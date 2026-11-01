@@ -1,0 +1,214 @@
+<img src="assets/logo.svg" alt="" width="96" height="96" align="left">
+
+# OhMyBug plugin — bughunter
+
+<br clear="left">
+
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/hAtEhsWqFe)
+
+We find the bugs your Claude Code missed. You pay only when your own Claude
+confirms real bugs: $4 per bug-finding review (however many bugs it
+holds), $12 for a deep hunt you choose ($24 on a wide change), minor findings
+free, first review free.
+
+- **Fast review** · $4 · finds 73% of significant bugs · up to 15 minutes
+- **Deep review** · $12 ($24 on a wide change) · finds 90% of significant bugs · up to 2 hours
+
+## Install (Claude Code)
+
+```bash
+claude plugin marketplace add OhMyX-AI/ohmybug-plugin
+claude plugin install bughunter@ohmybug
+```
+
+That's the whole setup. On first use Claude Code opens a GitHub sign-in in
+your browser; your account (with a free first review) is created
+automatically. No keys to copy, nothing lands in config files.
+
+## Install (pi)
+
+[pi](https://pi.dev) has no built-in MCP — add the adapter, then the server:
+
+```bash
+pi install npm:pi-mcp-adapter
+npx skills add OhMyX-AI/ohmybug-plugin --skill bughunter
+```
+
+Add to `.mcp.json` in your project root (or `~/.config/mcp/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "ohmybug": { "url": "https://mcp.ohmybug.ai/mcp", "auth": "oauth" }
+  }
+}
+```
+
+Restart pi, run `/mcp-auth ohmybug` once — a GitHub page opens in the
+browser, your account with a free first review is created
+automatically. Then say "hunt bugs" or `/skill:bughunter`.
+
+Prefer a raw key (CI)? Use `"auth": "bearer", "bearerTokenEnv":
+"OHMYBUG_API_KEY"` instead of `"auth": "oauth"`.
+
+Optional merge gate (pi has blocking tool hooks) — `.pi/extensions/ohmybug-gate.ts`:
+
+```ts
+import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
+
+pi.on("tool_call", async (event) => {
+  if (isToolCallEventType("bash", event) && /\bgh pr merge\b/.test(event.input.command)
+      && !process.env.SKIP_BUGHUNT) {
+    return { block: true, reason: "Final diff not hunted — run /skill:bughunter first (or SKIP_BUGHUNT=1)" };
+  }
+});
+```
+
+## Install (Codex app / CLI)
+
+The plugin package wires the skill, MCP server, and Codex review routing in one
+install. Codex uses the same GitHub OAuth flow as Claude Code:
+
+```bash
+codex plugin marketplace add OhMyX-AI/ohmybug-plugin
+codex plugin add bughunter@ohmybug
+codex mcp login ohmybug
+codex update
+```
+
+The last line brings Codex itself up to date, and it stays last: where Codex
+cannot tell how it was installed (for example, bundled inside another app) it
+exits with an error, and by then the plugin, the MCP server and the sign-in are
+already in place. Update that Codex the way it was installed.
+
+Open `/hooks` once after installation, review and trust the OhMyBug hook
+definition, then start a new Codex thread. Codex skips non-managed plugin hooks
+until you trust their current definition; without that step the skill and MCP
+still install, but automatic review routing is not active. Then ask Codex to
+run the OhMyBug cloud hunt (or use the plugin's starter prompt). A local
+`APPROVE` from a code-review agent is not merge evidence.
+
+### Existing skill-only installs
+
+If the plugin was installed with `npx skills add`, keep the skill and add the
+same MCP server explicitly:
+
+```bash
+npx skills add OhMyX-AI/ohmybug-plugin --skill bughunter
+codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp
+```
+
+`codex mcp add` detects OAuth and opens the GitHub sign-in flow automatically.
+
+For headless CI, use an operator-issued raw `omb_` key — write to
+[hi@ohmybug.ai](mailto:hi@ohmybug.ai) or DM [@ohmybug](https://x.com/ohmybug)
+to get one:
+
+```bash
+export OHMYBUG_API_KEY=omb_...
+codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp \
+  --bearer-token-env-var OHMYBUG_API_KEY
+```
+
+(Claude Code users who prefer a key over OAuth can do the same with
+`claude mcp add --transport http ohmybug https://mcp.ohmybug.ai/mcp
+--header "Authorization: Bearer $OHMYBUG_API_KEY"` — an explicit
+Authorization header disables the OAuth flow.)
+
+Questions → [Discord](https://discord.gg/hAtEhsWqFe).
+
+## First run: no pull request needed
+
+Open your agent in the project and run `/bughunter:review` (or say "hunt
+bugs in my code"). It hunts whatever is there: a branch against `main`,
+uncommitted changes, the last commits, or – in a folder that is not a git
+repository at all – the files themselves as new code. It says which one it
+picked before anything is sent, and you can point it elsewhere ("hunt
+`src/solver/`", "the last 3 commits").
+
+On a GitHub repository, `/bughunter:scan` hunts the code this repository changed in the last 30 days
+(`/bughunter:scan 14` for two weeks). The server reads the history from
+GitHub and clones the repository on its side — nothing is uploaded from your
+machine — then runs a deep hunt (up to 150 minutes) over the window's changed
+code with two engines, and hands back one merged review that lists anything
+it did not read. Your agent verifies the findings like any hunt, and it is priced
+as a deep hunt: $12, or $24 on a wide change, only if a real bug is confirmed. It needs the OhMyBug GitHub App on that repository, runs once per
+repository per week, and is not a merge gate.
+
+## What it does
+
+- Before every `gh pr merge`, a gate checks the FINAL diff was hunted —
+  deliberately the last net before merge, after human reviews and CI
+  (skip once with `SKIP_BUGHUNT=1`; review fixes change the diff and
+  re-arm the gate).
+- `/bughunter:review` (or just ask to "hunt bugs") sends your diff + selected
+  context to OhMyBug's cloud. You see the exact file manifest before upload.
+- An orchestrated fleet of adversarial reviewers hunts on OhMyBug's models.
+  Only findings that survive triage come back.
+- Your own agent verifies each finding against your codebase and reports
+  REAL / NOT_REAL / UNCLEAR. You see and approve the verdicts.
+- Billing: one flat price per review with confirmed real bugs — one or ten,
+  same price: $4 fast, $12 deep, $24 deep on a wide change (11+ folder chunks). Minor findings, review runs, false positives, unclear — $0.
+- `/bughunter:stats` shows your record: bugs found, reviews run, balance.
+- Before a diff or file contents leave your machine (`submit_review`,
+  `provide_files`), a secret scan refuses a payload that carries a credential
+  (vendor-prefixed tokens, private keys, key files) and says which file and
+  line, with the value masked. A payload it cannot read is refused too. It
+  lets a payload through unscanned in four cases only: submits that send no
+  payload (repo + ref) have nothing to scan; without `python3` it cannot run,
+  and says so in a system message; it does not run on Windows; the out-of-band
+  upload for very large diffs is not scanned. Set
+  `OHMYBUG_SECRET_SCAN=0` (in the `env` block of `settings.json`) to turn the
+  scan off.
+
+### What runs where
+
+Everything that blocks or refuses lives in shell hooks, so it behaves the same
+in every client. The Claude Code mod shows and offers; it never refuses. A
+button acts only on a hunt the mod tracks by its id, in a state it saw that hunt
+reach, and never on the wording of a refusal.
+
+| | Claude Code 2.1.287+ | older Claude Code | Codex |
+|---|---|---|---|
+| Merge gate, secret scan, hunt records | yes | yes | yes |
+| Hunt status in the status line, a toast when a hunt finishes or asks for files | yes | — | — |
+| Band above the prompt when a tracked hunt finishes, fails or asks for files: **Continue** sends the next step for that hunt's id, **Later** closes it | yes | — | — |
+| Deep-hunt offer (the `deep_offer` of a tracked hunt's `get_findings`) as **Run deep hunt** — pressing it is your consent — **Not now**, which sends nothing, and **Not today**, which asks the agent to pause the offer for 24 hours | yes | — | — |
+| A merge the gate refused: the gate's own words in the band, and **Poll &lt;id&gt;** only while a tracked hunt of this repository is open; no other button | yes | — | — |
+| Findings drawn as a card (`show the raw answer` keeps the original) | yes | — | — |
+| `/hunts` pane | yes | — | — |
+| A hunt read but not confirmed: one line in the system prompt and the same in the status line (`bughunt <id> · verdicts not sent`) until `confirm_findings` for that id; while another hunt runs or waits to be read, the status line shows that hunt instead | yes | — | — |
+
+A finished hunt someone already read or judged — in another chat, or in a way
+the mod did not see — gets no toast, band, resume or verdicts line here: the
+mod asks the status URL (a finished, unread hunt again every few minutes), and
+the server says whether the result was read or has verdicts. If the status URL
+cannot be reached, the band stays as before.
+
+The mod never starts a turn on its own unless you opt in. Two environment
+variables tune it (in the `env` block of `settings.json`, or managed settings
+for a team):
+
+- `OHMYBUG_AUTO_RESUME=1` — when a tracked hunt finishes, fails or asks for
+  files and the session is idle, send that hunt's next step instead of showing
+  the band. Off by default.
+- `OHMYBUG_STATUS=0` — keep the status line clear; the prompt line goes with
+  it, so the agent is never told what the person cannot see.
+
+The VS Code extension has no band above the prompt; there the toast and the
+status line carry it.
+Turn the mod off with
+`/plugin` like any built-in mod; the shell hooks stay.
+
+## MCP contract (server: https://mcp.ohmybug.ai/mcp)
+
+| Tool | In | Out |
+|---|---|---|
+| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}` | `{review_id, status, mode, pending_verdicts[]}` |
+| `get_findings` | `review_id` | `{status: running\|needs_files\|done\|failed, findings[{finding_id, severity, file, line?, title, failure_scenario, suggested_fix?}]}` |
+| `provide_files` | `review_id`, `paths[]` (Claude Code: the plugin's hook reads them from disk) or `files[{path, content}]` | `{status, delivered}` |
+| `confirm_findings` | `review_id`, `verdicts[{finding_id, verdict: REAL\|NOT_REAL\|UNCLEAR, reason}]` | `{confirmed, minor_confirmed, billed_usd, free_review_used, balance_usd, receipt_id}` |
+| `get_balance` | — | `{balance_usd, free_reviews_left, confirmed_total, stats{…}}` |
+
+Errors: `payment_required` (top up), `pending_verdicts` (resolve previous
+review's verdicts first).

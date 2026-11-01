@@ -1,0 +1,107 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/first-run.sh",
+            "commandWindows": "exit 0"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scan-hint.sh",
+            "commandWindows": "exit 0"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/version-check.sh",
+            "commandWindows": "exit 0",
+            "timeout": 5,
+            "statusMessage": "Checking OhMyBug plugin updates..."
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/tools-check.sh",
+            "commandWindows": "exit 0"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-pr-gate.sh",
+            "commandWindows": "exit 0"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/watch-guard.sh",
+            "commandWindows": "exit 0"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*ohmybug.*__(submit_review|provide_files)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/secret-scan.sh",
+            "commandWindows": "exit 0"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*ohmybug.*__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/first-run.sh",
+            "commandWindows": "exit 0"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*ohmybug.*__(submit_review|get_findings|wait_review|confirm_findings)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stamp-hunt.sh",
+            "commandWindows": "exit 0"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*ohmybug.*__(submit_review|confirm_findings|get_balance)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/bugarium-notice.sh",
+            "commandWindows": "exit 0"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pending-nudge.sh",
+            "commandWindows": "exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}
