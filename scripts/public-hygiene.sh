@@ -39,7 +39,7 @@ EOF
 #   a cross-reference into the product's own private repository (any org)
 #   absolute paths of a developer machine or its temp worktrees
 #   the provider's CLI and server-side source files
-INTERNAL='rev_[0-9a-f]{8}\b|rcp_[0-9a-f]{6,}|\b[\w.-]+/OhMyBug\b|\bOhMyBug#\d+|/Users/[\w.-]+/|/private/tmp/|/home/[\w.-]+/|\bfly(\.io|ctl| ssh| logs| machine)\b|\b(sprites|pgqueue|submitplan|repoaccess)\.ts\b'
+INTERNAL='rev_[0-9a-f]{8}|rcp_[0-9a-f]{6,}|\b[\w.-]+/OhMyBug\b|\bOhMyBug#\d+|/Users/[\w.-]+/|/private/tmp/|/home/[\w.-]+/|\bfly(\.io|ctl| ssh| logs| machine)\b|\b(sprites|pgqueue|submitplan|repoaccess)\.ts\b'
 
 # Print offending lines as `label:line: text`, exit 1 if any. Reads stdin.
 scan() { # label
@@ -85,11 +85,13 @@ self_test() {
   local cyr; cyr=$(printf '\321\202\320\265\320\272\321\201\321\202')
   printf 'ordinary line\n%s\n' "$cyr" > "$tmp/cyr"
   printf 'see rev_0123abcd for the trace\n' > "$tmp/rev"
+  # The full id the server issues: 32 hex, where `\b` after 8 never holds.
+  printf 'see rev_%s for the trace\n' 0123abcd0123abcd0123abcd0123abcd > "$tmp/rev32"
   printf 'filed as some-org/OhMyBug#123\n' > "$tmp/xref"
   printf 'path was /Users/someone/src/x\n' > "$tmp/path"
   printf 'receipt rcp_deadbeef01\n' > "$tmp/rcp"
   local f want
-  for f in cyr rev xref path rcp; do
+  for f in cyr rev rev32 xref path rcp; do
     if check_text "$tmp/$f" >/dev/null 2>&1; then
       printf 'FAIL (positive control %s): the guard did not bite\n' "$f"; fails=$((fails + 1))
     fi
