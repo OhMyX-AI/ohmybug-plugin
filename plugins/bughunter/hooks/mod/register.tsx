@@ -349,7 +349,7 @@ export const register: Register = on => {
   })
 
   // The one thing the mod tells the agent, and the status line tells the person
-  // the same once no newer hunt holds it: a hunt it read whose verdicts it has not sent. Keyed by hunt id,
+  // the same unless another hunt that runs or waits to be read holds it: a hunt it read whose verdicts it has not sent. Keyed by hunt id,
   // gone once confirm_findings for that id is seen or the hunt is 6 hours old.
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
