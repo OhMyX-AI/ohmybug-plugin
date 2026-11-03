@@ -82,7 +82,8 @@ test('a hunt that finishes raises a toast and a band, and starts no turn by itse
   await clock.advance(75_000)
   expect(seen.toasts.join('\n')).toContain('rev_1 is done · 2 findings')
   expect(await band($)).toContain('Hunt rev_1 is done · 2 findings.')
-  expect(await buttons($)).toEqual(['go', 'later'])
+  expect(await band($)).toContain('Hunt rev_1 is done')
+  expect(await buttons($)).toEqual([])
   // Without OHMYBUG_AUTO_RESUME nothing is sent, not even when a turn ends idle.
   await drawn($, 'PromptHint', { isDraft: false, isWorking: false, hint: '' })
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
@@ -163,20 +164,81 @@ test('a file request the agent read itself mid-turn raises no band at the turn e
   expect(await band($)).toBe('engine drawing')
 })
 
-test('Continue sends the step for the hunt it names, by id', async ($, on) => {
+// #2343: the agent's watch wakes it on done, failed and needs_files, so a hunt band offers no choice; only money asks.
+for (const [state, says] of [['done', 'Hunt rev_1 is done'], ['failed', 'Hunt rev_1 failed'], ['needs_files', 'Reviewers of hunt rev_1 asked for files']] as const) {
+  test(`a ${state} hunt band says so and offers no button`, async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    mock.env(on, {})
+    const seen = world(on, JSON.stringify(state === 'needs_files' ? { status: 'running', awaiting_client_files: true } : { status: state, findings: 2 }))
+    await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+    await $.tool.call({ tool: SUBMIT } as never)
+    await clock.advance(75_000)
+    expect(await band($)).toContain(says)
+    expect(await buttons($)).toEqual([])
+    expect(seen.prompts).toHaveLength(0)
+  })
+}
+
+test('with OHMYBUG_AUTO_RESUME=1, a hunt parked behind a draft resumes when the person sends it: their turn does not take the band away', async ($, on) => {
   const clock = mock.clock(on)
   mock.store(on)
-  mock.env(on, {})
+  mock.env(on, { OHMYBUG_AUTO_RESUME: '1' })
   const seen = world(on, JSON.stringify({ status: 'done', findings: 2 }))
   await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
   await $.tool.call({ tool: SUBMIT } as never)
+  await drawn($, 'PromptHint', { isDraft: true, isWorking: false, hint: '' })
   await clock.advance(75_000)
-  await press($, 'go')
+  expect(await band($)).toContain('Hunt rev_1 is done')
+  expect(seen.prompts).toHaveLength(0)
+  await drawn($, 'PromptHint', { isDraft: false, isWorking: true, hint: '' })
+  await $.turn.start({ prompt: 'the draft' } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
   expect(seen.prompts).toEqual(['The OhMyBug hunt rev_1 is done. Read it with get_findings (review_id rev_1) and continue the bughunter flow.'])
+})
+
+test('a subagent\'s turn inside the main one leaves the hunt band; the person\'s next turn takes it', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  world(on, JSON.stringify({ status: 'done', findings: 2 }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await clock.advance(75_000)
+  await $.turn.start({ prompt: 'sub', agentId: 'a1' } as never)
+  expect(await band($)).toContain('Hunt rev_1 is done')
+  await $.turn.start({ prompt: 'next' } as never)
   expect(await band($)).toBe('engine drawing')
 })
 
-test('a hunt the agent has read since loses its Continue', async ($, on) => {
+test('a merge refusal band goes when the next turn starts', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  world(on, JSON.stringify({ status: 'running' }))
+  on('tool.call', { tool: 'Bash' }, async () => ({ deny: RUNNING }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await $.tool.call({ tool: 'Bash', command: 'gh pr merge 12 --squash' } as never)
+  expect(await band($)).toContain('Merge blocked')
+  await $.turn.start({ prompt: 'next' } as never)
+  expect(await band($)).toBe('engine drawing')
+})
+
+test('a hunt band nobody reads goes when the next turn starts', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  world(on, JSON.stringify({ status: 'done', findings: 2 }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await clock.advance(75_000)
+  expect(await band($)).toContain('Hunt rev_1 is done')
+  await $.turn.start({ prompt: 'something else' } as never)
+  expect(await band($)).toBe('engine drawing')
+})
+
+test('a hunt the agent has read since loses its band', async ($, on) => {
   const clock = mock.clock(on)
   mock.store(on)
   mock.env(on, {})
@@ -184,9 +246,9 @@ test('a hunt the agent has read since loses its Continue', async ($, on) => {
   await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
   await $.tool.call({ tool: SUBMIT } as never)
   await clock.advance(75_000)
-  expect(await buttons($)).toContain('go')
+  expect(await band($)).toContain('Hunt rev_1 is done')
   await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
-  expect(await buttons($)).toEqual([])
+  expect(await band($)).toBe('engine drawing')
   expect(seen.prompts).toHaveLength(0)
 })
 
@@ -339,7 +401,7 @@ test('reading the result itself marks the hunt read', async ($, on) => {
 const RUNNING = 'OhMyBug: a hunt is RUNNING for this diff and has not returned yet. Poll get_findings until it says done, then merge.'
 const UNHUNTED = 'OhMyBug: the current diff has not been hunted, or has CHANGED since the hunt (fixes count — re-hunt them).'
 
-test('the gate\'s RUNNING refusal with a tracked open hunt offers Poll for that id and nothing else', async ($, on) => {
+test('the gate\'s RUNNING refusal with a tracked open hunt says so and offers no button: the agent has the refusal (#2343)', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   mock.env(on, {})
@@ -349,9 +411,8 @@ test('the gate\'s RUNNING refusal with a tracked open hunt offers Poll for that 
   await $.tool.call({ tool: SUBMIT } as never)
   await $.tool.call({ tool: 'Bash', command: 'gh pr merge 12 --squash' } as never)
   expect(await band($)).toContain('Merge blocked: a hunt is RUNNING for this diff')
-  expect(await buttons($)).toEqual(['gate-poll'])
-  await press($, 'gate-poll')
-  expect(seen.prompts).toEqual(['Poll the OhMyBug hunt rev_1: call get_findings with review_id rev_1.'])
+  expect(await buttons($)).toEqual([])
+  expect(seen.prompts).toHaveLength(0)
 })
 
 test('a hunt that finishes mid-turn replaces the merge refusal that was waiting for it, at the turn end', async ($, on) => {
@@ -367,7 +428,8 @@ test('a hunt that finishes mid-turn replaces the merge refusal that was waiting 
   await clock.advance(75_000)
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
   expect(await band($)).toContain('Hunt rev_1 is done')
-  expect(await buttons($)).toEqual(['go', 'later'])
+  expect(await band($)).toContain('Hunt rev_1 is done')
+  expect(await buttons($)).toEqual([])
 })
 
 for (const [kind, reason] of [['RUNNING', RUNNING], ['unhunted', UNHUNTED]] as const) {
@@ -413,6 +475,9 @@ test('the deep hunt buttons come only with deep_offer, and Not now sends nothing
   expect(await buttons($)).not.toContain('deep-yes')
   await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
   expect(await band($)).toContain('Deep hunt offered for rev_1: A deep hunt reads the whole repository.')
+  expect(await buttons($)).toEqual(['deep-yes', 'deep-no', 'deep-snooze'])
+  // The offer waits for the person's answer: a new turn does not take it away (#2343).
+  await $.turn.start({ prompt: 'x' } as never)
   expect(await buttons($)).toEqual(['deep-yes', 'deep-no', 'deep-snooze'])
   await press($, 'deep-no')
   expect(seen.prompts).toHaveLength(0)
@@ -687,7 +752,8 @@ test('with OHMYBUG_AUTO_RESUME=1, a hunt that finishes during a turn resumes whe
   await drawn($, 'PromptHint', { isDraft: false, isWorking: true, hint: '' })
   await clock.advance(75_000)
   expect(seen.prompts).toHaveLength(0)
-  expect(await buttons($)).toEqual(['go', 'later'])
+  expect(await band($)).toContain('Hunt rev_1 is done')
+  expect(await buttons($)).toEqual([])
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
   expect(seen.prompts).toEqual(['The OhMyBug hunt rev_1 is done. Read it with get_findings (review_id rev_1) and continue the bughunter flow.'])
   expect(await band($)).toBe('engine drawing')
@@ -704,7 +770,8 @@ test('with OHMYBUG_AUTO_RESUME=1, a draft in the prompt is never overrun', async
   await clock.advance(75_000)
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
   expect(seen.prompts).toHaveLength(0)
-  expect(await buttons($)).toEqual(['go', 'later'])
+  expect(await band($)).toContain('Hunt rev_1 is done')
+  expect(await buttons($)).toEqual([])
 })
 
 // The server's read journal is the fact; this session's `seen` is a guess.
@@ -758,7 +825,8 @@ test('a done hunt read elsewhere after its band went up loses the band and its u
   await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
   await $.tool.call({ tool: SUBMIT } as never)
   await clock.advance(75_000)
-  expect(await buttons($)).toEqual(['go', 'later'])
+  expect(await band($)).toContain('Hunt rev_1 is done')
+  expect(await buttons($)).toEqual([])
   expect(seen.status.at(-1)).toContain('rev_1 done')
   await clock.advance(240_000)
   expect(await buttons($)).toEqual([])
@@ -807,9 +875,9 @@ test('a status URL that fails on the slow poll leaves the nudge as it was', asyn
   await $.tool.call({ tool: SUBMIT } as never)
   await clock.advance(75_000)
   await clock.advance(240_000)
-  expect(await buttons($)).toEqual(['go', 'later'])
-  await press($, 'go')
-  expect(seen.prompts).toEqual(['The OhMyBug hunt rev_1 is done. Read it with get_findings (review_id rev_1) and continue the bughunter flow.'])
+  expect(await band($)).toContain('Hunt rev_1 is done')
+  expect(await buttons($)).toEqual([])
+  expect(seen.prompts).toHaveLength(0)
 })
 
 test('a read here while the slow poll is in flight wins over the server saying it was read', async ($, on) => {

@@ -7,7 +7,8 @@
 // existed.
 //
 // Quiet: a status-line entry while a hunt runs, a toast and one band above the
-// prompt when there is something to act on. No sound, no turn of its own unless
+// prompt when something happened; a button only where the person must decide (the
+// deep offer, which spends money — #2343). No sound, no turn of its own unless
 // the person sets OHMYBUG_AUTO_RESUME=1. The one line it adds to the system
 // prompt (a read hunt whose verdicts are not sent) the status line shows the
 // person in the same words, unless a hunt that runs or waits to be read holds
@@ -16,8 +17,7 @@
 // The rule every action obeys: a button or an auto-resume acts only on a hunt
 // this mod tracks by review_id, in a state it saw that hunt move into itself.
 // Nothing is derived from a refusal's wording: a gate refusal is shown as it
-// reads, and the most it offers is "Poll <id>" for an open tracked hunt of this
-// repository. A text does not say which hunt or which refusal it is about, and
+// reads, with no button. A text does not say which hunt or which refusal it is about, and
 // a "Hunt now" offered on the RUNNING refusal once started a second paid hunt.
 
 import type { EngineInterface as Engine, Register, RenderChildren } from 'claude-code'
@@ -108,7 +108,7 @@ function news(h: BughunterHunt): string {
   return `Hunt ${h.id} is done${n === undefined ? '' : ` · ${n} finding${n === 1 ? '' : 's'}`}.`
 }
 
-/** What Continue sends: the hunt's id, and the step its seen state calls for. */
+/** What auto-resume sends (OHMYBUG_AUTO_RESUME=1): the hunt's id, and the step its seen state calls for. */
 function resumeText(h: BughunterHunt): string {
   if (h.state === 'needs_files') return `Reviewers of the OhMyBug hunt ${h.id} asked for files. Call get_findings with review_id ${h.id} and serve them.`
   if (h.state === 'failed') return `The OhMyBug hunt ${h.id} failed. Call get_findings with review_id ${h.id} to see why.`
@@ -123,9 +123,9 @@ function actionable(b: BughunterBand): BughunterHunt | undefined {
   return h && h.state === b.state && !h.seen ? h : undefined
 }
 
-/** The open tracked hunt of this repository a gate band may offer to poll. */
-const openHunt = (cwd: string, id?: string) =>
-  huntList.find(h => ours(h, cwd) && isOpen(h) && (id === undefined || h.id === id))
+/** The open tracked hunt of this repository a gate refusal is about: the band keeps its id, and the turn end
+ *  replaces the refusal with that hunt's news once it finished. */
+const openHunt = (cwd: string) => huntList.find(h => ours(h, cwd) && isOpen(h))
 
 // What the person chose (environment), what the last drawing said about the
 // session and what the network allowed. Module state on purpose: a reload
@@ -135,7 +135,7 @@ const ctx = { autoResume: false, showStatus: true, working: true, draft: false, 
 
 const MERGE = /\b(gh\s+pr\s+merge|glab\s+mr\s+merge)\b/
 
-/** A merge the gate refused: its own words, and Poll for an open tracked hunt
+/** A merge the gate refused: its own words, and the id of an open tracked hunt
  *  here. Which hunt comes from the mod's list, never from the refusal's text. */
 async function observeGate($: Engine, command: string, text: string | undefined, failed: boolean) {
   if (!MERGE.test(command)) return
@@ -251,7 +251,7 @@ async function pollDue($: Engine) {
   const now = await $.clock.now()
   // A done hunt nobody here has read yet is asked again on the slow clock: the
   // server knows when another session read or judged it, and the nudges (band,
-  // Continue, auto-resume) then read that here with no network call of their own.
+  // auto-resume) then read that here with no network call of their own.
   for (const h of huntList.filter(x => ours(x, cwd) && x.state === 'done' && !x.seen && x.statusUrl && now >= x.nextAt)) {
     let body
     try {
@@ -392,6 +392,10 @@ export const register: Register = on => {
     ctx.working = true
     // A gate refusal is news for the turn it happened in; the band does not linger.
     if (bandNow?.kind === 'gate') setBand($, null)
+    // A hunt's news has no Later to close it (#2343), so the person's next turn takes it away. Not under
+    // auto-resume: that band is what the turn end resumes (a draft parked it), and not on a subagent's turn,
+    // which runs inside the main one. The deep offer waits for the person's answer.
+    else if (bandNow?.kind === 'hunt' && !ctx.autoResume && !e.agentId) setBand($, null)
     return next(e)
   })
 
@@ -423,30 +427,14 @@ export const register: Register = on => {
         }} />,
       ]
     } else if (b.kind === 'gate') {
+      // The refusal is the agent's own tool result, and its watch polls the hunt: nothing for the person to press (#2343).
       lead = 'Merge blocked: '
-      const open = b.id ? openHunt(await $.session.cwd(), b.id) : undefined
-      if (open) {
-        actions = [
-          <Button key="gate-poll" label={`Poll ${open.id}`} hotkey="1" onPress={async () => {
-            close()
-            if (huntList.find(x => x.id === open.id && isOpen(x))) {
-              await $.prompt.submit({ text: `Poll the OhMyBug hunt ${open.id}: call get_findings with review_id ${open.id}.` })
-            }
-          }} />,
-        ]
-      }
-    } else if (actionable(b)) {
-      actions = [
-        <Button key="go" label="Continue" hotkey="1" variant="primary" onPress={async () => {
-          const h = actionable(bandNow?.id === b.id ? bandNow : null)
-          close()
-          if (h) await $.prompt.submit({ text: resumeText(h) })
-        }} />,
-        <Button key="later" label="Later" hotkey="2" role="dismiss" onPress={close} />,
-      ]
-    } else {
+    } else if (!actionable(b)) {
+      // A hunt band whose hunt was read or moved on: nothing to draw.
       return next(e)
     }
+    // A hunt band that is drawn says what happened and offers nothing (#2343): the agent's watch wakes it on done,
+    // failed and needs_files, so a Continue only added a duplicate turn. Buttons stay where only the person decides.
     return (
       <Box flexDirection="column">
         <Text><Text color="red">OhMyBug</Text> {lead}{b.text}</Text>

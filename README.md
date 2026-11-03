@@ -164,17 +164,18 @@ repository per week, and is not a merge gate.
 ### What runs where
 
 Everything that blocks or refuses lives in shell hooks, so it behaves the same
-in every client. The Claude Code mod shows and offers; it never refuses. A
-button acts only on a hunt the mod tracks by its id, in a state it saw that hunt
-reach, and never on the wording of a refusal.
+in every client. The Claude Code mod shows and offers; it never refuses. It
+draws a button only where you have to decide (the deep-hunt offer, which spends
+money); the agent's own watch picks up a finished hunt, so that band only says
+what happened.
 
 | | Claude Code 2.1.287+ | older Claude Code | Codex |
 |---|---|---|---|
 | Merge gate, secret scan, hunt records | yes | yes | yes |
 | Hunt status in the status line, a toast when a hunt finishes or asks for files | yes | — | — |
-| Band above the prompt when a tracked hunt finishes, fails or asks for files: **Continue** sends the next step for that hunt's id, **Later** closes it | yes | — | — |
+| Band above the prompt when a tracked hunt finishes, fails or asks for files: the news only, no button; it goes once the agent reads the hunt or the next turn starts | yes | — | — |
 | Deep-hunt offer (the `deep_offer` of a tracked hunt's `get_findings`) as **Run deep hunt** — pressing it is your consent — **Not now**, which sends nothing, and **Not today**, which asks the agent to pause the offer for 24 hours | yes | — | — |
-| A merge the gate refused: the gate's own words in the band, and **Poll &lt;id&gt;** only while a tracked hunt of this repository is open; no other button | yes | — | — |
+| A merge the gate refused: the gate's own words in the band, no button; it goes when the next turn starts | yes | — | — |
 | Findings drawn as a card (`show the raw answer` keeps the original) | yes | — | — |
 | `/hunts` pane | yes | — | — |
 | A hunt read but not confirmed: one line in the system prompt and the same in the status line (`bughunt <id> · verdicts not sent`) until `confirm_findings` for that id; while another hunt runs or waits to be read, the status line shows that hunt instead | yes | — | — |
@@ -183,7 +184,8 @@ A finished hunt someone already read or judged — in another chat, or in a way
 the mod did not see — gets no toast, band, resume or verdicts line here: the
 mod asks the status URL (a finished, unread hunt again every few minutes), and
 the server says whether the result was read or has verdicts. If the status URL
-cannot be reached, the band stays as before.
+cannot be reached, the band stays until the agent reads the hunt or your next
+turn starts.
 
 The mod never starts a turn on its own unless you opt in. Two environment
 variables tune it (in the `env` block of `settings.json`, or managed settings
