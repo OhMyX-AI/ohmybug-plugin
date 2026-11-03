@@ -130,6 +130,7 @@ mkdir -p "$FX/repo/sub" && echo 'outside' > "$FX/outside.ts"
   printf 'export const a = 1\n' > a.ts && printf 'T=%s\n' "$GHP" > ci.sh && printf 'S=1\n' > secret.txt
   git add a.ts ci.sh .gitignore && printf 'export const n = 2\n' > new.ts
   printf '// \377\376\n' > bad.ts && ln -s ../outside.ts out.ts && ln -s a.ts alias.ts
+  printf 'export const d = 3\n' > sub/d.ts && git add sub/d.ts && ln -s sub lnk
 )
 fillrun() { # cwd, paths JSON -> sets rc, out (stdout), err (stderr)
   local e; e=$(mktemp)
@@ -138,15 +139,66 @@ fillrun() { # cwd, paths JSON -> sets rc, out (stdout), err (stderr)
   err=$(cat "$e"); rm -f "$e"
 }
 field() { printf '%s' "$out" | python3 -c "import json,sys; o=json.load(sys.stdin)['hookSpecificOutput']; print(eval(sys.argv[1]))" "$1" 2>/dev/null; }
-fillrun "$FX/repo" '["a.ts","new.ts","bad.ts","alias.ts","nope.ts","sub",".git/config","out.ts","../outside.ts"]'
+fillrun "$FX/repo" '["a.ts","new.ts","bad.ts","alias.ts","nope.ts","sub",".git/config","out.ts","../outside.ts","sub/d.ts","lnk/d.ts"]'
 check "paths: the call goes on" "$rc" 0
-check "paths: tracked, untracked and linked-inside files are filled from disk, in order" \
+check "paths: tracked and untracked files are filled from disk, in order" \
   "$(field "ascii([(f['path'], f['content']) for f in o['updatedInput']['files']])")" \
-  "[('a.ts', 'export const a = 1\\n'), ('new.ts', 'export const n = 2\\n'), ('bad.ts', '// \\ufffd\\ufffd\\n'), ('alias.ts', 'export const a = 1\\n')]"
+  "[('a.ts', 'export const a = 1\\n'), ('new.ts', 'export const n = 2\\n'), ('bad.ts', '// \\ufffd\\ufffd\\n'), ('sub/d.ts', 'export const d = 3\\n')]"
 check "paths: the paths key is gone, the review id stays" "$(field "sorted(o['updatedInput'])")" "['files', 'review_id']"
 check "paths: no permission decision, ever" "$(field "sorted(o)")" "['additionalContext', 'hookEventName', 'updatedInput']"
 check "paths: skipped ones are named to the agent" "$(field "o['additionalContext'].split('Not sent')[1]")" \
-  " (missing, a directory, under .git or outside the repository): nope.ts, sub, .git/config, out.ts, ../outside.ts."
+  " (missing, unreadable, not a regular file, a symlink, under .git or outside the repository): alias.ts, nope.ts, sub, .git/config, out.ts, ../outside.ts, lnk/d.ts."
+# Where python has no dir_fd (Windows): os.open refuses dir_fd as it does there, so
+# a run that took the dir_fd branch fails; links are refused by the realpath check.
+mkdir -p "$FX/nodirfd" && cat > "$FX/nodirfd/sitecustomize.py" <<'PY'
+import os
+_open = os.open
+def _no_dir_fd(path, flags, mode=0o777, *, dir_fd=None):
+    if dir_fd is not None:
+        raise NotImplementedError("dir_fd unavailable on this platform")
+    return _open(path, flags, mode)
+os.open = _no_dir_fd
+os.supports_dir_fd = set()
+PY
+PYTHONPATH="$FX/nodirfd" fillrun "$FX/repo" '["a.ts","alias.ts","out.ts","sub/d.ts","lnk/d.ts"]'
+check "paths: without dir_fd links are still refused" \
+  "$rc:$(field "[f['path'] for f in o['updatedInput']['files']]")" "0:['a.ts', 'sub/d.ts']"
+# The bytes come from the fd that was checked: a directory swapped for a link to
+# outside right before the file is opened changes nothing. Reopening by name, or
+# the check-then-open branch, would send the file outside.
+mkdir -p "$FX/swap/sub" "$FX/away" && printf 'away\n' > "$FX/away/d.ts"
+( cd "$FX/swap" && git init -q && printf 'here\n' > sub/d.ts && git add sub/d.ts )
+mkdir -p "$FX/swapper" && cat > "$FX/swapper/sitecustomize.py" <<'PY'
+import os
+_open, _done = os.open, []
+def _swap(path, flags, mode=0o777, *, dir_fd=None):
+    if not _done and os.fsencode(path).endswith(b"d.ts"):
+        _done.append(1)
+        top = os.environ["SWAP_TOP"]
+        os.rename(os.path.join(top, "sub"), os.path.join(top, "sub.real"))
+        os.symlink(os.environ["SWAP_TO"], os.path.join(top, "sub"))
+    return _open(path, flags, mode, dir_fd=dir_fd)
+os.open = _swap
+os.supports_dir_fd.add(_swap)
+PY
+SWAP_TOP="$FX/swap" SWAP_TO="$FX/away" PYTHONPATH="$FX/swapper" fillrun "$FX/swap" '["sub/d.ts"]'
+check "paths: a directory swapped for a link mid-call sends the checked file" \
+  "$rc:$(field "[(f['path'], f['content']) for f in o['updatedInput']['files']]")" "0:[('sub/d.ts', 'here\\n')]"
+check "paths: ...and the swap really happened under the walk" "$([ -L "$FX/swap/sub" ] && [ -d "$FX/swap/sub.real" ] && echo yes)" yes
+# Every fd is closed as the walk goes: a long list under a small fd limit loses nothing.
+many=$(python3 -c "import json; print(json.dumps(['sub/d.ts'] * 100 + ['.git/config'] * 50))")
+check "paths: 150 paths under a 32-fd limit, every listed one filled" \
+  "$(ulimit -n 32; fillrun "$FX/repo" "$many"; field "len(o['updatedInput']['files'])")" 100
+# A name is opened as it is sent: an empty, "." or ".." part is refused, not tidied
+# into another file (a trailing "/." would read a.ts under a name no rule matches).
+fillrun "$FX/repo" '["a.ts/.","a.ts/","sub/../a.ts","./a.ts","sub//d.ts"]'
+check "paths: odd parts are refused, a leading ./ is not" \
+  "$rc:$(field "[f['path'] for f in o['updatedInput']['files']]")" "0:['./a.ts']"
+# A named pipe is opened without blocking and skipped as not a regular file.
+mkfifo "$FX/repo/pipe"
+fillrun "$FX/repo" '["pipe","a.ts"]'
+check "paths: a named pipe is skipped, not waited on" "$rc:$(field "[f['path'] for f in o['updatedInput']['files']]")" "0:['a.ts']"
+rm -f "$FX/repo/pipe"
 fillrun "$FX/repo/sub" '["a.ts"]'
 check "paths: read from the top level, whatever the session directory" "$(field "o['updatedInput']['files'][0]['path']")" "a.ts"
 fillrun "$FX/repo" '["a.ts","secret.txt"]'
