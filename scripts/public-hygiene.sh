@@ -35,7 +35,10 @@ EOF
 # Markers of the service's insides, as a reader would meet them. Each
 # alternative names a CLASS, not a secret: the guard must not itself be the
 # leak, so nothing here spells a hostname, a repository or an org.
-#   review ids and receipts as the API prints them
+#   review ids and receipts as the API prints them: `rev_` + 8 hex anywhere,
+#   whole or cut short, inside a word, an escape or a URL. Deliberately a bare
+#   prefix: a near miss (`prev_…`) is rewritten, never exempted — every
+#   exemption tried here let an escaped or encoded id through
 #   a cross-reference into the product's own private repository (any org)
 #   absolute paths of a developer machine or its temp worktrees
 #   the provider's CLI and server-side source files
@@ -87,11 +90,20 @@ self_test() {
   printf 'see rev_0123abcd for the trace\n' > "$tmp/rev"
   # The full id the server issues: 32 hex, where `\b` after 8 never holds.
   printf 'see rev_%s for the trace\n' 0123abcd0123abcd0123abcd0123abcd > "$tmp/rev32"
+  # The older shape (8 hex, a dash, 3 hex), an id cut short, ids glued to an
+  # underscore on either side as file names and keys carry them, and ids behind
+  # a JSON escape or a percent-encoding, as pasted logs and URLs carry them.
+  printf 'see rev_0123abcd-0ab for the trace\n' > "$tmp/rev83"
+  printf 'see rev_0123abcd0123 for the trace\n' > "$tmp/revshort"
+  printf 'wrote rev_%s_trace.json\n' 0123abcd0123abcd0123abcd0123abcd > "$tmp/revtail"
+  printf 'key x_rev_%s\n' 0123abcd0123abcd0123abcd0123abcd > "$tmp/revhead"
+  printf '{"msg":"ok\\nrev_%s"}\n' 0123abcd0123abcd0123abcd0123abcd > "$tmp/revesc"
+  printf 'url /r%%2Frev_%s/status\n' 0123abcd0123abcd0123abcd0123abcd > "$tmp/revpct"
   printf 'filed as some-org/OhMyBug#123\n' > "$tmp/xref"
   printf 'path was /Users/someone/src/x\n' > "$tmp/path"
   printf 'receipt rcp_deadbeef01\n' > "$tmp/rcp"
   local f want
-  for f in cyr rev rev32 xref path rcp; do
+  for f in cyr rev rev83 revshort revtail revhead revesc revpct rev32 xref path rcp; do
     if check_text "$tmp/$f" >/dev/null 2>&1; then
       printf 'FAIL (positive control %s): the guard did not bite\n' "$f"; fails=$((fails + 1))
     fi
@@ -101,6 +113,12 @@ self_test() {
   printf 'English only, see #38, other-org/other-repo#5768, https://example.com/x, version 0.69.0\n' > "$tmp/ok"
   if ! check_text "$tmp/ok" >/dev/null 2>&1; then
     printf 'FAIL (negative control): an innocent line was refused\n'; fails=$((fails + 1))
+  fi
+  # Short `rev_` text, as examples and placeholders write it (`rev_abc`,
+  # `rev_cafe`, seven hex), is no id: the 8-hex floor must hold.
+  printf 'placeholders rev_abc, rev_cafe and rev_0123abc stay\n' > "$tmp/short"
+  if ! check_text "$tmp/short" >/dev/null 2>&1; then
+    printf 'FAIL (negative control short): a placeholder under 8 hex was refused\n'; fails=$((fails + 1))
   fi
   # The commit-range check reads messages, not trees: a Russian subject in a
   # scratch repository must be caught, and an English one passed.

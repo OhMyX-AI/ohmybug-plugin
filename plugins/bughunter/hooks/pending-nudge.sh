@@ -74,7 +74,7 @@ CAP=5
 # the record could never be cleared and the nag would repeat every turn until
 # the TTL expired: a nag nobody can satisfy is how a control gets disarmed.
 # Safe to skip by name because a real id cannot end this way: the server mints
-# `rev_` + 12 uuid chars (8 hex, a dash, 3 hex) and the submit path names the
+# `rev_` + 32 hex (formerly 8 hex, a dash, 3 hex) and the submit path names the
 # record from that response, never from anything the model typed. Two reviewers
 # read the filter as hiding legitimate hunts, so the invariant lives here now:
 # if ids ever gain a dot, this line is the one to revisit. `.promoted` is the
