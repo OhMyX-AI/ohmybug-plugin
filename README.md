@@ -130,7 +130,7 @@ On a GitHub repository, `/bughunter:scan` hunts the code this repository changed
 (`/bughunter:scan 14` for two weeks). The server reads the history from
 GitHub and clones the repository on its side — nothing is uploaded from your
 machine — then runs a deep hunt (up to 150 minutes) over the window's changed
-code with two engines, and hands back one merged review that lists anything
+code, and hands back one merged review that lists anything
 it did not read. Your agent verifies the findings like any hunt, and it is priced
 as a deep hunt: $12, or $24 on a wide change, only if a real bug is confirmed. It needs the OhMyBug GitHub App on that repository, runs once per
 repository per week, and is not a merge gate.

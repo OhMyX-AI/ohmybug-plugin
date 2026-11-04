@@ -1241,7 +1241,7 @@ For a user who just installed the plugin and asks what it can do, offer
 no GitHub and no git (the ladder in step 1) – and this scan as the option for
 a GitHub repository with the App installed. The server reads
 the window from GitHub, clones the repository on its side, runs a deep hunt
-over the window's changed code with two engines – up to 150 minutes – and
+over the window's changed code – up to 150 minutes – and
 returns ONE merged review. It is not a merge
 gate and records nothing for one; never present it as a review of the current
 branch.
