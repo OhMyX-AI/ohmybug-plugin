@@ -203,7 +203,8 @@ CODE200 = 'case " $* " in *" -w "*) printf \'\\n200\' ;; esac\n'
 def shims(d, curl_body):
     # The shim notes whether the watch file already existed when it was called:
     # the file must be there before the first poll, not one poll later.
-    open(f"{d}/curl", "w").write(f"#!/bin/sh\n[ -f \"$HOME/.ohmybug/watch/rev_test\" ] && echo yes >> \"{d}/seen\"\nprintf '%s' '" + curl_body + "'\n" + CODE200); os.chmod(f"{d}/curl", 0o755)
+    # ...and the URL it was asked for (its last argument): the loop names its waiter there.
+    open(f"{d}/curl", "w").write(f"#!/bin/sh\n[ -f \"$HOME/.ohmybug/watch/rev_test\" ] && echo yes >> \"{d}/seen\"\nfor a; do u=$a; done; echo \"$u\" >> \"{d}/urls\"\nprintf '%s' '" + curl_body + "'\n" + CODE200); os.chmod(f"{d}/curl", 0o755)
     # The sleep shim records what it was asked for: that number IS the cadence.
     open(f"{d}/sleep", "w").write(f'#!/bin/sh\necho "$1" >> "{d}/slept"\nexit 0\n'); os.chmod(f"{d}/sleep", 0o755)
     return {**os.environ, "PATH": f"{d}:{os.environ['PATH']}", "HOME": d}
@@ -246,6 +247,13 @@ with tempfile.TemporaryDirectory() as d:
     # start, last line, status, the next sleep (the cadence after a good poll), cadence, and the last good poll's time.
     assert len(kept) == 6 and kept[2:5] == ["running", "45", "45"] and int(kept[0]) <= int(kept[5]) <= int(kept[1]), kept
     assert not os.path.exists(f"{d}/slept"), "the first arm polls at once"
+    # The loop names its waiter on every poll: the server journals `w` to tell the 5 s loop from other waiters.
+    assert open(f"{d}/urls").read() == "http://x/?w=loop\n", open(f"{d}/urls").read()
+# ...and after a query the URL already carries, as one more parameter, not a second `?`.
+with tempfile.TemporaryDirectory() as d:
+    r = subprocess.run([zsh, "-c", armed(loop_src).replace("http://x/", "http://x/?t=1")], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, env=shims(d, '{"status":"running","next_poll_after_s":45}'))
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    assert open(f"{d}/urls").read() == "http://x/?t=1&w=loop\n", open(f"{d}/urls").read()
 # The cadence comes off the body (#67): a payload submit's body says
 # next_poll_after_s 45 and heartbeat_s 225, and the loop sleeps 45 — not the
 # 240 it was seeded with — and writes that cadence into the watch file, so the

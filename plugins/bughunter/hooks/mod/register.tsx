@@ -24,6 +24,11 @@ import type { EngineInterface as Engine, Register, RenderChildren } from 'claude
 
 import { bodyOf, findingsOf, gateReason, minutes, num, pollState, str, toolKind } from './parse'
 
+/** The status door journals which waiter polled (`w`): the skill's watch loop sends `loop`, the mod `mod`. */
+export const tagged = (url: string): string => {
+  try { const u = new URL(url); u.searchParams.append('w', 'mod'); return u.toString() } catch { return url }
+}
+
 /** One hunt the bughunter mod watches: what submit_review answered, then what the status URL says. */
 type BughunterHunt = {
   id: string
@@ -255,7 +260,7 @@ async function pollDue($: Engine) {
   for (const h of huntList.filter(x => ours(x, cwd) && x.state === 'done' && !x.seen && x.statusUrl && now >= x.nextAt)) {
     let body
     try {
-      const res = await $.http.fetch(h.statusUrl!)
+      const res = await $.http.fetch(tagged(h.statusUrl!))
       body = res.ok ? JSON.parse(res.text) : undefined
     } catch {
       body = undefined
@@ -272,7 +277,7 @@ async function pollDue($: Engine) {
   for (const h of due) {
     let res
     try {
-      res = await $.http.fetch(h.statusUrl!)
+      res = await $.http.fetch(tagged(h.statusUrl!))
     } catch {
       // A policy (sec-default, a proxy allowlist) refused the request. Say so
       // once in the status line rather than look like a hunt that never ends.

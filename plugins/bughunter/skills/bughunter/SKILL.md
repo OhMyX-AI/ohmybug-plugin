@@ -663,7 +663,8 @@ of the turn.
 
 ```bash
 mode=fast # deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)
-url='<status_url>'; watch="$HOME/.ohmybug/watch/<review_id>"; mkdir -p "${watch%/*}"
+url='<status_url>'; case $url in *\?*) url="$url&w=loop" ;; *) url="$url?w=loop" ;; esac # names this waiter on the server's read journal
+watch="$HOME/.ohmybug/watch/<review_id>"; mkdir -p "${watch%/*}"
 every=<watch_poll_s> # seconds between polls: the submit response's watch_poll_s seeds it
                      # (its next_poll_after_s on an older server that has none, monitor.interval_s
                      # on one older still); the body's watch_poll_s takes over from the first poll

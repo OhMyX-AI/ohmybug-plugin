@@ -1,3 +1,4 @@
+import { tagged } from './register'
 import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
@@ -57,9 +58,9 @@ function engine(on: On) {
 
 function world(on: On, status: string | null | string[] | (() => Promise<string>)) {
   const replies = Array.isArray(status) ? [...status] : null
-  const seen = { toasts: [] as string[], status: [] as (string | undefined)[], prompts: [] as string[] }
+  const seen = { toasts: [] as string[], status: [] as (string | undefined)[], prompts: [] as string[], urls: [] as string[] }
   engine(on)
-  on('http.fetch', async () => (status === null ? { deny: 'refused by policy' }
+  on('http.fetch', async ($, e) => (seen.urls.push(String((e as { url?: unknown }).url)), status === null ? { deny: 'refused by policy' }
     : { value: { status: 200, ok: true, headers: {}, text: typeof status === 'function' ? await status()
       : replies ? (replies.length > 1 ? replies.shift()! : replies[0]!) : status } }) as never)
   on('ui.toast', async ($, e) => { seen.toasts.push(e.text); return { value: undefined } as never })
@@ -88,6 +89,19 @@ test('a hunt that finishes raises a toast and a band, and starts no turn by itse
   await drawn($, 'PromptHint', { isDraft: false, isWorking: false, hint: '' })
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'end_turn' } as never)
   expect(seen.prompts).toHaveLength(0)
+})
+
+test('every status poll the mod makes names its waiter: w=mod, appended after any query the URL already has', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  const seen = world(on, JSON.stringify({ status: 'done', findings: 0, next_poll_after_s: 60 }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT, meta: { repo: 'o/r', ref: 'abc', base_branch: 'main' } } as never)
+  await clock.advance(75_000)
+  expect(seen.urls.length).toBeGreaterThan(0)
+  for (const u of seen.urls) expect(u).toBe('https://status.test/r/rev_1/status?w=mod')
+  expect(tagged('https://status.test/r/rev_1/status?t=1')).toBe('https://status.test/r/rev_1/status?t=1&w=mod')
 })
 
 test('a hunt another chat of the same repository started is not this chat\'s: no band, no toast, no status', async ($, on) => {

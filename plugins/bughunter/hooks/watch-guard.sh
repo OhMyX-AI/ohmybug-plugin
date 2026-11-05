@@ -37,5 +37,5 @@ if "rearm" in c and ".loop" in c:
 print("loop")
 ' 2>/dev/null) || exit 0
 [ "$HIT" = loop ] || exit 0
-echo "ohmybug: refused — this background command polls a hunt's status in a loop that prints nothing until the hunt ends. Claude Code wakes you only when a background command exits, so it would wake you once, at the end, and the prompt cache goes cold for the whole wait. Run the bughunter skill's watch loop instead (copy it from the skill; it exits at every heartbeat line, re-arm the same command each time), or a one-shot 'sleep <heartbeat_s> && curl -fsS <status_url>' re-armed on each wake." >&2
+echo "ohmybug: refused — this background command polls a hunt's status in a loop that prints nothing until the hunt ends. Claude Code wakes you only when a background command exits, so it would wake you once, at the end, and the prompt cache goes cold for the whole wait. Run the bughunter skill's watch loop instead (copy it from the skill; it exits at every heartbeat line, re-arm the same command each time): it reads every watch_poll_s, where a one-shot sleep-then-curl reads a finished hunt minutes late." >&2
 exit 2
