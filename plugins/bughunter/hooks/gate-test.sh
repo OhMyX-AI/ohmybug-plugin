@@ -2882,6 +2882,12 @@ for rule in "Read only each choice's \`id\` and \`label\`; drop an id not listed
   '`HTTP 403` – stories are switched off for this key or account: say so.' \
   'Anything else (`HTTP 429`, `HTTP 5xx`, `HTTP 000` or a curl error): say publication failed and show the error; do not resend.' \
   'starts with `https://` and ends in `/s/` plus letters and digits only' \
+  'Both commands in this section are for a `share.how` URL that starts with' \
+  'Never paste any other value into them. For `post` with no such URL, use the tool below, or with neither, say publication failed; `post_anonymous` has its own fallback in the next bullet.' \
+  'ends in `/s/` plus letters and digits only – no `?`, `#`, quote or space.' \
+  '`HTTP 200` – published. For `post_anonymous`, read `author` in the answer printed before that line' \
+  'The command takes only the URL shape stated above.' \
+  'the same for both commands in this section' 'Read its `HTTP` line by the list above.' \
   'to a new file with your file-writing tool, never through the shell (no echo, printf or heredoc)' \
   'Use a fresh path in a private temp directory and delete the file afterwards' \
   'and an answer that is not one of those two labels publishes nothing' \
@@ -2900,19 +2906,23 @@ done
 for label in 'Not now' 'Post without my GitHub name' 'Keep private' 'Always post automatically' 'Post automatically for 24 h' "Don't ask for 24 h"; do
   printf '%s' "$SKJ" | grep -qF -- "$label" && { echo "FAIL story: SKILL.md 6b hard-codes the label [$label]; ask with share.choices' own"; fails=$((fails + 1)); }
 done
-# The anonymous curl, RUN with the real curl against a local server: a refusal (400) and a post (200) must both print the
-# answer's body and end with the status line, exit 0, on the path with /anonymous. A fail option (-f, --fail-with-body)
-# hides the body or is refused by older curl, so a client could not tell a refused draft from a failure.
-AN=$(mktemp -d)
-ANCMD=$(python3 - plugins/bughunter/skills/bughunter/SKILL.md <<'PY'
+# Both story curls (post and the post without the name), RUN with the real curl against a local server: a refusal
+# (400) and a post (200) must both print the answer's body and end with the status line, exit 0, on their own path,
+# with the body file sent whole. A fail option (-f, --fail-with-body) hides the body or is refused by older curl, so a
+# client could not tell a refused draft from a failure; an inline body puts the story through the shell.
+for case in 'post|Then post it to the one-time URL|' 'anonymous|**Publishing without the name**|/anonymous'; do
+  cname=${case%%|*}; rest=${case#*|}; anchor=${rest%%|*}; suffix=${rest#*|}
+  AN=$(mktemp -d)
+  ANCMD=$(python3 - plugins/bughunter/skills/bughunter/SKILL.md "$anchor" <<'PY'
 import re, sys
 s = open(sys.argv[1]).read()
-m = re.search(r"\*\*Publishing without the name\*\*.*?```bash\n(.*?)```", s, re.S)
+i = s.find(sys.argv[2])
+m = re.search(r"```bash\n(.*?)```", s[i:], re.S) if i >= 0 else None
 # Run as written: agents read the raw file, indent and all.
 print(m.group(1) if m else "")
 PY
 )
-python3 - "$AN" <<'PY' &
+  python3 - "$AN" <<'PY' &
 import http.server, json, os, sys
 d = sys.argv[1]
 n = [0]
@@ -2930,35 +2940,37 @@ s = http.server.HTTPServer(("127.0.0.1", 0), H)
 open(os.path.join(d, "port"), "w").write(str(s.server_address[1]))
 s.handle_request(); s.handle_request()
 PY
-ANPID=$!
-for _ in $(seq 50); do [ -s "$AN/port" ] && break; sleep 0.1; done
-if [ -z "$ANCMD" ] || [ ! -s "$AN/port" ]; then
-  echo "FAIL story: the anonymous curl block in SKILL.md 6b is gone, or the local server did not start"; fails=$((fails + 1))
-else
-  ANURL="http://127.0.0.1:$(cat "$AN/port")/s/tok"
-  # The body file as the agent's file tool writes it: a real story, with what a shell would choke on or run.
-  python3 -c 'import json, sys; json.dump({"text": "The worker doesn'"'"'t retry $HOME `id` \"now\".", "lesson": "**Don'"'"'t retry.** Once.\n**Log it.** Always.", "rounds_survived": 0}, open(sys.argv[1], "w"))' "$AN/body.json"
-  ANRUN=${ANCMD//<share.how URL>/$ANURL}
-  ANRUN=${ANRUN//<body file>/$AN/body.json}
-  for want in 'HTTP 400|text too long' 'HTTP 200|"author": "anonymous"'; do
-    out=$(bash -c "$ANRUN" 2>&1); rc=$?
-    last=$(printf '%s\n' "$out" | sed '/^$/d' | tail -n 1)
-    [ "$rc" = 0 ] && [ "$last" = "${want%%|*}" ] && printf '%s' "$out" | grep -qF -- "${want#*|}" \
-      || { echo "FAIL story: the anonymous curl gave rc=$rc last=[$last] for ${want%%|*} (want the body and the status line, exit 0)"; fails=$((fails + 1)); }
-  done
-  python3 - "$AN/log" <<'PY' || fails=$((fails + 1))
-import json, sys
-rows = [json.loads(l) for l in open(sys.argv[1])]
+  ANPID=$!
+  for _ in $(seq 50); do [ -s "$AN/port" ] && break; sleep 0.1; done
+  if [ -z "$ANCMD" ] || [ ! -s "$AN/port" ]; then
+    echo "FAIL story: the $cname curl block in SKILL.md 6b is gone, or the local server did not start"; fails=$((fails + 1))
+  else
+    ANURL="http://127.0.0.1:$(cat "$AN/port")/s/tok"
+    # The body file as the agent's file tool writes it: a real story, with what a shell would choke on or run.
+    python3 -c 'import json, sys; json.dump({"text": "The worker doesn'"'"'t retry $HOME `id` \"now\".", "lesson": "**Don'"'"'t retry.** Once.\n**Log it.** Always.", "rounds_survived": 0}, open(sys.argv[1], "w"))' "$AN/body.json"
+    ANRUN=${ANCMD//<share.how URL>/$ANURL}
+    ANRUN=${ANRUN//<body file>/$AN/body.json}
+    for want in 'HTTP 400|text too long' 'HTTP 200|"published": true'; do
+      out=$(env -u http_proxy -u HTTP_PROXY -u https_proxy -u HTTPS_PROXY -u ALL_PROXY -u all_proxy bash -c "$ANRUN" 2>&1); rc=$?
+      last=$(printf '%s\n' "$out" | sed '/^$/d' | tail -n 1)
+      [ "$rc" = 0 ] && [ "$last" = "${want%%|*}" ] && printf '%s' "$out" | grep -qF -- "${want#*|}" \
+        || { echo "FAIL story: the $cname curl gave rc=$rc last=[$last] for ${want%%|*} (want the body and the status line, exit 0)"; fails=$((fails + 1)); }
+    done
+    python3 - "$AN/log" "/s/tok$suffix" "$cname" <<'PY' || fails=$((fails + 1))
+import json, os, sys
+log, path, name = sys.argv[1:4]
+rows = [json.loads(l) for l in open(log)] if os.path.exists(log) else []
 def body(r):
     try: return json.loads(r["body"])
     except ValueError: return None
-bad = [r for r in rows if r["path"] != "/s/tok/anonymous" or r["type"] != "application/json"
+bad = [r for r in rows if r["path"] != path or r["type"] != "application/json"
        or body(r) != {"text": "The worker doesn't retry $HOME `id` \"now\".", "lesson": "**Don't retry.** Once.\n**Log it.** Always.", "rounds_survived": 0}]
 if len(rows) != 2 or bad:
-    print(f"FAIL story: the anonymous curl sent {[(r['path'], r['body']) for r in rows]} (want /s/tok/anonymous twice, the JSON text whole)"); sys.exit(1)
+    print(f"FAIL story: the {name} curl sent {[(r['path'], r['body']) for r in rows]} (want {path} twice, the JSON text whole)"); sys.exit(1)
 PY
-fi
-kill "$ANPID" 2>/dev/null; wait "$ANPID" 2>/dev/null; rm -rf "$AN"
+  fi
+  kill "$ANPID" 2>/dev/null; wait "$ANPID" 2>/dev/null; rm -rf "$AN"
+done
 # Bounded both ways: a renamed end heading would read to the end of the file and check unrelated sections.
 n=$(wc -l <"$SK"); [ "$n" -gt 20 ] && [ "$n" -lt 250 ] || { echo "FAIL story: section 6b of SKILL.md was not found alone ($n lines)"; fails=$((fails + 1)); }
 rm -f "$SK"
