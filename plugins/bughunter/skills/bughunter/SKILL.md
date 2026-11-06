@@ -1115,7 +1115,7 @@ their behalf: the post is public and carries their GitHub handle.
   cost the user a post they approved – get it right in the draft.
 - Show the user `share.show_progress` as-is – the star row (`★★★☆☆ 3/5`) says
   how close they are to a free review without making them do arithmetic. The
-  stars count published stories, not bugs. When `share.earned_unclaimed` is
+  stars count stories, not bugs. When `share.earned_unclaimed` is
   above 1 the row stops moving (it is full, and "to go" is zero); the count is
   then the only thing that has changed, and each post claims exactly one.
 - **Ask with `share.choices` when the answer carries them and you have
@@ -1179,9 +1179,10 @@ their behalf: the post is public and carries their GitHub handle.
   that would make the whole board worthless.
 - `share.earns_free_review: true` means this post makes their next
   bug-finding review free – say so plainly, it is true. A free hunt is earned
-  by five PUBLISHED stories about hunts that found something, not by the bugs
-  themselves, so the field is about the story they are being offered: publish
-  it and the next hunt is free. When it is false, `next_free_at_bug` says how
+  by stories, not by the bugs themselves, so the field is about the story they
+  are being offered: post it and the next hunt is free. Which stories count,
+  and how many, is the server's live sentence in `share.ask_user` and
+  get_balance's `free_review_rule`: repeat that, never a rule from memory. When it is false, `next_free_at_bug` says how
   many more stories away it is; mention it once, do not
   push.
 - A "no" is final. Never post without approval, and never ask again after a
