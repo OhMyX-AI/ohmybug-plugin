@@ -1188,15 +1188,40 @@ they pick posting without it (`share.author` says who signs it now).
   your client has that tool. Prefer whichever you actually have; the URL
   always works, because curl has no version. This is how every "publish"
   above is done, except `post_anonymous`.
-- **Publishing without the name** (`post_anonymous`) has one path:
-  `post_story_anonymous` with the same fields. Without that tool, drop the
-  `post_anonymous` id like any unlisted one and do not offer it. Never
-  `post_story` or the plain URL for it, not even after a failure: they sign
-  the story with the handle. Send it once. A refused draft (the answer says
-  what to change) is a new text: show it and ask again, as above. Any other
-  failure: say publication failed and show the error; do not resend, since
-  the story may already be up – the user can check
-  https://mcp.ohmybug.ai/me/stories.
+- **Publishing without the name** (`post_anonymous`) has two paths, and
+  only these: `post_story_anonymous` with the same fields, or this exact
+  command, run as written (never edit the `post` curl line into it):
+
+  First write the body – the same three fields as plain JSON – to a new
+  file with your file-writing tool, never through the shell (no echo, printf
+  or heredoc). The shell then never sees the story, so no apostrophe,
+  backtick or `$` in it can break the command or run. Use a fresh path in a
+  private temp directory and delete the file afterwards. Then:
+
+  ```bash
+  curl -sS --max-time 30 -w '\nHTTP %{http_code}\n' -X POST -H 'content-type: application/json' \
+    --data-binary @'<body file>' '<share.how URL>/anonymous'
+  ```
+
+  The command is for a `share.how` URL that starts with `https://` and ends
+  in `/s/` plus letters and digits only – no `?`, `#`, quote or space. With
+  neither the tool nor such a URL, drop the `post_anonymous` id like any
+  unlisted one and do not offer it. Never `post_story` or the plain
+  URL for it, not even after a failure: they sign the story with the handle.
+  Send it once, and read the `HTTP` line the command prints last (no such
+  line means it failed):
+  - `HTTP 200` – read `author` in the answer printed before that line, as
+    the next paragraph says.
+  - `HTTP 400` – a refused draft: the answer says what to change. A new text
+    is shown and asked about again, as above; the same link still takes it.
+  - `HTTP 403` – stories are switched off for this key or account: say so.
+  - `HTTP 404` – the link is unknown or already used: the story may be up. Do
+    not post again; the user can check https://mcp.ohmybug.ai/me/stories.
+  - Anything else (`HTTP 429`, `HTTP 5xx`, `HTTP 000` or a curl error): say
+    publication failed and show the error; do not resend. The story may still
+    be up – the user can check the same page.
+
+  The tool answers the same cases as errors in words; treat them the same way.
   Then read `author` in the answer. Only `author: "anonymous"` confirms it;
   anything else, or no `author` at all, means the story may carry their
   name: say so plainly and give them the answer's `manage_url`, where they

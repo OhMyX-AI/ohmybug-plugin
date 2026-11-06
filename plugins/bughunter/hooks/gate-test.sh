@@ -2873,10 +2873,17 @@ for rule in "Read only each choice's \`id\` and \`label\`; drop an id not listed
   'A reply that is one whole label' 'A plain decline is a no, and it is final.' \
   'with `post_anonymous` there too, ask once which of the two' 'No numbers or letters anywhere' \
   'Consent is bound to the exact text here too' \
-  'Never `post_story` or the plain URL for it, not even after a failure' 'Send it once.' \
-  'is a new text: show it and ask again, as above' 'do not resend, since the story may already be up' \
-  'has one path: `post_story_anonymous` with the same fields' \
-  'Without that tool, drop the `post_anonymous` id like any unlisted one and do not offer it' \
+  'Never `post_story` or the plain URL for it, not even after a failure' \
+  'A new text is shown and asked about again, as above; the same link still takes it' \
+  'only these: `post_story_anonymous` with the same fields, or this exact command, run as written' \
+  'With neither the tool nor such a URL, drop the `post_anonymous` id like any unlisted one and do not offer it' \
+  'Send it once, and read the `HTTP` line the command prints last (no such line means it failed)' \
+  '`HTTP 400` – a refused draft' '`HTTP 404` – the link is unknown or already used: the story may be up. Do not post again' \
+  '`HTTP 403` – stories are switched off for this key or account: say so.' \
+  'Anything else (`HTTP 429`, `HTTP 5xx`, `HTTP 000` or a curl error): say publication failed and show the error; do not resend.' \
+  'starts with `https://` and ends in `/s/` plus letters and digits only' \
+  'to a new file with your file-writing tool, never through the shell (no echo, printf or heredoc)' \
+  'Use a fresh path in a private temp directory and delete the file afterwards' \
   'and an answer that is not one of those two labels publishes nothing' \
   'anything else that is not a plain yes or no, ask again' \
   '`post_anonymous` is published by the next bullet, never here' 'above is done, except `post_anonymous`.' \
@@ -2893,8 +2900,65 @@ done
 for label in 'Not now' 'Post without my GitHub name' 'Keep private' 'Always post automatically' 'Post automatically for 24 h' "Don't ask for 24 h"; do
   printf '%s' "$SKJ" | grep -qF -- "$label" && { echo "FAIL story: SKILL.md 6b hard-codes the label [$label]; ask with share.choices' own"; fails=$((fails + 1)); }
 done
-# The anonymous post has no curl path yet (its flags broke the call on some curl versions): no URL built from share.how is offered for it.
-printf '%s' "$SKJ" | grep -qF -- '/anonymous' && { echo "FAIL story: SKILL.md 6b offers a curl path for the post without the name"; fails=$((fails + 1)); }
+# The anonymous curl, RUN with the real curl against a local server: a refusal (400) and a post (200) must both print the
+# answer's body and end with the status line, exit 0, on the path with /anonymous. A fail option (-f, --fail-with-body)
+# hides the body or is refused by older curl, so a client could not tell a refused draft from a failure.
+AN=$(mktemp -d)
+ANCMD=$(python3 - plugins/bughunter/skills/bughunter/SKILL.md <<'PY'
+import re, sys
+s = open(sys.argv[1]).read()
+m = re.search(r"\*\*Publishing without the name\*\*.*?```bash\n(.*?)```", s, re.S)
+# Run as written: agents read the raw file, indent and all.
+print(m.group(1) if m else "")
+PY
+)
+python3 - "$AN" <<'PY' &
+import http.server, json, os, sys
+d = sys.argv[1]
+n = [0]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("content-length") or 0))
+        with open(os.path.join(d, "log"), "a") as f:
+            f.write(json.dumps({"path": self.path, "type": self.headers.get("content-type"), "body": body.decode()}) + "\n")
+        n[0] += 1
+        code, out = (400, {"error": "text too long"}) if n[0] == 1 else (200, {"published": True, "author": "anonymous"})
+        data = json.dumps(out).encode()
+        self.send_response(code); self.send_header("content-type", "application/json"); self.send_header("content-length", str(len(data))); self.end_headers(); self.wfile.write(data)
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(os.path.join(d, "port"), "w").write(str(s.server_address[1]))
+s.handle_request(); s.handle_request()
+PY
+ANPID=$!
+for _ in $(seq 50); do [ -s "$AN/port" ] && break; sleep 0.1; done
+if [ -z "$ANCMD" ] || [ ! -s "$AN/port" ]; then
+  echo "FAIL story: the anonymous curl block in SKILL.md 6b is gone, or the local server did not start"; fails=$((fails + 1))
+else
+  ANURL="http://127.0.0.1:$(cat "$AN/port")/s/tok"
+  # The body file as the agent's file tool writes it: a real story, with what a shell would choke on or run.
+  python3 -c 'import json, sys; json.dump({"text": "The worker doesn'"'"'t retry $HOME `id` \"now\".", "lesson": "**Don'"'"'t retry.** Once.\n**Log it.** Always.", "rounds_survived": 0}, open(sys.argv[1], "w"))' "$AN/body.json"
+  ANRUN=${ANCMD//<share.how URL>/$ANURL}
+  ANRUN=${ANRUN//<body file>/$AN/body.json}
+  for want in 'HTTP 400|text too long' 'HTTP 200|"author": "anonymous"'; do
+    out=$(bash -c "$ANRUN" 2>&1); rc=$?
+    last=$(printf '%s\n' "$out" | sed '/^$/d' | tail -n 1)
+    [ "$rc" = 0 ] && [ "$last" = "${want%%|*}" ] && printf '%s' "$out" | grep -qF -- "${want#*|}" \
+      || { echo "FAIL story: the anonymous curl gave rc=$rc last=[$last] for ${want%%|*} (want the body and the status line, exit 0)"; fails=$((fails + 1)); }
+  done
+  python3 - "$AN/log" <<'PY' || fails=$((fails + 1))
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1])]
+def body(r):
+    try: return json.loads(r["body"])
+    except ValueError: return None
+bad = [r for r in rows if r["path"] != "/s/tok/anonymous" or r["type"] != "application/json"
+       or body(r) != {"text": "The worker doesn't retry $HOME `id` \"now\".", "lesson": "**Don't retry.** Once.\n**Log it.** Always.", "rounds_survived": 0}]
+if len(rows) != 2 or bad:
+    print(f"FAIL story: the anonymous curl sent {[(r['path'], r['body']) for r in rows]} (want /s/tok/anonymous twice, the JSON text whole)"); sys.exit(1)
+PY
+fi
+kill "$ANPID" 2>/dev/null; wait "$ANPID" 2>/dev/null; rm -rf "$AN"
 # Bounded both ways: a renamed end heading would read to the end of the file and check unrelated sections.
 n=$(wc -l <"$SK"); [ "$n" -gt 20 ] && [ "$n" -lt 250 ] || { echo "FAIL story: section 6b of SKILL.md was not found alone ($n lines)"; fails=$((fails + 1)); }
 rm -f "$SK"
