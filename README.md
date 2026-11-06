@@ -137,10 +137,10 @@ repository per week, and is not a merge gate.
 
 ## What it does
 
-- Before every `gh pr merge`, a gate checks the FINAL diff was hunted —
-  deliberately the last net before merge, after human reviews and CI
-  (skip once with `SKIP_BUGHUNT=1`; review fixes change the diff and
-  re-arm the gate).
+- The hunt is the review: run it as soon as a change is ready, instead of a
+  local review. Before every `gh pr merge`, a gate is the safety net: it checks
+  the final diff was hunted (skip once with `SKIP_BUGHUNT=1`; review fixes
+  change the diff and re-arm the gate).
 - `/bughunter:review` (or just ask to "hunt bugs") sends your diff + selected
   context to OhMyBug's cloud. You see the exact file manifest before upload.
 - An orchestrated fleet of adversarial reviewers hunts on OhMyBug's models.

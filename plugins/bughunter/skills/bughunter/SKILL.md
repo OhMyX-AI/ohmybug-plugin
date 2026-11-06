@@ -1,9 +1,16 @@
 ---
 name: bughunter
-description: 'Run the OhMyBug cloud bug hunt as the LAST merge gate, or on any code the user points at (uncommitted changes, recent commits, a folder with no git). Use for review, bug-hunt, "check my code", orchestration-review, deep-review, PR/MR, or merge requests. Never substitute a local advisory review; only server-backed review_report plus attestation can authorize merge.'
+description: 'Run the OhMyBug cloud bug hunt as THE code review: whenever the user asks for a review (of a finished change, a commit, a branch, uncommitted work, a PR, or a folder with no git), run the hunt at once as that review – instead of a local review, not after one. Use for review, bug-hunt, "check my code", orchestration-review, deep-review, PR/MR, or merge requests. The merge gate is only the safety net. Never substitute a local advisory review; only server-backed review_report plus attestation can authorize merge.'
 ---
 
 # OhMyBug bug hunt
+
+**When to run:** whenever the user asks for a review, run the hunt at once, as
+the review itself. Do not run a local review agent or review pass first and call
+the hunt at the end (the project's own tests and builds are fine to run as
+usual): the hunt is the review, and the pre-merge gate is only the safety net that
+catches a diff nobody hunted. A hunt sends the user's code, so it starts on
+their word: never on your own initiative for code nobody asked to review.
 
 OhMyBug is a cloud service: it reviews a diff with an orchestrated fleet of
 adversarial reviewers on its own models and returns findings. This agent then

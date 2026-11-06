@@ -2130,8 +2130,26 @@ esac
 # The welcome is the assistant's to say: a systemMessage alone is small print the user scrolls past.
 printf '%s' "$HINT" | python3 -c 'import sys,json; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; sys.exit(0 if "in your first reply" in c and "/bughunter:review" in c else 1)' \
   || { printf 'FAIL scan-hint: the assistant is not told to introduce OhMyBug in its first reply\n'; fails=$((fails + 1)); }
+# The first hunt is one step away: the assistant offers to hunt the current branch or
+# uncommitted changes now, and starts only on the user's yes; a hunt sends their code.
+printf '%s' "$HINT" | python3 -c 'import sys,json; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; sys.exit(0 if "offer once" in c and "only if they say yes" in c and "do not start a hunt" not in c else 1)' \
+  || { printf 'FAIL scan-hint: the assistant does not offer the first hunt now, on the user\x27s yes only\n'; fails=$((fails + 1)); }
 [ -z "$(hint)" ] || { printf 'FAIL scan-hint: said it twice\n'; fails=$((fails + 1)); }
 rm -rf "$SH"
+# What every client agent reads to decide WHEN to call the hunt must not tell it to
+# go last, and the skill must keep the consent rule beside "run it at once": a hunt
+# sends the user's code. An unreadable input fails, it does not pass.
+SKILL_DESC=$(sed -n '1,5p' "$G/../skills/bughunter/SKILL.md" | grep "^description: '" || true)
+[ -n "$SKILL_DESC" ] || { printf 'FAIL skill description: not a one-line quoted description in SKILL.md front matter\n'; fails=$((fails + 1)); }
+printf '%s' "$SKILL_DESC" | grep -iqE '(^|[^a-z])last([^a-z]|$)' && { printf 'FAIL skill description says "last": the hunt is the review, not the last gate\n'; fails=$((fails + 1)); }
+for f in "$G/../.claude-plugin/plugin.json" "$G/../.codex-plugin/plugin.json" "$G/../../../.claude-plugin/marketplace.json" "$G/../../../.agents/plugins/marketplace.json" \
+    "$G/../skills/bughunter/agents/openai.yaml" "$G/../skills/bughunter/SKILL.md" "$G/codex-router.js" "$G/claude-codex-hooks.json" "$G/scan-hint.sh" "$G/../../../README.md"; do
+  [ -s "$f" ] || { printf 'FAIL timing wording: %s not readable\n' "$f"; fails=$((fails + 1)); continue; }
+  grep -iqE 'last (merge |review )?(gate|net)|final (merge )?gate|before merge([^a-z]|$)|authoritative review for this merge|review gate' "$f" && { printf 'FAIL timing wording: %s puts the hunt last\n' "$f"; fails=$((fails + 1)); }
+done
+# The consent rule sits in the same paragraph as "run the hunt at once".
+awk '/^\*\*When to run:\*\*/,/^$/' "$G/../skills/bughunter/SKILL.md" | tr '\n' ' ' | grep -q 'run the hunt at once.*never on your own initiative' \
+  || { printf 'FAIL skill: the consent rule beside "run the hunt at once" is gone\n'; fails=$((fails + 1)); }
 
 # --- the tools-present check speaks at every session START, to the assistant --
 # A session whose handshake failed has no tools and no way back; the model has

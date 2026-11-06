@@ -8,7 +8,7 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-router.js\" session",
             "timeout": 5,
-            "statusMessage": "Loading OhMyBug review gate..."
+            "statusMessage": "Loading OhMyBug code review..."
           },
           {
             "type": "command",

@@ -33,8 +33,13 @@ os.environ["OMB_STATE_DIR"] = tempfile.mkdtemp()
 first = run("session")
 assert "OhMyBug is installed" in first["systemMessage"], first
 first_text = first["hookSpecificOutput"]["additionalContext"]
-assert first_text.startswith("OhMyBug is the authoritative review"), first_text[:80]
+assert first_text.startswith("OhMyBug is the code review: whenever the user asks for a review"), first_text[:80]
+# The timing is the point: at once, instead of a local review, not after one.
+assert "run the hunt at once as that review, instead of a local review and not after one" in first_text
+assert "never on your own initiative" in first_text
 assert "in your first reply" in first_text and "Run the OhMyBug cloud hunt on my code" in first_text
+# The first hunt is one step away, on the user's yes only.
+assert "offer once to hunt" in first_text and "only if they say yes" in first_text and "do not start a hunt" not in first_text
 session = run("session")
 assert "OhMyBug is installed" not in session["systemMessage"], session
 assert session["hookSpecificOutput"]["hookEventName"] == "SessionStart"

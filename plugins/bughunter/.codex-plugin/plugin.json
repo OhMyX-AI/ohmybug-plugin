@@ -1,7 +1,7 @@
 {
   "name": "bughunter",
-  "version": "0.146.0",
-  "description": "OhMyBug cloud bug hunt as the last merge gate, with Codex-native MCP routing.",
+  "version": "0.147.0",
+  "description": "OhMyBug cloud bug hunt as your code review, as soon as a change is ready, with Codex-native MCP routing.",
   "author": {
     "name": "OhMyBug",
     "email": "hi@ohmybug.ai",
@@ -16,7 +16,7 @@
   "hooks": ["./hooks/hooks.json", "./hooks/claude-codex-hooks.json"],
   "interface": {
     "displayName": "OhMyBug Bughunter",
-    "shortDescription": "Cloud bug hunt before merge",
+    "shortDescription": "Cloud bug hunt as your code review",
     "longDescription": "Run the OhMyBug cloud hunt through MCP, verify every finding locally, and use server attestation as the only merge authority.",
     "developerName": "OhMyBug",
     "category": "Developer Tools",
@@ -27,7 +27,7 @@
     "defaultPrompt": [
       "Run the OhMyBug cloud hunt on this diff.",
       "Hunt bugs in my code – no pull request, just what is here.",
-      "Check this PR for real bugs before merge.",
+      "Review my current changes for real bugs.",
       "Show the verified findings and merge gate evidence."
     ],
     "brandColor": "#E5484D"

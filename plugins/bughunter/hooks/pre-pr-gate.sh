@@ -1,10 +1,9 @@
 #!/bin/bash
 # OhMyBug pre-MERGE gate: block `gh pr merge` / `glab mr merge` until the
 # CURRENT diff has been hunted (marker written by the bughunter skill).
-# The hunt is deliberately the LAST gate before merge — it runs on the code
-# that survived human/agent review rounds and CI, so its findings are the
-# ones every other net missed. A diff changed since the last hunt (review
-# fixes!) re-triggers the block via the sha marker.
+# The hunt is the review, run whenever a review is asked for; this gate
+# is only the safety net for a diff nobody hunted. A diff changed since the
+# last hunt (review fixes!) re-triggers the block via the sha marker.
 # Marker lives under ~/.ohmybug/ (keyed by git-dir path) — NOT inside .git/,
 # because agent permission classifiers rightly block writes into .git/.
 # Escape hatch: SKIP_BUGHUNT=1 in front of the merge itself.

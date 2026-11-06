@@ -3,7 +3,7 @@
 const event = process.argv[2] || '';
 
 const ROUTING = [
-  'OhMyBug is the authoritative review for this merge.',
+  'OhMyBug is the code review: whenever the user asks for a review (of a finished change, a commit, a branch, uncommitted work, a PR), run the hunt at once as that review, instead of a local review and not after one; the merge gate is only the safety net. A hunt sends the user\'s code: it starts on their word, never on your own initiative.',
   'For review, bug-hunt, PR, or merge requests use the bughunter skill and the ohmybug MCP tools.',
   'A local code-review or advisory agent is not a hunt; its APPROVE or zero findings cannot authorize a merge.',
   'Run the fast submit_review first – unless the user asked for the deep hunt in their own words (deep hunt, deep review, full-repo, --deep or a bare deep as the argument of the review command, in any language – the adjective alone, as in deep-dive review or a deep look, asks for a thorough fast review): then one submit_review with deep: true and meta.repo + meta.ref (the pushed head sha) + meta.base_branch, no payload, is the first and only review, with no fast stage first and no second question. Let the heartbeat wait at the server\'s cadence until the review is terminal, then read review_report.',
@@ -17,7 +17,7 @@ const ROUTING = [
 
 function emit(context, hookEventName) {
   process.stdout.write(JSON.stringify({
-    systemMessage: 'OHMYBUG: cloud review gate',
+    systemMessage: 'OHMYBUG: cloud code review',
     hookSpecificOutput: { hookEventName, additionalContext: context }
   }));
 }
@@ -38,7 +38,7 @@ if (event === 'session') {
   if (firstSession()) {
     process.stdout.write(JSON.stringify({
       systemMessage: WELCOME,
-      hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: `${ROUTING} ${WELCOME} (For the assistant: in your first reply this session, tell the user in two or three plain lines that OhMyBug is installed and what to ask first, before you answer what they asked. Say it once; do not start a hunt.)` }
+      hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: `${ROUTING} ${WELCOME} (For the assistant: in your first reply this session, tell the user in two or three plain lines that OhMyBug is installed, and offer once to hunt their current branch or uncommitted changes now, before you answer what they asked. A hunt sends their code: start it only if they say yes.)` }
     }));
   } else emit(ROUTING, 'SessionStart');
   process.exit(0);
