@@ -22,7 +22,7 @@
 
 import type { EngineInterface as Engine, Register, RenderChildren } from 'claude-code'
 
-import { bodyOf, findingsOf, gateReason, minutes, num, pollState, str, toolKind } from './parse'
+import { bodyOf, catchOf, findingsOf, gateReason, halfBlocks, mascotOf, minutes, num, pollState, speciesOf, str, toolKind } from './parse'
 
 /** The status door journals which waiter polled (`w`): the skill's watch loop sends `loop`, the mod `mod`. */
 export const tagged = (url: string): string => {
@@ -460,6 +460,29 @@ export const register: Register = on => {
     )
     if (rawOpen.has(e.requestId)) return <Box flexDirection="column">{await next(e)}{toggle}</Box>
 
+    // The hunt's one mascot, only as the server sends it; with none, the head line alone.
+    // The pixels go only to the terminal, where a cell is square enough for half blocks.
+    const withMascot = (head: RenderChildren) => {
+      const m = mascotOf(body)
+      if (!m) return head
+      const side = [
+        head,
+        <Text bold>{m.name}{m.isNew ? ' — new!' : ''}</Text>,
+        <Text dimColor>{m.isNew ? 'new to your Bugarium' : 'in your Bugarium'} · {m.caught} of {m.total} caught</Text>,
+        <Text dimColor><Link href={m.url} /></Text>,
+      ]
+      if (e.surface !== 'terminal') return <Box flexDirection="column">{side}</Box>
+      const pixels = halfBlocks(m.sprite).map(row => (
+        <Text>{row.map(({ top, bottom }) => top && bottom ? <Text color={top} backgroundColor={bottom}>▀</Text>
+          : top ? <Text color={top}>▀</Text> : bottom ? <Text color={bottom}>▄</Text> : ' ')}</Text>
+      ))
+      return (
+        <Box flexDirection="row">
+          <Box flexDirection="column">{pixels}</Box>
+          <Box flexDirection="column" marginLeft={3}>{side}</Box>
+        </Box>
+      )
+    }
     let rows
     if (kind === 'confirm_findings') {
       const species = Array.isArray(body.species) ? (body.species as Record<string, unknown>[]) : []
@@ -472,13 +495,15 @@ export const register: Register = on => {
         Array.isArray(s.lessons) ? s.lessons.flatMap(l => str(l) ?? []) : []
       const notes = species.reduce((n, s) => n + lessonsOf(s).length, 0)
       rows = [
-        <Text>verdicts recorded · {confirmed} confirmed{num(body.minor_confirmed) ? ` · ${body.minor_confirmed} minor` : ''}</Text>,
+        withMascot(<Text>verdicts recorded · {confirmed} confirmed{num(body.minor_confirmed) ? ` · ${body.minor_confirmed} minor` : ''}</Text>),
+        // The catch: what this confirm matched to a species, one line each.
+        ...catchOf(body).map(c => <Text>+{c.count} {c.species.name}</Text>),
         ...species.map(s => (
           <Box flexDirection="column">
             <Text>
-              <Text dimColor>{str(s.finding_id) ?? '?'} →</Text> {str(s.name) ?? str(s.slug) ?? '?'}
+              <Text dimColor>{str(s.finding_id) ?? '?'} →</Text> {speciesOf(s)?.name ?? '?'}
             </Text>
-            {str(s.url) ? <Text dimColor>{'    '}<Link href={str(s.url)!} /></Text> : null}
+            {speciesOf(s) ? <Text dimColor>{'    '}<Link href={speciesOf(s)!.url} /></Text> : null}
             {lessonsOf(s).map(l => <Text dimColor>{'    '}· {l.slice(0, 240)}</Text>)}
           </Box>
         )),
@@ -493,15 +518,16 @@ export const register: Register = on => {
       } else {
         const found = findingsOf(body).sort((a, b) => SEVERITY.indexOf(a.severity) - SEVERITY.indexOf(b.severity))
         rows = [
-          <Text>{str(body.mode) ?? 'fast'} hunt {id} · done · {found.length} finding{found.length === 1 ? '' : 's'}</Text>,
+          withMascot(<Text>{str(body.mode) ?? 'fast'} hunt {id} · done · {found.length} finding{found.length === 1 ? '' : 's'}</Text>),
           ...found.map(f => (
             <Box flexDirection="column">
               <Text>
                 <Text color={COLOR[f.severity]} dimColor={!COLOR[f.severity]}>● {f.severity.padEnd(8)}</Text>
                 {f.id}  {f.title}
+                {/* The finding's bug species, a grey label at the line's end. */}
+                {f.species ? <Text dimColor>  · <Link href={f.species.url} label={f.species.name} /></Text> : null}
               </Text>
               {f.where ? <Text dimColor>{'           '}{f.where}</Text> : null}
-              {f.species ? <Text dimColor>{'           '}bug: <Link href={f.species.url} label={f.species.name} /></Text> : null}
             </Box>
           )),
           found.length === 0 && str(body.summary) ? <Text>{str(body.summary)}</Text> : null,

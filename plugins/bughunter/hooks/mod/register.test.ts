@@ -581,7 +581,9 @@ test('the confirm card shows each species with its page and field notes', async 
   const texts = await confirmCard($, [{ finding_id: 'f_1', slug: 'retry-twice', name: 'Retry twice',
     url: 'https://bugs.test/retry-twice', lessons: ['Make the retry idempotent.', 'Key the write by request id.'] }])
   expect(texts).toContain('Retry twice')
-  expect(texts).toContain('https://bugs.test/retry-twice')
+  expect(texts, 'the page link is built from the slug, not drawn from the server').toContain('https://mcp.ohmybug.ai/bugs/retry-twice')
+  expect(texts).not.toContain('bugs.test')
+  expect(texts).toContain('+1 Retry twice')
   expect(texts).toContain('    · Make the retry idempotent.')
   expect(texts).toContain('2 field notes from other hunters are in the agent\'s context')
 })
@@ -593,6 +595,38 @@ test('a medium-confidence species is drawn like any other, with no "likely" mark
     url: 'https://bugs.test/retry-twice' }])
   expect(texts).toContain('Retry twice')
   expect(texts).not.toMatch(/likely|probably/i)
+})
+
+test('the catch counts each species once per finding, and a bad slug or name never reaches the card', async ($, on) => {
+  mock.store(on)
+  engine(on)
+  const texts = await confirmCard($, [
+    { finding_id: 'f_1', slug: 'retry-twice', name: 'Retry twice' },
+    { finding_id: 'f_2', slug: 'retry-twice', name: 'Retry twice' },
+    { finding_id: 'f_3', slug: 'helpers-tested', name: 'Helpers Tested, Entry Point Untested' },
+    { finding_id: 'f_4', slug: 'odd-name', name: 'Odd\u202Ename' },
+    { finding_id: 'f_5', slug: 'Bad Slug', name: 'Bad slug' },
+    { finding_id: 'f_6', slug: 'evil', name: 'https://evil.test' },
+  ])
+  expect(texts).toContain('+2 Retry twice')
+  expect(texts, 'a catalogue name with a comma is drawn as is').toContain('+1 Helpers Tested, Entry Point Untested')
+  expect(texts, 'a name outside the pattern falls back to the slug').toContain('+1 odd-name')
+  expect(texts).not.toContain('\u202E')
+  expect(texts, 'a slug outside the pattern is no species').not.toContain('Bad slug')
+  expect(texts, 'a URL-shaped name is not drawn').not.toContain('evil.test')
+  expect(texts).toContain('+1 evil')
+})
+
+test('the confirm card draws the server mascot above the catch, and none without the field', async ($, on) => {
+  mock.store(on)
+  engine(on)
+  const mascot = { slug: 'retry-twice', name: 'Retry twice', new: true, caught: 1, total: 120, sprite: { color: '#22e36a', rows: ['.#', '#.'] } }
+  const card = async (rid: string, extra: object) => drawn($, 'ToolResult', { tool_use_id: rid, tool: CONFIRM,
+    output: JSON.stringify({ confirmed: 1, species: [{ finding_id: 'f_1', slug: 'retry-twice', name: 'Retry twice' }], ...extra }), isErrored: false }, rid)
+  const withIt = await card('c2', { mascot })
+  expect(withIt).toContain('Retry twice — new!')
+  expect(withIt.indexOf('Retry twice — new!')).toBeLessThan(withIt.indexOf('+1 Retry twice'))
+  expect(await card('c3', {})).not.toContain('— new!')
 })
 
 test('a species without lessons draws no field-note lines', async ($, on) => {
@@ -721,11 +755,43 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'bughunter', surface, component: 'ToolResult', requestId: 't3',
       props: { tool_use_id: 't3', tool: GET, output: withSpecies, isErrored: false } } as never)
     const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
-    expect(texts).toContain('bug: ')
     expect(texts).toContain('Lost update')
-    expect(texts, 'a species without an https page link was drawn').not.toContain('Not a web page')
+    expect(texts, 'the species rides on the finding line').toMatch(/Refund retried twice on timeout\s+· /)
     const links = await ui.findAll({ type: 'Link' })
-    expect(links.map(l => (l as unknown as { props?: { href?: string } }).props?.href)).toEqual(['https://mcp.ohmybug.ai/bugs/lost-update'])
+    expect(links.map(l => (l as unknown as { props?: { href?: string } }).props?.href),
+      'links are built from the slug; the server URL is never drawn').toEqual(['https://mcp.ohmybug.ai/bugs/lost-update', 'https://mcp.ohmybug.ai/bugs/x'])
+  })
+
+  test(`the mascot is drawn only from the server's field, pixels on the terminal only, on ${surface}`, async ($, on) => {
+    mock.store(on)
+    engine(on)
+    // A hostile `url` rides along: the link must still be the one built from the slug.
+    const mascot = { slug: 'silent-fallback', name: 'Silent Fallback', new: true, caught: 7, total: 120, url: 'javascript:alert(1)',
+      sprite: { color: '#22e36a', rows: ['.##.', '#oo#', '#..#', '.##.'] } }
+    const mount = async (rid: string, m: unknown) => {
+      const ui = await $.ui.mount({ plugin: 'bughunter', surface, component: 'ToolResult', requestId: rid,
+        props: { tool_use_id: rid, tool: GET, output: JSON.stringify({ ...JSON.parse(done), ...(m === undefined ? {} : { mascot: m }) }), isErrored: false } } as never)
+      const hrefs = (await ui.findAll({ type: 'Link' })).map(l => (l as unknown as { props?: { href?: string } }).props?.href)
+      return Object.assign((await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n'), { hrefs })
+    }
+    const drawn = await mount('m1', mascot)
+    expect(drawn.hrefs, 'the mascot link is built from the slug; the server url is never drawn').toEqual(['https://mcp.ohmybug.ai/bugs/silent-fallback'])
+    expect(String(drawn)).not.toContain('javascript')
+    expect(String(await mount('m0', { ...mascot, new: false }))).toContain('in your Bugarium · 7 of 120 caught')
+    expect(String(drawn)).toContain('Silent Fallback — new!')
+    expect(String(drawn)).toContain('new to your Bugarium · 7 of 120 caught')
+    expect(String(drawn).includes('▀') || String(drawn).includes('▄'), 'pixels on the terminal, none elsewhere').toBe(surface === 'terminal')
+    // No field, or any part that does not read, draws no mascot at all: the plugin never picks one itself.
+    for (const [rid, m] of [['m2', undefined], ['m3', { ...mascot, caught: 121 }], ['m4', { ...mascot, new: 'yes' }],
+      ['m5', { ...mascot, slug: 'Silent Fallback' }], ['m6', { ...mascot, sprite: { color: '#22e36a', rows: ['.##', '#o#', '#..'] } }],
+      ['m7', { ...mascot, sprite: { color: 'red', rows: ['.##.', '#oo#'] } }], ['m8', { ...mascot, caught: 1.5 }],
+      ['m9', { ...mascot, sprite: { color: '#22e36a', rows: ['.##.', '#o#'] } }], ['ma', { ...mascot, sprite: { color: '#22e36a', rows: ['.#x.', '#oo#'] } }],
+      ['mb', { ...mascot, sprite: { color: '#22e36a', rows: ['#'.repeat(25), '#'.repeat(25)] } }],
+      ['mc', { ...mascot, sprite: { color: '#22e36a', rows: Array(26).fill('##') } }]] as const) {
+      const t = String(await mount(rid, m))
+      expect(t, `${rid}: no mascot`).not.toContain('Silent Fallback')
+      expect(t, `${rid}: the head line stays`).toContain('fast hunt rev_1 · done · 2 findings')
+    }
   })
 
   test(`an answer the card cannot read is drawn by the engine on ${surface}`, async ($, on) => {
