@@ -5,6 +5,11 @@
 <br clear="left">
 
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/6d7g8J44C7)
+[![#1 on ReviewBench](https://img.shields.io/badge/ReviewBench-%231-0F7B5F)](https://review-bench.ai)
+[![Price: from $4](https://img.shields.io/badge/price-from%20%244-0F7B5F)](https://ohmybug.ai)
+[![Listed on mcp.so](https://img.shields.io/badge/listed%20on-mcp.so-111111)](https://mcp.so/servers/ohmybug)
+
+[![OhMyBug: a cloud bug hunt for your coding agent's changes](https://ohmybug.ai/og.png)](https://ohmybug.ai)
 
 We find the bugs your Claude Code missed. You pay only when your own Claude
 confirms real bugs: $4 per bug-finding review (however many bugs it
@@ -13,6 +18,8 @@ free, first review free.
 
 - **Fast review** · $4 · finds 73% of significant bugs · up to 15 minutes
 - **Deep review** · $12 ($24 on a wide change) · finds 90% of significant bugs · up to 2 hours
+
+See the bug species our hunts keep finding in the [Bugarium](https://mcp.ohmybug.ai/bugs).
 
 ## Install (Claude Code)
 
