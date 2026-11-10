@@ -2,7 +2,8 @@
   "mcpServers": {
     "ohmybug": {
       "type": "http",
-      "url": "https://mcp.ohmybug.ai/mcp"
+      "url": "https://mcp.ohmybug.ai/mcp",
+      "headersHelper": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/mcp-headers.sh\""
     }
   }
 }
