@@ -9,10 +9,11 @@
 // Quiet: a status-line entry while a hunt runs, a toast and one band above the
 // prompt when something happened; a button only where the person must decide (the
 // deep offer, which spends money — #2343). No sound, no turn of its own unless
-// the person sets OHMYBUG_AUTO_RESUME=1. The one line it adds to the system
-// prompt (a read hunt whose verdicts are not sent) the status line shows the
-// person in the same words, unless a hunt that runs or waits to be read holds
-// the status line; the line comes back when that one is read.
+// the person sets OHMYBUG_AUTO_RESUME=1. What it adds to the system prompt: a
+// read hunt whose verdicts are not sent, which the status line shows the person
+// in the same words (unless a hunt that runs or waits to be read holds the
+// status line; the line comes back when that one is read), and a deep hunt the
+// person started from the band's button, which the agent did not submit.
 //
 // The rule every action obeys: a button or an auto-resume acts only on a hunt
 // this mod tracks by review_id, in a state it saw that hunt move into itself.
@@ -52,7 +53,7 @@ type BughunterHunt = {
   /** The session that submitted it: the store is shared by every session of this machine. */
   session?: string
   /** Started (or found) by the person's Run deep hunt press on the offer for `parent`, not by the agent: the agent is
-   *  told about it in the prompt until it reads the result (#3307). */
+   *  told about it in the prompt until it reads the result. */
   pressed?: { parent: string }
 }
 
@@ -172,7 +173,7 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     // input: nothing started, nothing charged. Keep the record as it is.
     // The hunt belongs to the chat that asked for it just now: adopt it, or the
     // chat that was told "already running" would track nothing.
-    // A second escalation is answered with the review's first deep hunt (`already_escalated`, #3318): the same.
+    // A second escalation is answered with the review's first deep hunt (`already_escalated`): the same.
     if (at >= 0 && (body.already_running === true || body.already_escalated === true)) {
       if (list[at]!.session !== sessionId) { list[at] = { ...list[at]!, session: sessionId }; await save($, list); await refreshStatus($) }
       return
@@ -194,7 +195,7 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     const offer = body.deep_offer as Record<string, unknown> | undefined
     if (kind === 'get_findings' && state === 'done' && offer && typeof offer === 'object' && str(offer.pitch)) {
       // A strong offer is the server's recommendation, with its reasons in the pitch; the price is the server's quote.
-      // Its own buttons when the server sends their addresses (#3307); an older server's offer keeps the chat buttons.
+      // Its own buttons when the server sends their addresses; an older server's offer keeps the chat buttons.
       setBand($, { kind: 'deep', id, text: str(offer.pitch)!.slice(0, 280), strong: offer.strength === 'strong', price: num(offer.price_usd),
         start: buttonUrl(offer.start_url, list[at]!.statusUrl), snooze: buttonUrl(offer.snooze_url, list[at]!.statusUrl) })
     }
@@ -324,31 +325,26 @@ async function apply($: Engine, id: string, change: (cur: BughunterHunt) => Part
 }
 
 const httpsUrl = (v: unknown): string | undefined => { const s = str(v); return s && /^https:\/\//.test(s) ? s : undefined }
-/** A button's address, only on the hunt's own server (the status URL's origin), https, with no query or fragment:
- *  anything else keeps the chat buttons, so a press never posts somewhere the hunt does not live. */
-function buttonUrl(v: unknown, statusUrl: string | undefined): string | undefined {
+/** `s` on the same https origin as `base`, with no userinfo, query or fragment (an empty `?` or `#` included), and,
+ *  with `path`, under that path; undefined for anything else. */
+function sameServer(v: unknown, base: string | undefined, path?: string): string | undefined {
   const s = httpsUrl(v)
-  if (!s || !statusUrl) return undefined
+  if (!s || !base || /[?#@]/.test(s)) return undefined
   try {
     const u = new URL(s)
-    return u.origin === new URL(statusUrl).origin && !u.search && !u.hash && u.pathname.startsWith('/deep-offer/') ? s : undefined
+    return u.origin === new URL(base).origin && (!path || u.pathname.startsWith(path)) ? s : undefined
   } catch { return undefined }
 }
+/** A button's address, only under the hunt's own server's offer door: anything else keeps the chat buttons, so a press
+ *  never posts somewhere the hunt does not live. */
+const buttonUrl = (v: unknown, statusUrl: string | undefined) => sameServer(v, statusUrl, '/deep-offer/')
 
-/** One press of an offer button: the server's answer, sorted the one way the table on #3307 allows. Only a 4xx is a
- *  refusal ("not started"); no answer, a 5xx or a 2xx that cannot be read is unknown. */
+/** One press of an offer button, sorted one way. Only the offer door's own refusals say "not started": 400 (an old
+ *  button), 402 (no credit), 403 (the review's key is gone), 404 (the offer is gone), 409 (refused, the chat says why),
+ *  429 (a limit). Anything else, a 408 or 503 a proxy may answer included, no answer within PRESS_WAIT_MS, or a 2xx that
+ *  cannot be read, is unknown: the hunt may have started. */
 type Pressed = { kind: 'ok'; body: Record<string, unknown> } | { kind: 'refused'; status: number } | { kind: 'unknown' }
-async function pressUrl($: Engine, url: string): Promise<Pressed> {
-  let res
-  try { res = await $.http.fetch(url, { method: 'POST', headers: { 'x-ohmybug-press': '1' } }) } catch { return { kind: 'unknown' } }
-  if (res.status >= 400 && res.status < 500) return { kind: 'refused', status: res.status }
-  if (!res.ok) return { kind: 'unknown' }
-  try {
-    const body = JSON.parse(res.text) as unknown
-    return body && typeof body === 'object' ? { kind: 'ok', body: body as Record<string, unknown> } : { kind: 'unknown' }
-  } catch { return { kind: 'unknown' } }
-}
-
+const PRESS_WAIT_MS = 30_000
 const REFUSED: Record<number, string> = {
   400: 'the button is out of date, update the plugin',
   402: 'no credit for a deep hunt',
@@ -357,40 +353,70 @@ const REFUSED: Record<number, string> = {
   409: 'ask in the chat to see why',
   429: 'a limit is reached, try later',
 }
-const refusedWords = (status: number) => REFUSED[status] ?? `the server refused (${status})`
-
-/** Run deep hunt, pressed: the row of #3307's table the answer falls in. A record is added only for a deep hunt this
- *  machine does not track; a tracked one, here or in another session, is never replaced or touched. */
-async function pressStart($: Engine, parent: string, url: string) {
-  const r = await pressUrl($, url)
-  if (r.kind === 'refused') { await $.ui.toast(`OhMyBug: deep hunt not started: ${refusedWords(r.status)}.`); return }
-  const id = r.kind === 'ok' ? str(r.body.review_id) : undefined
-  const statusUrl = r.kind === 'ok' ? httpsUrl(r.body.status_url) : undefined
-  if (!id || !statusUrl) { await $.ui.toast('OhMyBug: no answer from the server: ask in the chat whether the deep hunt started.'); return }
-  const started = r.kind === 'ok' && r.body.started === true
-  // Every await before the snapshot, as observe() takes it.
-  const now = await $.clock.now()
-  const cwd = await $.session.cwd()
-  const held = huntList.find(h => h.id === id)
-  if (held) {
-    await $.ui.toast(`OhMyBug: deep hunt ${id} already exists for ${parent}${ours(held, cwd) ? '' : ', followed in another session'}.`)
-    return
-  }
-  await save($, [...huntList, { id, mode: 'full', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false,
-    nextAt: now + 15_000, pressed: { parent } }])
-  await $.ui.toast(started ? `OhMyBug: deep hunt ${id} started for ${parent}.` : `OhMyBug: deep hunt ${id} already exists for ${parent}.`)
-  await refreshStatus($)
+async function pressUrl($: Engine, url: string): Promise<Pressed> {
+  let res
+  try {
+    const answer = $.http.fetch(url, { method: 'POST', headers: { 'x-ohmybug-press': '1' } })
+    res = await Promise.race([answer, $.clock.sleep(PRESS_WAIT_MS).then(() => undefined)])
+  } catch { return { kind: 'unknown' } }
+  if (!res) return { kind: 'unknown' }
+  if (REFUSED[res.status]) return { kind: 'refused', status: res.status }
+  if (!res.ok) return { kind: 'unknown' }
+  try {
+    const body = JSON.parse(res.text) as unknown
+    return body && typeof body === 'object' ? { kind: 'ok', body: body as Record<string, unknown> } : { kind: 'unknown' }
+  } catch { return { kind: 'unknown' } }
 }
 
-/** Not today, pressed: the server's pause, said as the server answered it. Nothing is stored here. */
+const START_IN_CHAT = (parent: string) => `Yes, run the deep hunt for ${parent}.`
+const SNOOZE_IN_CHAT = 'Not today: do not offer me the deep hunt for the next 24 hours. Call set_policy with snooze {"deep": 24}, and say when it ends.'
+
+/** Run deep hunt, pressed. A refusal is said and nothing changes. An unknown answer falls back to the chat button: a
+ *  second escalation of the same review starts nothing on the server, so asking the agent cannot start a second hunt.
+ *  A deep hunt the server answered with is said first, then tracked: added when this machine does not track it,
+ *  taken over by this chat when another session tracks it (as a submit answered "already running" is), and kept as
+ *  it is when this chat already tracks it. The store is read again first, so a session that started tracking it since
+ *  this one loaded is seen. */
+async function pressStart($: Engine, parent: string, url: string) {
+  const r = await pressUrl($, url)
+  if (r.kind === 'refused') { await $.ui.toast(`OhMyBug: deep hunt not started: ${REFUSED[r.status]}.`); return }
+  const id = r.kind === 'ok' ? str(r.body.review_id) : undefined
+  const statusUrl = r.kind === 'ok' ? sameServer(r.body.status_url, url) : undefined
+  if (!id || !statusUrl) {
+    await $.ui.toast('OhMyBug: no answer from the server: asking in the chat instead.')
+    await $.prompt.submit({ text: START_IN_CHAT(parent) })
+    return
+  }
+  const started = r.kind === 'ok' && r.body.started === true
+  await $.ui.toast(started ? `OhMyBug: deep hunt ${id} started for ${parent}.` : `OhMyBug: deep hunt ${id} already exists for ${parent}.`)
+  try {
+    const now = await $.clock.now()
+    const cwd = await $.session.cwd()
+    const saved = (await $.store.get('hunts')) as BughunterHunt[] | undefined
+    // Every await before the snapshot: the stored list, with this session's own records it may not hold yet.
+    const stored = Array.isArray(saved) ? saved : []
+    const list = [...stored, ...huntList.filter(h => !stored.some(x => x.id === h.id))]
+    const at = list.findIndex(h => h.id === id)
+    if (at >= 0 && ours(list[at]!, cwd)) return
+    if (at >= 0) list[at] = { ...list[at]!, session: sessionId, cwd, pressed: list[at]!.pressed ?? { parent } }
+    else list.push({ id, mode: str(r.body.mode) ?? 'full', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false,
+      nextAt: now + 15_000, pressed: { parent } })
+    await save($, list)
+    await refreshStatus($)
+  } catch {
+    // Said already; a bookkeeping slip must not hide that the hunt exists.
+  }
+}
+
+/** Not today, pressed: the server's pause, said as the server answered it; an unknown answer falls back to the chat. */
 async function pressSnooze($: Engine, url: string) {
   const r = await pressUrl($, url)
-  if (r.kind === 'refused') { await $.ui.toast(`OhMyBug: deep offers not paused: ${refusedWords(r.status)}.`); return }
+  if (r.kind === 'refused') { await $.ui.toast(`OhMyBug: deep offers not paused: ${REFUSED[r.status]}.`); return }
   const until = r.kind === 'ok' ? str(r.body.snoozed_until) : undefined
   const at = until ? new Date(until) : undefined
-  await $.ui.toast(at && !Number.isNaN(at.getTime())
-    ? `OhMyBug: deep offers paused until ${at.toLocaleString()}.`
-    : 'OhMyBug: no answer from the server: the pause may not be saved.')
+  if (at && !Number.isNaN(at.getTime())) { await $.ui.toast(`OhMyBug: deep offers paused until ${at.toLocaleString()}.`); return }
+  await $.ui.toast('OhMyBug: no answer from the server: asking in the chat instead.')
+  await $.prompt.submit({ text: SNOOZE_IN_CHAT })
 }
 
 /** What the agent is told about a deep hunt the person started from the band: it did not call submit_review for it. */
@@ -433,16 +459,16 @@ export const register: Register = on => {
     return ran
   })
 
-  // The one thing the mod tells the agent, and the status line tells the person
-  // the same unless another hunt that runs or waits to be read holds it: a hunt it read whose verdicts it has not sent. Keyed by hunt id,
-  // gone once confirm_findings for that id is seen or the hunt is 6 hours old.
+  // What the mod tells the agent. A hunt it read whose verdicts it has not sent, which the status line tells the person
+  // too unless another hunt that runs or waits to be read holds it: gone once confirm_findings for that id is seen or
+  // the hunt is 6 hours old. And a deep hunt the person started from the band, until the agent reads it.
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
     try {
       const cwd = await $.session.cwd()
       const now = await $.clock.now()
       const lines = [
-        // A deep hunt the person started from the band, until the agent reads it (#3307): the agent did not submit it.
+        // A deep hunt the person started from the band, until the agent reads it: the agent did not submit it.
         ...huntList.filter(h => ours(h, cwd) && h.pressed && !h.seen && now - h.startedAt < STALE_MS).map(pressedNote),
         // Shown to the person or not told to the agent: OHMYBUG_STATUS=0 drops the verdicts line (the press note is not
         // a status-line line: the person pressed, and the agent must know the hunt is not its own).
@@ -502,22 +528,23 @@ export const register: Register = on => {
     let actions: RenderChildren[] = []
     let lead = ''
     if (b.kind === 'deep') {
-      // Pressing Run is the person's consent; Not now sends nothing; Not today asks for a one-day pause.
+      // Pressing Run is the person's consent; Not now sends nothing; Not today pauses the offer for a day. With the
+      // offer's own addresses a press goes to the server; without them (an older server) it is a chat message.
       lead = `Deep hunt ${b.strong ? 'recommended' : 'offered'} for ${b.id}${b.price !== undefined ? ` (${b.price} USD, only if a real bug is confirmed)` : ''}: `
       actions = [
         <Button key="deep-yes" label="Run deep hunt" hotkey="1" variant="primary" onPress={async () => {
           // Closed before the request: a second press cannot happen while the first is in flight.
           close()
           if (b.start) await pressStart($, b.id, b.start)
-          else await $.prompt.submit({ text: `Yes, run the deep hunt for ${b.id}.` })
+          else await $.prompt.submit({ text: START_IN_CHAT(b.id) })
         }} />,
         <Button key="deep-no" label="Not now" hotkey="2" role="dismiss" onPress={close} />,
-        // The person's own word: the offer stays quiet for a day. The agent writes it down (set_policy
-        // snooze), because the server keeps it for every session; asking for a deep hunt still works.
+        // The person's own word: the offer stays quiet for a day, kept by the server for every session (pressed to it
+        // directly, or written by the agent with set_policy on an older server); asking for a deep hunt still works.
         <Button key="deep-snooze" label="Not today" hotkey="3" onPress={async () => {
           close()
           if (b.snooze) await pressSnooze($, b.snooze)
-          else await $.prompt.submit({ text: 'Not today: do not offer me the deep hunt for the next 24 hours. Call set_policy with snooze {"deep": 24}, and say when it ends.' })
+          else await $.prompt.submit({ text: SNOOZE_IN_CHAT })
         }} />,
       ]
     } else if (b.kind === 'gate') {

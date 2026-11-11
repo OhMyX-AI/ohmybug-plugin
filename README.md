@@ -201,8 +201,10 @@ for a team):
 - `OHMYBUG_AUTO_RESUME=1` — when a tracked hunt finishes, fails or asks for
   files and the session is idle, send that hunt's next step instead of showing
   the band. Off by default.
-- `OHMYBUG_STATUS=0` — keep the status line clear; the prompt line goes with
-  it, so the agent is never told what the person cannot see.
+- `OHMYBUG_STATUS=0` — keep the status line clear; the verdicts line in the
+  prompt goes with it, so the agent is never told what the person cannot see.
+  A deep hunt you start from the band's button is still told to the agent:
+  the press is yours, and the agent did not start that hunt.
 
 The VS Code extension has no band above the prompt; there the toast and the
 status line carry it.
