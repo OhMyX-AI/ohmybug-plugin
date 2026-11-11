@@ -647,29 +647,31 @@ test('a press does not bring back a stale stored copy of a hunt this session hol
   expect(hunts($).find(x => x.id === 'rev_1')).toMatchObject({ state: 'done' })
 })
 
-test('a press takes the store\'s copy of another session\'s hunt over this session\'s older copy of it', async ($, on) => {
-  await offered($, on)
+test('a press for a deep hunt another chat tracks and has read leaves it to that chat: this agent owes no verdicts for it', async ($, on) => {
+  const { seen } = await offered($, on)
   const now = hunts($).find(x => x.id === 'rev_1')!.startedAt
-  const theirs = { id: 'rev_deep6', mode: 'full', state: 'running', statusUrl: 'https://status.test/r/rev_deep6/status', cwd: '/other', session: 's9',
-    startedAt: now, seen: false, nextAt: now }
+  const theirs = { id: 'rev_deep6', mode: 'full', state: 'done', statusUrl: 'https://status.test/r/rev_deep6/status', cwd: '/repo', session: 's9',
+    startedAt: now, seen: true, nextAt: now }
   stored.hunts = [...hunts($), theirs]
-  // Loaded here as running; the other session reads it to its end since.
   await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
   await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
-  stored.hunts = hunts($).map(h => h.id === 'rev_deep6' ? { ...h, state: 'done', seen: true } : h)
+  const before = stored.hunts
   postReply = () => started('rev_deep6', false)
   await press($, 'deep-yes')
-  expect(hunts($).find(x => x.id === 'rev_deep6')).toMatchObject({ state: 'done', seen: true, session: 's1' })
+  expect(stored.hunts).toEqual(before)
+  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep6 already running for rev_1, tracked in another chat.')
+  expect(await note($)).not.toContain('rev_deep6')
 })
 
-test('a press does not bring back a stored hunt older than 6 hours', async ($, on) => {
+test('a stored record older than 6 hours does not count as tracked: the press tracks the hunt here', async ($, on) => {
   await offered($, on)
   const now = hunts($).find(x => x.id === 'rev_1')!.startedAt
   stored.hunts = [...hunts($), { id: 'rev_old', mode: 'fast', state: 'running', statusUrl: 'https://status.test/r/rev_old/status', cwd: '/repo',
     session: 's9', startedAt: now - 7 * 3600_000, seen: false, nextAt: now }]
-  postReply = () => started('rev_deep1')
+  postReply = () => started('rev_old', false)
   await press($, 'deep-yes')
-  expect(hunts($).map(h => h.id)).not.toContain('rev_old')
+  // Older than the window: nobody tracks it any more, so this chat does, from the press.
+  expect(hunts($).filter(h => h.id === 'rev_old')).toMatchObject([{ session: 's1', pressed: { parent: 'rev_1' }, startedAt: now }])
 })
 
 test('the press note is told to the agent with the status line off too', async ($, on) => {
@@ -704,17 +706,18 @@ test('started:false for a deep hunt this session tracks keeps the record exactly
   expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep1 already exists for rev_1.')
 })
 
-test('started:false for a deep hunt another session began tracking after this one loaded: seen in the store, taken over by this chat, nothing else of it changed', async ($, on) => {
+test('started:false for a deep hunt another session began tracking after this one loaded: seen in the store, said tracked in another chat, and left untouched', async ($, on) => {
   const { seen } = await offered($, on)
   const theirs = { id: 'rev_deep2', mode: 'full', state: 'running', statusUrl: 'https://status.test/r/rev_deep2/status', cwd: '/other', session: 's9',
-    startedAt: 1, seen: false, nextAt: 1 }
+    startedAt: hunts($).find(x => x.id === 'rev_1')!.startedAt, seen: false, nextAt: 1 }
   // Another session's record, written to the shared store while this one runs: no reload here.
-  stored.hunts = [...hunts($), theirs]
+  const before = [...hunts($), theirs]
+  stored.hunts = before
   postReply = () => started('rev_deep2', false)
   await press($, 'deep-yes')
-  expect(hunts($).filter(x => x.id === 'rev_deep2')).toEqual([{ ...theirs, session: 's1', cwd: '/repo', pressed: { parent: 'rev_1' } }])
-  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep2 already exists for rev_1.')
-  expect(await note($)).toContain('rev_deep2 from the offer button')
+  expect(stored.hunts).toEqual(before)
+  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep2 already running for rev_1, tracked in another chat.')
+  expect(await note($)).not.toContain('rev_deep2')
 })
 
 test('started:false for the deep hunt the agent itself started here keeps its record: not marked pressed, so the agent is not told it is someone else\'s', async ($, on) => {

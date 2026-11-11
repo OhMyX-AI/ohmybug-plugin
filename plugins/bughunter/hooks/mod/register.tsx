@@ -373,38 +373,39 @@ const SNOOZE_IN_CHAT = 'Not today: do not offer me the deep hunt for the next 24
 
 /** Run deep hunt, pressed. A refusal is said and nothing changes. An unknown answer falls back to the chat button: a
  *  second escalation of the same review starts nothing on the server, so asking the agent cannot start a second hunt.
- *  A deep hunt the server answered with is said first, then tracked: added when this machine does not track it,
- *  taken over by this chat when another session tracks it (as a submit answered "already running" is), and kept as
- *  it is when this chat already tracks it. The store is read again first, so a session that started tracking it since
- *  this one loaded is seen; for records of this session its own copy wins. */
+ *  A deep hunt the server answered with is looked up, said, then tracked only when no chat tracks it yet: kept as it
+ *  is when this chat tracks it, and left untouched when another chat does (said so). Moving a record between chats is
+ *  not safe while every session saves its whole list. The store is read again first, so a session that started
+ *  tracking it since this one loaded is seen. */
 async function pressStart($: Engine, parent: string, url: string) {
   const r = await pressUrl($, url)
   if (r.kind === 'refused') { await $.ui.toast(`OhMyBug: deep hunt not started: ${REFUSED[r.status]}.`); return }
   const id = r.kind === 'ok' ? str(r.body.review_id) : undefined
   const statusUrl = r.kind === 'ok' ? sameServer(r.body.status_url, url) : undefined
-  if (!id || !statusUrl) {
+  if (r.kind !== 'ok' || !id || !statusUrl) {
     await $.ui.toast('OhMyBug: no answer from the server: asking in the chat instead.')
     await $.prompt.submit({ text: START_IN_CHAT(parent) })
     return
   }
-  const started = r.kind === 'ok' && r.body.started === true
-  await $.ui.toast(started ? `OhMyBug: deep hunt ${id} started for ${parent}.` : `OhMyBug: deep hunt ${id} already exists for ${parent}.`)
+  let held: BughunterHunt[] = []
+  let cwd = ''
+  try {
+    cwd = await $.session.cwd()
+    const now = await $.clock.now()
+    const saved = (await $.store.get('hunts')) as BughunterHunt[] | undefined
+    const stored = Array.isArray(saved) ? saved.filter(h => now - h.startedAt < STALE_MS) : []
+    held = [...huntList, ...stored].filter(h => h.id === id)
+  } catch {
+    // Unread: tracked here as new; the toast still says the hunt exists.
+  }
+  const elsewhere = held.length > 0 && !held.some(h => ours(h, cwd))
+  await $.ui.toast(elsewhere ? `OhMyBug: deep hunt ${id} already running for ${parent}, tracked in another chat.`
+    : r.body.started === true ? `OhMyBug: deep hunt ${id} started for ${parent}.` : `OhMyBug: deep hunt ${id} already exists for ${parent}.`)
+  if (held.length) return
   try {
     const now = await $.clock.now()
-    const cwd = await $.session.cwd()
-    const saved = (await $.store.get('hunts')) as BughunterHunt[] | undefined
-    // Every await before the snapshot. huntList holds every session's hunts as loaded: only this session's own records
-    // win over the store (which may hold another session's older copy of them); for the rest the store is newer.
-    // The store pruned as session.start prunes.
-    const mine = huntList.filter(h => h.session === sessionId)
-    const stored = Array.isArray(saved) ? saved.filter(h => now - h.startedAt < STALE_MS) : []
-    const list = [...mine, ...stored.filter(x => !mine.some(h => h.id === x.id))]
-    const at = list.findIndex(h => h.id === id)
-    if (at >= 0 && ours(list[at]!, cwd)) return
-    if (at >= 0) list[at] = { ...list[at]!, session: sessionId, cwd, pressed: list[at]!.pressed ?? { parent } }
-    else list.push({ id, mode: str(r.body.mode) ?? 'full', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false,
-      nextAt: now + 15_000, pressed: { parent } })
-    await save($, list)
+    await save($, [...huntList, { id, mode: str(r.body.mode) ?? 'full', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now,
+      seen: false, nextAt: now + 15_000, pressed: { parent } }])
     await refreshStatus($)
   } catch {
     // Said already; a bookkeeping slip must not hide that the hunt exists.
