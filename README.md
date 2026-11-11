@@ -181,7 +181,7 @@ what happened.
 | Merge gate, secret scan, hunt records | yes | yes | yes |
 | Hunt status in the status line, a toast when a hunt finishes or asks for files | yes | — | — |
 | Band above the prompt when a tracked hunt finishes, fails or asks for files: the news only, no button; it goes once the agent reads the hunt or the next turn starts | yes | — | — |
-| Deep-hunt offer (the `deep_offer` of a tracked hunt's `get_findings`) as **Run deep hunt** — pressing it is your consent — **Not now**, which sends nothing, and **Not today**, which asks the agent to pause the offer for 24 hours | yes | — | — |
+| Deep-hunt offer (the `deep_offer` of a tracked hunt's `get_findings`) as **Run deep hunt** — pressing it is your consent, sent straight to the OhMyBug server, which starts the deep hunt; the mod tracks it and tells the agent it runs — **Not now**, which sends nothing, and **Not today**, which saves a 24-hour pause of the offer on the server. On an older server whose offer has no button addresses, the two buttons ask the agent instead | yes | — | — |
 | A merge the gate refused: the gate's own words in the band, no button; it goes when the next turn starts | yes | — | — |
 | Findings drawn as a card (`show the raw answer` keeps the original) | yes | — | — |
 | `/hunts` pane | yes | — | — |
@@ -202,7 +202,9 @@ for a team):
   files and the session is idle, send that hunt's next step instead of showing
   the band. Off by default.
 - `OHMYBUG_STATUS=0` — keep the status line clear; the prompt line goes with
-  it, so the agent is never told what the person cannot see.
+  it, so the agent is never told what the person cannot see. One line stays:
+  a deep hunt you started with **Run deep hunt** is told to the agent, so it
+  does not start another.
 
 The VS Code extension has no band above the prompt; there the toast and the
 status line carry it.

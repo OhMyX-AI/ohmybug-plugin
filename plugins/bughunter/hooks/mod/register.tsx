@@ -78,8 +78,9 @@ let sessionId = ''
 let heldId: string | undefined
 const ours = (h: BughunterHunt, cwd: string) => h.cwd === cwd && !!sessionId && h.session === sessionId
 const rawOpen = new Set<string>()
-/** Deep hunts the person's press started (or found running): told to the agent until it reads the child. */
-let deepNotes: { parent: string; child: string; started: boolean; at: number }[] = []
+/** Deep hunts the person's press started (or found running), each for the session that pressed: told to that
+ *  session's agent until it reads the child to its end (done or failed), or for 6 hours. */
+let deepNotes: { parent: string; child: string; started: boolean; at: number; session: string }[] = []
 
 function setHunts($: Engine, list: BughunterHunt[]) { huntList = list; $.ui.invalidate('ui.render') }
 function setBand($: Engine, b: BughunterBand) { bandNow = b; $.ui.invalidate('ui.render') }
@@ -109,14 +110,22 @@ const NOT_STARTED: Record<number, string> = {
   409: 'it cannot start from the button; ask for it in the chat',
   429: 'the account is at its limit of hunts right now; try again later',
 }
-/** POST one of the offer's buttons: the parsed answer, or the status it failed with (0: no answer at all). */
-async function pressUrl($: Engine, url: string): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; status: number }> {
+const NOT_SAVED: Record<number, string> = {
+  403: 'the key that ran this hunt is revoked',
+  404: 'the offer has expired',
+  429: 'too many presses; try again in a minute',
+}
+/** A start whose answer did not come back whole: the server may have started it, so nothing is said as fact. */
+const START_UNKNOWN = 'OhMyBug: no clear answer from the server, so the deep hunt may have started. Ask in the chat to check before starting another.'
+/** POST one of the offer's buttons: its status (0: no answer at all) and, on a 2xx, the body when it is a JSON object. */
+async function pressUrl($: Engine, url: string): Promise<{ ok: boolean; status: number; body?: Record<string, unknown> }> {
+  let res
+  try { res = await $.http.fetch(url, { method: 'POST' }) } catch { return { ok: false, status: 0 } }
+  if (!res.ok) return { ok: false, status: res.status }
   try {
-    const res = await $.http.fetch(url, { method: 'POST' })
-    if (!res.ok) return { ok: false, status: res.status }
     const body = JSON.parse(res.text) as unknown
-    return body && typeof body === 'object' ? { ok: true, body: body as Record<string, unknown> } : { ok: false, status: 0 }
-  } catch { return { ok: false, status: 0 } }
+    return { ok: true, status: res.status, body: body && typeof body === 'object' ? body as Record<string, unknown> : undefined }
+  } catch { return { ok: true, status: res.status } }
 }
 
 /** Run deep hunt, pressed on an offer that carries its start URL: the press is the person's consent and goes to
@@ -124,19 +133,24 @@ async function pressUrl($: Engine, url: string): Promise<{ ok: true; body: Recor
  *  already running for that offer) is tracked like a submitted one, and the agent is told it exists. */
 async function startDeep($: Engine, parent: string, url: string) {
   const r = await pressUrl($, url)
-  const child = r.ok ? str(r.body.review_id) : undefined
-  const home = huntList.find(h => h.id === parent)
-  const statusUrl = r.ok && child && REVIEW_ID.test(child) ? sameServer(r.body.status_url, home?.statusUrl, /^\/r\/rev_[A-Za-z0-9]{1,64}\/status$/) : undefined
-  if (!r.ok || !child || !REVIEW_ID.test(child) || !statusUrl) {
-    await $.ui.toast(`OhMyBug: the deep hunt did not start: ${(!r.ok && NOT_STARTED[r.status]) || 'the server did not answer as expected; ask for it in the chat'}.`)
+  if (!r.ok) {
+    await $.ui.toast(r.status === 0 ? START_UNKNOWN : `OhMyBug: the deep hunt did not start: ${NOT_STARTED[r.status] ?? 'the server refused it; ask for it in the chat'}.`)
     return
   }
-  const started = r.body.started === true
+  const child = str(r.body?.review_id)
+  if (!child || !REVIEW_ID.test(child)) { await $.ui.toast(START_UNKNOWN); return }
+  // A 2xx with an id: the hunt exists. What follows only decides whether this mod can watch it too.
+  const started = r.body!.started === true
+  const statusUrl = sameServer(r.body!.status_url, huntList.find(h => h.id === parent)?.statusUrl, new RegExp(`^/r/${child}/status$`))
   const now = await $.clock.now()
   const cwd = await $.session.cwd()
-  const list = huntList.filter(h => h.id !== child)
-  list.push({ id: child, mode: 'deep', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false, nextAt: now + 60_000 })
-  deepNotes = [...deepNotes.filter(n => n.child !== child), { parent, child, started, at: now }]
+  const list = [...huntList]
+  const at = list.findIndex(h => h.id === child)
+  // Already tracked (an earlier press, or the agent's own submit): kept as it is, as a submit answered
+  // already_running keeps it, so a hunt read or judged here is not asked for again.
+  if (at >= 0) { if (list[at]!.session !== sessionId) list[at] = { ...list[at]!, session: sessionId } }
+  else if (statusUrl) list.push({ id: child, mode: 'deep', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false, nextAt: now + 60_000 })
+  deepNotes = [...deepNotes.filter(n => n.child !== child), { parent, child, started, at: now, session: sessionId }]
   await save($, list)
   await refreshStatus($)
   await $.ui.toast(`OhMyBug: ${started ? 'the deep hunt started' : 'the deep hunt is already running'}: ${child}.`)
@@ -146,7 +160,7 @@ async function startDeep($: Engine, parent: string, url: string) {
 async function snoozeDeep($: Engine, url: string) {
   const r = await pressUrl($, url)
   await $.ui.toast(r.ok ? 'OhMyBug: no deep hunt offers for the next 24 hours. Asking for one still works.'
-    : `OhMyBug: the pause was not saved: ${NOT_STARTED[r.status] ?? 'the server did not answer as expected'}.`)
+    : `OhMyBug: the pause was not saved: ${NOT_SAVED[r.status] ?? 'the server did not take it; ask for the pause in the chat'}.`)
 }
 
 const isOpen = (h: BughunterHunt) => h.state === 'running' || h.state === 'needs_files'
@@ -247,8 +261,9 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
       findings: state === 'done' ? findingsOf(body).length : list[at]!.findings }
     if (bandNow?.kind === 'hunt' && bandNow.id === id) setBand($, null)
     if (heldId === id) heldId = undefined
-    // The agent read the deep hunt a press started: nothing more to tell it.
-    if (deepNotes.some(n => n.child === id)) deepNotes = deepNotes.filter(n => n.child !== id)
+    // The agent read the deep hunt a press started to its end: nothing more to tell it. A read while it runs
+    // keeps the note: the agent must still not submit another.
+    if (terminal) deepNotes = deepNotes.filter(n => n.child !== id)
     // The deep offer comes in the answer for this tracked hunt, and only there.
     const offer = body.deep_offer as Record<string, unknown> | undefined
     if (kind === 'get_findings' && state === 'done' && offer && typeof offer === 'object' && str(offer.pitch)) {
@@ -429,8 +444,9 @@ export const register: Register = on => {
     try {
       const now = await $.clock.now()
       deepNotes = deepNotes.filter(n => now - n.at < STALE_MS)
-      if (deepNotes.length) {
-        const text = deepNotes.map(n => `The person pressed "Run deep hunt" for OhMyBug hunt ${n.parent}; the server ${n.started ? 'started' : 'already runs'} deep hunt ${n.child} for it. Do not call submit_review for it. Read it with get_findings (review_id ${n.child}) when it is done.`).join('\n')
+      const mine = deepNotes.filter(n => !!sessionId && n.session === sessionId)
+      if (mine.length) {
+        const text = mine.map(n => `The person pressed "Run deep hunt" for OhMyBug hunt ${n.parent}; the server ${n.started ? 'started' : 'already runs'} deep hunt ${n.child} for it. Do not call submit_review for it. Read it with get_findings (review_id ${n.child}).`).join('\n')
         composed = { sections: [...composed.sections, { id: 'bughunter:deep-started', text, scope: 'session' as const }] }
       }
     } catch {
@@ -505,8 +521,8 @@ export const register: Register = on => {
           else await $.prompt.submit({ text: `Yes, run the deep hunt for ${b.id}.` })
         }} />,
         <Button key="deep-no" label="Not now" hotkey="2" role="dismiss" onPress={close} />,
-        // The person's own word: the offer stays quiet for a day. The agent writes it down (set_policy
-        // snooze), because the server keeps it for every session; asking for a deep hunt still works.
+        // The person's own word: the offer stays quiet for a day, kept on the server for every session. Saved by
+        // the snooze URL when the offer has one; else the agent writes it (set_policy snooze). Asking still works.
         <Button key="deep-snooze" label="Not today" hotkey="3" onPress={async () => {
           close()
           if (b.snoozeUrl) await snoozeDeep($, b.snoozeUrl)
