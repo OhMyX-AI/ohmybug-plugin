@@ -33,6 +33,14 @@ export function bodyOf(output: unknown): Body | undefined {
 }
 
 export const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
+/** A hunt's label: a deep (full) stage first, then the stage-one mode the server echoes as hunt_mode (cheap,
+ * ultrafast, fast), then a fast stage, else `otherwise`; a value outside those lists is never drawn. */
+export const huntLabel = (body: Record<string, unknown>, otherwise: string): string => {
+  const stage = str(body.mode), mode = str(body.hunt_mode)
+  if (stage === 'full') return stage
+  if (mode === 'cheap' || mode === 'ultrafast' || mode === 'fast') return mode
+  return stage === 'fast' ? stage : otherwise
+}
 export const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
 /** A bug species as the card draws it: the page link is built here from the slug — no URL from the server
