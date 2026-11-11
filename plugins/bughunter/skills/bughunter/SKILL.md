@@ -468,7 +468,7 @@ This works in two cases, checked server-side in this order:
   to the monitor step. The mode is `fast` – stage one – unless this submit
   carried `deep: true` on the user's word (§3b): then it is `deep`, and the
   watcher is the deep one. A stage-one answer's `hunt_mode` (`cheap` or
-  `ultrafast`, §3a) names the watcher's mode instead of `fast`. Readable repo access means the reviewers fetch the
+  `ultrafast`, see "Hunt modes") names the watcher's mode instead of `fast`. Readable repo access means the reviewers fetch the
   files they need themselves instead of asking you.
 - Error `diff_required` (private repo without the App) → this is rung 2 above:
   offer the one-click App install FIRST and retry, because it removes the payload
@@ -543,11 +543,15 @@ d = sys.argv[1]
 files = []  # [dict(path=p, content=open(p).read()) for p in <your context list>]
 json.dump(dict(diff=open(d + '/diff.patch').read(), files=files), open(d + '/payload.json', 'w'))
 PY
-curl -fsS -X POST -H 'content-type: application/json' --data-binary @"$d/payload.json" '<upload_url>')
+curl -sS --fail-with-body -X POST -H 'content-type: application/json' --data-binary @"$d/payload.json" '<upload_url>')
 ```
 
 3. The review starts on upload – arm the background monitor on `status_url`
-   as usual. When the server can read the repo, context files are mostly
+   as usual. For a cheap or ultrafast hunt the upload can answer 409 with
+   `{error, code}` (`mode_needs_repo`, `mode_too_large`): nothing started, the
+   upload address stays open. Show `error` verbatim and offer what it says (a
+   snapshot or a smaller diff to the same address, or a new submit with
+   `mode: "fast"`) with one yes/no question. When the server can read the repo, context files are mostly
    redundant (reviewers fetch what they need themselves) – diff + meta is
    enough.
 
@@ -915,7 +919,7 @@ Do not stall: if the user is away and the files pass the exclusion rules,
 send them – the manifest keeps it auditable. If nothing can be sent, call
 `provide_files` with an empty list so the review proceeds without waiting.
 
-### 3a. Hunt modes: cheap, ultrafast, fast
+### Hunt modes: cheap, ultrafast, fast
 
 The first stage runs in one of three modes. Each bills only when the user's
 verdicts confirm a real bug, and the server's figures win over these:

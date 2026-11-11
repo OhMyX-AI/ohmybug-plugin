@@ -17,8 +17,8 @@ local review agent as a substitute, never start fast and deep in parallel, and
 never call an `APPROVE` valid until `review_report` and `get_attestation` exist.
 
 If the user passed arguments, treat them as scope instructions (e.g. a
-narrower path or branch) – except a mode (below) and `deep` / `--deep`: that is the user asking
-for the deep hunt up front. Then the first and only `submit_review` carries
+narrower path or branch) – except a hunt mode (see below) and `deep` /
+`--deep`. `deep` / `--deep` is the user asking for the deep hunt up front. Then the first and only `submit_review` carries
 `deep: true` with `meta.repo` + `meta.ref` (the pushed head sha) +
 `meta.base_branch` and no payload – no fast stage first, no second question.
 If the server refuses (`repo_required`, `repo_too_big`, `commit_required`,
@@ -31,4 +31,4 @@ and the user agrees.
 `cheap`, `ultrafast` and `fast` (bare or as `--mode <m>`) pick the hunt mode:
 send it as `submit_review`'s `mode`, following the skill's "Hunt modes"
 section; without one, send no `mode` and the user's default runs. A mode does
-not go with `deep`.
+not go with `deep`: when the user names both, ask which one they want.

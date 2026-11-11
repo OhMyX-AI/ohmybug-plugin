@@ -428,7 +428,7 @@ async function pressStart($: Engine, parent: string, url: string) {
     const cwd = await $.session.cwd()
     const now = await $.clock.now()
     await put($, id, cur => !cur
-      ? { id, mode: str(r.body.mode) ?? 'full', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false,
+      ? { id, mode: huntLabel(r.body, 'full'), state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false,
           nextAt: now + 15_000, pressed: { parent } }
       : ours(cur, cwd) ? undefined : { ...adopt(cur, cwd), pressed: { parent } })
     await refreshStatus($)
