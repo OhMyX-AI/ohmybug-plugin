@@ -49,7 +49,7 @@ session_text = session["hookSpecificOutput"]["additionalContext"]
 # timed_out:true — and that answer is the wake's reading, not a reason to loop:
 # a wake that loops holds the thread when the next one fires, measured as a
 # client polling once a minute against a four-minute contract.
-for phrase in ("submit_review", "wait_review", "automation_update", "destination=thread", "four-minute heartbeat", "The automation is the cadence and a wake is one read", "make ONE read and end", "timed_out:true", "never loop either call inside the wake", "stop on done, failed or needs_files", "answer needs_files first", "review_report", "get_attestation", "never run fast and deep in parallel"):
+for phrase in ("submit_review", "wait_review", "automation_update", "destination=thread", "heartbeat at the response's monitor.interval_s", "The automation is the cadence and a wake is one read", "make ONE read and end", "timed_out:true", "never loop either call inside the wake", "stop on done, failed or needs_files", "answer needs_files first", "review_report", "get_attestation", "never run fast and deep in parallel"):
     assert phrase in session_text, phrase
 assert "local code-review" in session_text
 # The proof and its hand-off are two steps, and a Codex session has no hook
@@ -815,9 +815,36 @@ for phrase in ("**Deep first, only on the user's word.**",
                "the compact line reads `bughunt · deep · running`"):
     assert phrase in skill, phrase
 assert "unless the user asked for\nthe deep hunt outright" in skill
-assert "mode=fast # deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)" in monitor_code
+assert "mode=fast # REPLACE with the submit answer's hunt_mode (cheap, ultrafast or fast) when it has one; deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)" in monitor_code
+stats = open(str(Path(router).parent.parent / "commands/stats.md"), encoding="utf-8").read()
+# Hunt modes: the user's word picks one, none sent otherwise; refusals verbatim; never with deep.
+for phrase in ("### Hunt modes: cheap, ultrafast, fast", "send it as `submit_review`'s top-level\n  `mode`", "Otherwise send no `mode`",
+               "`get_balance` `modes` lists for the key", "`mode_unavailable`", "`mode_needs_repo`", "`mode_too_large`",
+               "`mode_with_deep`", "never\n  switch modes silently", "Never send `mode` with `deep`", "`bughunt · cheap · running`"):
+    assert phrase in skill, phrase
+# The upload prints the refusal's body and code on any curl (no -f, no 7.76-only flag).
+assert "curl -sS -w '\\nHTTP %{http_code}\\n' -X POST" in skill and "--fail-with-body" not in skill
+assert "once the last line reads `HTTP 200`" in skill and "ask which one they want" in skill
+review_cmd = open(str(Path(router).parent.parent / "commands/review.md"), encoding="utf-8").read()
+assert "send it as `submit_review`'s `mode`" in review_cmd and "A mode does\nnot go with `deep`:" in review_cmd
+assert "the first stage, in the mode the user named (else fast)" in review_cmd and "default" not in review_cmd and "`cheap`, `ultrafast` and `fast`" in review_cmd
+assert "`deep` / `--deep` is the user asking for the deep hunt up front" in review_cmd and "ask which one they want" in review_cmd
+# The Codex sentence is what Codex sessions get: pinned in the emitted text, and mode asks are routed.
+for phrase in ("goes as submit_review's top-level mode; with none named send no mode", "never mode: fast",
+               "(mode_unavailable, mode_needs_repo, mode_too_large, mode_with_deep)", "never a silent switch", "Never send mode with deep",
+               "The heartbeat's <mode> is the submit answer's hunt_mode", "with none named send no mode, and the hunt is fast"):
+    assert phrase in router_text, phrase
+# Slice 1 has no default mode and no typical minutes: nothing may promise them.
+for text in (skill, router_text, stats):
+    assert "default_mode" not in text and "minutes_typical" not in text and "my default" not in text
+for prompt in ("run a cheap hunt on my code", "an ultrafast hunt of this branch, please"):
+    assert "Route this request now" in run("prompt", {"prompt": prompt})["hookSpecificOutput"]["additionalContext"], prompt
+# A mode word next to another noun is no hunt ask: none of these is routed.
+for prompt in ("find me a cheap flight", "add a cheap mode to the renderer", "do a cheap pass over the docs", "an ultrafast scan of the image cache"):
+    assert run("prompt", {"prompt": prompt}) == {}, prompt
+assert "the hunt modes from `modes`" in stats and "no `modes`" in stats
 command = open(str(Path(router).parent.parent / "commands/review.md"), encoding="utf-8").read()
-for phrase in ("except `deep` / `--deep`", "carries\n`deep: true`", "no fast stage first, no second question", "show its answer verbatim and offer the\nfast hunt instead; never downgrade silently"):
+for phrase in ("except a hunt mode (see below) and `deep` /\n`--deep`", "carries\n`deep: true`", "no fast stage first, no second question", "show its answer verbatim and offer the\nfast hunt instead; never downgrade silently"):
     assert phrase in command, phrase
 
 assert run("prompt", {"prompt": "Fix the typo in the README"}) == {}

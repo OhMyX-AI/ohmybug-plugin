@@ -16,8 +16,12 @@ confirms real bugs: $4 per bug-finding review (however many bugs it
 holds), $12 for a deep hunt you choose ($24 on a wide change), minor findings
 free, first review free.
 
+- **Cheap review** · $1, where the service runs it
+- **Ultrafast review** · $2, where the service runs it
 - **Fast review** · $4 · finds 73% of significant bugs · up to 15 minutes
 - **Deep review** · $12 ($24 on a wide change) · finds 90% of significant bugs · up to 2 hours
+
+Pick a mode for one hunt with `/bughunter:review cheap` (or `ultrafast`, `fast`); without one the hunt is fast. Cheap and ultrafast read the repository, so they need a pushed GitHub commit the service can read, and ultrafast a diff under 1 MB. `/bughunter:stats` lists the modes the service runs for your key.
 
 See the bug species our hunts keep finding in the [Bugarium](https://mcp.ohmybug.ai/bugs).
 
@@ -155,7 +159,7 @@ repository per week, and is not a merge gate.
 - Your own agent verifies each finding against your codebase and reports
   REAL / NOT_REAL / UNCLEAR. You see and approve the verdicts.
 - Billing: one flat price per review with confirmed real bugs — one or ten,
-  same price: $4 fast, $12 deep, $24 deep on a wide change (11+ folder chunks). Minor findings, review runs, false positives, unclear — $0.
+  same price: $1 cheap, $2 ultrafast, $4 fast, $12 deep, $24 deep on a wide change (11+ folder chunks). Minor findings, review runs, false positives, unclear — $0.
 - `/bughunter:stats` shows your record: bugs found, reviews run, balance.
 - Before a diff or file contents leave your machine (`submit_review`,
   `provide_files`), a secret scan refuses a payload that carries a credential
@@ -228,11 +232,11 @@ Turn the mod off with
 
 | Tool | In | Out |
 |---|---|---|
-| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}` | `{review_id, status, mode, pending_verdicts[]}` |
+| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}`, `mode?` (`cheap`, `ultrafast` or `fast`; absent: fast) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}` |
 | `get_findings` | `review_id` | `{status: running\|needs_files\|done\|failed, findings[{finding_id, severity, file, line?, title, failure_scenario, suggested_fix?}]}` |
 | `provide_files` | `review_id`, `paths[]` (Claude Code: the plugin's hook reads them from disk) or `files[{path, content}]` | `{status, delivered}` |
 | `confirm_findings` | `review_id`, `verdicts[{finding_id, verdict: REAL\|NOT_REAL\|UNCLEAR, reason}]` | `{confirmed, minor_confirmed, billed_usd, free_review_used, balance_usd, receipt_id}` |
-| `get_balance` | — | `{balance_usd, free_reviews_left, confirmed_total, stats{…}}` |
+| `get_balance` | — | `{balance_usd, free_reviews_left, confirmed_total, stats{…}, modes[{mode, price_usd}]}` |
 
-Errors: `payment_required` (top up), `pending_verdicts` (resolve previous
+Errors: `mode_unavailable`, `mode_needs_repo`, `mode_too_large`, `mode_with_deep` (the mode cannot run; nothing started or charged), `payment_required` (top up), `pending_verdicts` (resolve previous
 review's verdicts first).
