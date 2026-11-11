@@ -821,6 +821,9 @@ for phrase in ("### Hunt modes: cheap, ultrafast, fast", "send it as `submit_rev
                "`set_policy` with `default_mode: \"<mode>\"`", "`mode_unavailable`", "`mode_needs_repo`", "`mode_too_large`",
                "`mode_with_deep`", "never\n  switch modes silently", "Never send `mode` with `deep`", "`bughunt · cheap · running`"):
     assert phrase in skill, phrase
+# The upload prints the refusal's body and code on any curl (no -f, no 7.76-only flag).
+assert "curl -sS -w '\\nHTTP %{http_code}\\n' -X POST" in skill and "--fail-with-body" not in skill
+assert "once the last line reads `HTTP 200`" in skill and "ask which one they want" in skill
 review_cmd = open(str(Path(router).parent.parent / "commands/review.md"), encoding="utf-8").read()
 assert "send it as `submit_review`'s `mode`" in review_cmd and "A mode does\nnot go with `deep`:" in review_cmd
 assert "the first stage, in the user's\ndefault mode" in review_cmd and "`cheap`, `ultrafast` and `fast`" in review_cmd

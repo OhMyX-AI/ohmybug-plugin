@@ -543,11 +543,12 @@ d = sys.argv[1]
 files = []  # [dict(path=p, content=open(p).read()) for p in <your context list>]
 json.dump(dict(diff=open(d + '/diff.patch').read(), files=files), open(d + '/payload.json', 'w'))
 PY
-curl -sS --fail-with-body -X POST -H 'content-type: application/json' --data-binary @"$d/payload.json" '<upload_url>')
+curl -sS -w '\nHTTP %{http_code}\n' -X POST -H 'content-type: application/json' --data-binary @"$d/payload.json" '<upload_url>')
 ```
 
 3. The review starts on upload – arm the background monitor on `status_url`
-   as usual. For a cheap or ultrafast hunt the upload can answer 409 with
+   as usual once the last line reads `HTTP 200`; any other code is a refusal,
+   and the body above it says why. For a cheap or ultrafast hunt the upload can answer 409 with
    `{error, code}` (`mode_needs_repo`, `mode_too_large`): nothing started, the
    upload address stays open. Show `error` verbatim and offer what it says (a
    snapshot or a smaller diff to the same address, or a new submit with
@@ -957,7 +958,8 @@ verdicts confirm a real bug, and the server's figures win over these:
   to send instead (usually `mode: "fast"`) with ONE yes/no question – never
   switch modes silently.
 - **Deep is not a mode.** Never send `mode` with `deep`; a default mode never
-  applies to a deep hunt. The deep offer after any mode is the same.
+  applies to a deep hunt. The deep offer after any mode is the same. When the
+  user names both a mode and the deep hunt, ask which one they want.
 - **"Fast" elsewhere in this skill is the stage.** "The fast hunt", "a review
   starts fast" and "offer the fast hunt" mean stage one (not deep), in the
   mode the user named or none: never `mode: "fast"` on your own.
