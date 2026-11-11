@@ -647,6 +647,31 @@ test('a press does not bring back a stale stored copy of a hunt this session hol
   expect(hunts($).find(x => x.id === 'rev_1')).toMatchObject({ state: 'done' })
 })
 
+test('a press takes the store\'s copy of another session\'s hunt over this session\'s older copy of it', async ($, on) => {
+  await offered($, on)
+  const now = hunts($).find(x => x.id === 'rev_1')!.startedAt
+  const theirs = { id: 'rev_deep6', mode: 'full', state: 'running', statusUrl: 'https://status.test/r/rev_deep6/status', cwd: '/other', session: 's9',
+    startedAt: now, seen: false, nextAt: now }
+  stored.hunts = [...hunts($), theirs]
+  // Loaded here as running; the other session reads it to its end since.
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  stored.hunts = hunts($).map(h => h.id === 'rev_deep6' ? { ...h, state: 'done', seen: true } : h)
+  postReply = () => started('rev_deep6', false)
+  await press($, 'deep-yes')
+  expect(hunts($).find(x => x.id === 'rev_deep6')).toMatchObject({ state: 'done', seen: true, session: 's1' })
+})
+
+test('a press does not bring back a stored hunt older than 6 hours', async ($, on) => {
+  await offered($, on)
+  const now = hunts($).find(x => x.id === 'rev_1')!.startedAt
+  stored.hunts = [...hunts($), { id: 'rev_old', mode: 'fast', state: 'running', statusUrl: 'https://status.test/r/rev_old/status', cwd: '/repo',
+    session: 's9', startedAt: now - 7 * 3600_000, seen: false, nextAt: now }]
+  postReply = () => started('rev_deep1')
+  await press($, 'deep-yes')
+  expect(hunts($).map(h => h.id)).not.toContain('rev_old')
+})
+
 test('the press note is told to the agent with the status line off too', async ($, on) => {
   mock.clock(on)
   readableStore(on)
