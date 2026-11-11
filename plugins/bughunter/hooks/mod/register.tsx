@@ -175,17 +175,20 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     // The server answered with the hunt already queued or running for this input (or, for a second escalation, the
     // review's first deep hunt): nothing started, nothing charged. The hunt belongs to the chat that asked for it just
     // now: kept when it is this chat's, adopted when another chat tracks it, or the chat told "already running" would
-    // track nothing.
+    // track nothing. Not when another chat's agent has read it: the verdicts are owed there, and this agent can still
+    // read it, which moves it here.
     const again = body.already_running === true || body.already_escalated === true
-    await put($, id, cur => !cur ? h : again ? (ours(cur, cwd) ? undefined : adopt(cur, cwd)) : h)
+    await put($, id, cur => !cur ? h : !again ? h
+      : ours(cur, cwd) || (cur.session !== sessionId && cur.seen) ? undefined : adopt(cur, cwd))
   } else if (kind === 'get_findings' || kind === 'wait_review') {
     const state = pollState(body)
     const terminal = state === 'done' || state === 'failed'
-    // Read here: the hunt is this chat's now, and whatever the server said before, this chat owes the verdicts. Read
-    // to its end, a press note has done its job.
+    // Read to its end here: the hunt is this chat's now, and whatever the server said before, this chat owes the
+    // verdicts; a press note has done its job. A read that is not the end (running, or an error with no state) moves
+    // nothing: the owning chat keeps polling it and keeps its note.
     const next = await put($, id, cur => {
       if (!cur) return undefined
-      const h = adopt(cur, cwd)
+      const h = terminal ? adopt(cur, cwd) : cur
       return { ...h, state: state ?? h.state, seen: terminal || h.seen, settled: terminal ? false : h.settled,
         findings: state === 'done' ? findingsOf(body).length : h.findings, pressed: terminal ? undefined : h.pressed }
     })
@@ -494,7 +497,7 @@ export const register: Register = on => {
       const now = await $.clock.now()
       const lines = [
         // A deep hunt the person started from the band, until the agent reads it: the agent did not submit it.
-        ...huntList.filter(h => ours(h, cwd) && h.pressed && now - h.startedAt < STALE_MS).map(pressedNote),
+        ...huntList.filter(h => ours(h, cwd) && h.pressed && (!h.seen || h.settled) && now - h.startedAt < STALE_MS).map(pressedNote),
         // Shown to the person or not told to the agent: OHMYBUG_STATUS=0 drops the verdicts line (the press note is not
         // a status-line line: the person pressed, and the agent must know the hunt is not its own).
         ...huntList.filter(h => ctx.showStatus && awaitsVerdicts(h, cwd, now)).map(h => h.findings === 0

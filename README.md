@@ -196,13 +196,14 @@ turn starts.
 
 Every chat on the machine sees the same list of hunts, and each hunt belongs to
 one chat: that chat polls it, announces it and tells its agent about it. A chat
-takes over a hunt another chat tracks when its agent reads that hunt, or asks
-for it again (the server answers that it is already running, or that the review
-was already escalated to it), or when the deep offer's Run deep hunt is pressed
-for it. There it counts as unread until its own agent reads it, so that agent
-is never asked for verdicts on findings it has not seen; verdicts already sent
-stay sent. Each chat writes only the hunt it changes, so it does not put back
-an older copy of another chat's hunt. Two chats writing in the same few
+takes over a hunt another chat tracks when its agent reads that hunt to its
+end, when its agent asks for it again (the server answers that it is already
+running, or that the review was already escalated to it) and no other chat's
+agent has read it yet, or when the deep offer's Run deep hunt is pressed for
+it. Taken over, it is unread there until that chat's own agent reads it, so
+no agent is asked for verdicts on findings it has not seen; verdicts already
+sent stay sent. Every write reads the list again and changes only the one
+hunt, so a chat does not put back an older copy of another chat's hunt. Two chats writing in the same few
 milliseconds can still lose one write, and a chat still running an older
 plugin version writes its whole list until it restarts.
 

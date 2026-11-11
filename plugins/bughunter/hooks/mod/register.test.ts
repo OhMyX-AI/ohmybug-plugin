@@ -679,27 +679,61 @@ test('a hunt another chat adopted since is no longer polled or announced here', 
   expect(hunts().find(x => x.id === 'rev_9')).toMatchObject({ session: 's9' })
 })
 
-test('already_running for a hunt another chat read: adopted unread, no verdicts owed until this agent reads it', async ($, on) => {
+test('already_escalated for a deep hunt another chat read: it stays with the chat that owes its verdicts until this agent reads it', async ($, on) => {
   await offered($, on)
-  stored.hunts = [...hunts(), theirs('rev_8', t0(), { state: 'done', seen: true, findings: 0 })]
-  answer.submit = JSON.stringify({ review_id: 'rev_8', status: 'done', mode: 'fast', already_running: true, status_url: 'https://status.test/r/rev_8/status' })
-  await $.tool.call({ tool: SUBMIT } as never)
-  expect(hunts().find(x => x.id === 'rev_8')).toMatchObject({ session: 's1', cwd: '/repo', seen: false, state: 'done' })
+  const other = theirs('rev_8', t0(), { mode: 'full', state: 'done', seen: true, findings: 0 })
+  stored.hunts = [...hunts(), other]
+  answer.submit = JSON.stringify({ review_id: 'rev_8', mode: 'full', already_escalated: true, status_url: 'https://status.test/r/rev_8/status' })
+  await $.tool.call({ tool: SUBMIT, deep: 'rev_1' } as never)
+  expect(hunts().find(x => x.id === 'rev_8')).toEqual(other)
   expect(await note($)).not.toContain('rev_8')
-  answer.get = JSON.stringify({ review_id: 'rev_8', status: 'done', mode: 'fast', findings: [] })
+  // Read to its end here: now this chat owes the verdicts.
+  answer.get = JSON.stringify({ review_id: 'rev_8', status: 'done', mode: 'full', findings: [] })
   await $.tool.call({ tool: GET, review_id: 'rev_8' } as never)
+  expect(hunts().find(x => x.id === 'rev_8')).toMatchObject({ session: 's1', seen: true })
   expect(await note($)).toContain('confirm_findings for rev_8')
 })
 
-test('already_escalated for a deep hunt another chat judged: adopted, and a verdict sent stays sent', async ($, on) => {
+test('already_escalated for an unread deep hunt another chat tracks: adopted here, and a verdict sent stays sent', async ($, on) => {
   await offered($, on)
-  stored.hunts = [...hunts(), theirs('rev_7', t0(), { mode: 'full', state: 'done', seen: true, findings: 0, judged: true })]
+  stored.hunts = [...hunts(), theirs('rev_7', t0(), { mode: 'full', state: 'running', judged: true })]
   answer.submit = JSON.stringify({ review_id: 'rev_7', mode: 'full', already_escalated: true, status_url: 'https://status.test/r/rev_7/status' })
   await $.tool.call({ tool: SUBMIT, deep: 'rev_1' } as never)
   expect(hunts().find(x => x.id === 'rev_7')).toMatchObject({ session: 's1', seen: false, judged: true })
   answer.get = JSON.stringify({ review_id: 'rev_7', status: 'done', mode: 'full', findings: [] })
   await $.tool.call({ tool: GET, review_id: 'rev_7' } as never)
   expect(await note($)).not.toContain('rev_7')
+})
+
+test('a read that is not the end moves nothing: an error with no state, or a running answer, leaves the hunt and its press note with the chat that owns it', async ($, on) => {
+  await offered($, on)
+  const other = theirs('rev_4', t0(), { mode: 'full', pressed: { parent: 'rev_7' } })
+  stored.hunts = [...hunts(), other]
+  answer.get = JSON.stringify({ error: 'payment_required', review_id: 'rev_4' })
+  await $.tool.call({ tool: GET, review_id: 'rev_4' } as never)
+  expect(hunts().find(x => x.id === 'rev_4')).toEqual(other)
+  answer.get = JSON.stringify({ review_id: 'rev_4', status: 'running', mode: 'full' })
+  await $.tool.call({ tool: GET, review_id: 'rev_4' } as never)
+  expect(hunts().find(x => x.id === 'rev_4')).toEqual(other)
+})
+
+test('a running read of this chat\'s pressed hunt keeps its note, and the note says the hunt has not ended', async ($, on) => {
+  await offered($, on)
+  postReply = () => started('rev_deep1')
+  await press($, 'deep-yes')
+  answer.get = JSON.stringify({ review_id: 'rev_deep1', status: 'running', mode: 'full' })
+  await $.tool.call({ tool: GET, review_id: 'rev_deep1' } as never)
+  expect(await note($)).toContain('Read it with get_findings (review_id rev_deep1) when it ends.')
+})
+
+test('a pressed hunt this chat read under the previous version (pressed and seen, not settled) is not told again', async ($, on) => {
+  await offered($, on)
+  stored.hunts = [...hunts(), { ...theirs('rev_deep0', t0(), { mode: 'full', state: 'done', seen: true, pressed: { parent: 'rev_1' } }), session: 's1' }]
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  const told = await note($)
+  expect(told).not.toContain('rev_deep0 from the offer button')
+  // Its verdicts are still owed here: that line stays.
+  expect(told).toContain('rev_deep0 is done')
 })
 
 test('a poll answer for a hunt another chat adopted during the fetch writes nothing: the new owner keeps it', async ($, on) => {
