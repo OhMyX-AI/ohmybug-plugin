@@ -671,7 +671,7 @@ refused each one, and the agent sent the same refused call again for the rest
 of the turn.
 
 ```bash
-mode=fast # the submit answer's hunt_mode (cheap, ultrafast or fast); deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)
+mode=fast # REPLACE with the submit answer's hunt_mode (cheap, ultrafast or fast) when it has one; deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)
 url='<status_url>'; case $url in *\?*) url="$url&w=loop" ;; *) url="$url?w=loop" ;; esac # names this waiter on the server's read journal
 watch="$HOME/.ohmybug/watch/<review_id>"; mkdir -p "${watch%/*}"
 every=<watch_poll_s> # seconds between polls: the submit response's watch_poll_s seeds it
@@ -938,7 +938,9 @@ verdicts confirm a real bug, and the server's figures win over these:
   when no mode is sent). No `modes` there (an older server): name the mode only.
 - **A default.** "Make cheap my default" (any mode, any language): call
   `set_policy` with `default_mode: "<mode>"` and say it is set for the whole
-  account. A key's own default (set on https://app.ohmybug.ai/me, per key)
+  account. If `set_policy` answers that `default_mode` is an unknown field,
+  the server is older than this plugin: say modes are not available there
+  yet, and do not retry. A key's own default (set on https://app.ohmybug.ai/me, per key)
   wins over the account's: when `get_balance` `modes` marks another mode as
   `default` after the change, say so. `/bughunter:stats` shows the default.
 - **The repository.** `cheap` and `ultrafast` read the repository, so they
@@ -952,6 +954,9 @@ verdicts confirm a real bug, and the server's figures win over these:
   switch modes silently.
 - **Deep is not a mode.** Never send `mode` with `deep`; a default mode never
   applies to a deep hunt. The deep offer after any mode is the same.
+- **"Fast" elsewhere in this skill is the stage.** "The fast hunt", "a review
+  starts fast" and "offer the fast hunt" mean stage one (not deep), in the
+  mode the user named or none: never `mode: "fast"` on your own.
 - **The monitor.** The submit answer's `hunt_mode` is the mode that runs: the
   watch loop's `mode=` takes it, so the compact line reads
   `bughunt · cheap · running`. No `hunt_mode` (an older server): `fast`.

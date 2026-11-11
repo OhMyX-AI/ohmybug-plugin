@@ -10,8 +10,8 @@ human table:
 - false positives the cloud sent (cost the user nothing)
 - free reviews left, balance, total billed
 - the hunt modes from `modes`: each mode's price and time, and which one is
-  the default (`default: true`); "make <mode> my default" is `set_policy`
-  with `default_mode`
+  the default (`default: true`); no `modes` (an older server): leave the row
+  out, never fill it from memory
 
 One screen, no fluff. If the call fails with an authentication error, follow
 the sign-in instructions from the `bughunter` skill.

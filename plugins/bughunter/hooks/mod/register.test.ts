@@ -104,8 +104,10 @@ test('a hunt that finishes raises a toast and a band, and starts no turn by itse
   expect(seen.prompts).toHaveLength(0)
 })
 
-for (const [hunt_mode, label] of [['cheap', 'cheap'], ['ultrafast', 'ultrafast'], ['x\u001b[2J', 'fast']] as const) {
-  test(`a hunt whose submit answer carries hunt_mode ${JSON.stringify(hunt_mode)} reads "bughunt ${label}" on the status line`, async ($, on) => {
+// The stage-one mode the server echoes, else the stage, else fast; a deep (full) answer stays full; nothing else is drawn.
+for (const [mode, hunt_mode, label] of [['fast', 'cheap', 'cheap'], ['fast', 'ultrafast', 'ultrafast'], ['fast', 'x\u001b[2J', 'fast'],
+  ['x\u001b[2J', undefined, 'fast'], ['full', 'cheap', 'full']] as const) {
+  test(`a submit answer with mode ${JSON.stringify(mode)} and hunt_mode ${JSON.stringify(hunt_mode)} reads "bughunt ${label}" on the status line`, async ($, on) => {
     mock.clock(on)
     mock.store(on)
     mock.env(on, {})
@@ -114,7 +116,7 @@ for (const [hunt_mode, label] of [['cheap', 'cheap'], ['ultrafast', 'ultrafast']
     on('http.fetch', async () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ status: 'running', next_poll_after_s: 60 }) } }) as never)
     on('ui.status', async ($, e) => { status.push(e.text); return { value: undefined } as never })
     on('tool.call', { tool: SUBMIT }, async () => ({ result: { content: [] }, text: JSON.stringify({ review_id: 'rev_m', status: 'running',
-      mode: 'fast', hunt_mode, status_url: 'https://status.test/r/rev_m/status', recent_median_minutes: 3 }) }))
+      mode, hunt_mode, status_url: 'https://status.test/r/rev_m/status', recent_median_minutes: 3 }) }))
     await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
     await $.tool.call({ tool: SUBMIT, meta: { repo: 'o/r', ref: 'abc', base_branch: 'main' } } as never)
     expect(status.at(-1)).toMatch(new RegExp(`^bughunt ${label} 0/~3 min`))
@@ -1200,6 +1202,18 @@ test('OHMYBUG_STATUS=0 keeps the status line clear and the prompt line out', asy
   await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
   expect(seen.status).toHaveLength(0)
   expect(await nextStep($)).toBe('')
+})
+
+test('the findings card heads a cheap hunt with its mode, and a deep one with full', async ($, on) => {
+  mock.store(on)
+  engine(on)
+  for (const [extra, head] of [[{ hunt_mode: 'cheap' }, 'cheap hunt rev_1 · done'], [{ mode: 'full', hunt_mode: 'cheap' }, 'full hunt rev_1 · done']] as const) {
+    const output = JSON.stringify({ ...JSON.parse(done), ...extra })
+    const ui = await $.ui.mount({ plugin: 'bughunter', surface: 'terminal', component: 'ToolResult', requestId: 't1',
+      props: { tool_use_id: 't1', tool: GET, output, isErrored: false } } as never)
+    expect((await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')).toContain(head)
+    await ui.unmount()
+  }
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {

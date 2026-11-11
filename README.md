@@ -21,7 +21,7 @@ free, first review free.
 - **Fast review** (the default) · $4 · finds 73% of significant bugs · up to 15 minutes
 - **Deep review** · $12 ($24 on a wide change) · finds 90% of significant bugs · up to 2 hours
 
-Pick a mode for one hunt with `/bughunter:review cheap` (or `ultrafast`, `fast`), or tell your agent "make cheap my default". Cheap and ultrafast read the repository, so they need a pushed GitHub commit; a key's own default is set on [app.ohmybug.ai/me](https://app.ohmybug.ai/me).
+Pick a mode for one hunt with `/bughunter:review cheap` (or `ultrafast`, `fast`), or tell your agent "make cheap my default". Cheap and ultrafast read the repository, so they need a pushed GitHub commit (or a snapshot), and ultrafast a diff under 1 MB; a key's own default is set on [app.ohmybug.ai/me](https://app.ohmybug.ai/me).
 
 See the bug species our hunts keep finding in the [Bugarium](https://mcp.ohmybug.ai/bugs).
 
@@ -232,11 +232,11 @@ Turn the mod off with
 
 | Tool | In | Out |
 |---|---|---|
-| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}` | `{review_id, status, mode, pending_verdicts[]}` |
+| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}`, `mode?` (`cheap`, `ultrafast` or `fast`; absent: the key's or account's default) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}` |
 | `get_findings` | `review_id` | `{status: running\|needs_files\|done\|failed, findings[{finding_id, severity, file, line?, title, failure_scenario, suggested_fix?}]}` |
 | `provide_files` | `review_id`, `paths[]` (Claude Code: the plugin's hook reads them from disk) or `files[{path, content}]` | `{status, delivered}` |
 | `confirm_findings` | `review_id`, `verdicts[{finding_id, verdict: REAL\|NOT_REAL\|UNCLEAR, reason}]` | `{confirmed, minor_confirmed, billed_usd, free_review_used, balance_usd, receipt_id}` |
-| `get_balance` | — | `{balance_usd, free_reviews_left, confirmed_total, stats{…}}` |
+| `get_balance` | — | `{balance_usd, free_reviews_left, confirmed_total, stats{…}, modes[{mode, price_usd, minutes_typical, minutes_up_to, available, default}]}` |
 
-Errors: `payment_required` (top up), `pending_verdicts` (resolve previous
+Errors: `mode_unavailable`, `mode_needs_repo`, `mode_too_large`, `mode_with_deep` (the mode cannot run; nothing started or charged), `payment_required` (top up), `pending_verdicts` (resolve previous
 review's verdicts first).
