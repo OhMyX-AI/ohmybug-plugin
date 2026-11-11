@@ -1049,7 +1049,9 @@ Honesty rules (non-negotiable):
 Call `confirm_findings(review_id, verdicts)` with ALL verdicts in one call,
 each as `{finding_id, verdict, reason}` (one-sentence reason). Do this before
 starting fixes. Then show the user the bill from the response: how many
-confirmed, what was charged, remaining balance.
+confirmed, what was charged, remaining balance. The verdicts also make the
+review history the project's bug register, with what was real and why, at no
+extra cost.
 
 **The balance belongs to the account, not to you.** One key is shared by every
 session, worktree and machine that uses it, so `balance_usd`, `reviews_total`
@@ -1064,6 +1066,13 @@ disproving its own report. If a charge looks wrong, quote the receipt.
 
 Fix the confirmed bugs as part of the normal workflow. Findings include a
 suggested fix; treat it as a hint, not gospel.
+
+**A real `low`: neither fix it blindly nor drop it.** It does not hold the
+merge. Record it where the next agent and the next review will see it: a short
+comment at the site that names the risk and why it is accepted, or a line in
+the project's docs or tickets. Our recommendation: re-check recorded lows on a
+schedule, or when code near them changes, because a low can grow into a
+critical.
 
 **Three hunts in a row that each confirm a major end the fix-and-re-hunt
 loop.** Two ways forward: ship it dark – the feature behind a flag that
