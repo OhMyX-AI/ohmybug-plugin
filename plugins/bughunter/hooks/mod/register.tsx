@@ -57,7 +57,7 @@ type BughunterHunt = {
  *  state the mod saw it move into, re-checked before any action. */
 type BughunterBand =
   | { kind: 'hunt'; id: string; state: BughunterHunt['state']; text: string }
-  | { kind: 'deep'; id: string; text: string; strong?: boolean; price?: number }
+  | { kind: 'deep'; id: string; text: string; strong?: boolean; price?: number; startUrl?: string; snoozeUrl?: string }
   | { kind: 'gate'; id?: string; text: string }
   | null
 
@@ -78,6 +78,8 @@ let sessionId = ''
 let heldId: string | undefined
 const ours = (h: BughunterHunt, cwd: string) => h.cwd === cwd && !!sessionId && h.session === sessionId
 const rawOpen = new Set<string>()
+/** Deep hunts the person's press started (or found running): told to the agent until it reads the child. */
+let deepNotes: { parent: string; child: string; started: boolean; at: number }[] = []
 
 function setHunts($: Engine, list: BughunterHunt[]) { huntList = list; $.ui.invalidate('ui.render') }
 function setBand($: Engine, b: BughunterBand) { bandNow = b; $.ui.invalidate('ui.render') }
@@ -87,6 +89,65 @@ const PANE = 'bughunter-hunts'
 const STALE_MS = 6 * 3600_000
 const SEVERITY = ['critical', 'high', 'medium', 'low']
 const COLOR: Record<string, string> = { critical: 'red', high: 'red', medium: 'yellow' }
+
+const REVIEW_ID = /^rev_[A-Za-z0-9]{1,64}$/
+/** A URL of the server that tracks `statusUrl`'s hunt, or undefined: the deep offer's buttons are POSTed only to
+ *  the origin (scheme, host and port) the hunt's own status URL names, at the path the server gives them. */
+function sameServer(url: unknown, statusUrl: string | undefined, path: RegExp): string | undefined {
+  if (typeof url !== 'string' || !statusUrl) return undefined
+  try {
+    const u = new URL(url), home = new URL(statusUrl)
+    return u.origin === home.origin && path.test(u.pathname) && !u.search && !u.hash ? u.toString() : undefined
+  } catch { return undefined }
+}
+const START_PATH = /^\/live\/[0-9a-f]{16,128}\/deep$/
+const SNOOZE_PATH = /^\/live\/[0-9a-f]{16,128}\/snooze-deep$/
+/** Why a press did not land, in the mod's own words by the answer's status (no server text is drawn). */
+const NOT_STARTED: Record<number, string> = {
+  403: 'the key that ran this hunt is revoked',
+  404: 'the offer has expired',
+  409: 'it cannot start from the button; ask for it in the chat',
+  429: 'the account is at its limit of hunts right now; try again later',
+}
+/** POST one of the offer's buttons: the parsed answer, or the status it failed with (0: no answer at all). */
+async function pressUrl($: Engine, url: string): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; status: number }> {
+  try {
+    const res = await $.http.fetch(url, { method: 'POST' })
+    if (!res.ok) return { ok: false, status: res.status }
+    const body = JSON.parse(res.text) as unknown
+    return body && typeof body === 'object' ? { ok: true, body: body as Record<string, unknown> } : { ok: false, status: 0 }
+  } catch { return { ok: false, status: 0 } }
+}
+
+/** Run deep hunt, pressed on an offer that carries its start URL: the press is the person's consent and goes to
+ *  the server as it is, so no prompt asks the agent to spend money for them. The deep hunt it started (or the one
+ *  already running for that offer) is tracked like a submitted one, and the agent is told it exists. */
+async function startDeep($: Engine, parent: string, url: string) {
+  const r = await pressUrl($, url)
+  const child = r.ok ? str(r.body.review_id) : undefined
+  const home = huntList.find(h => h.id === parent)
+  const statusUrl = r.ok && child && REVIEW_ID.test(child) ? sameServer(r.body.status_url, home?.statusUrl, /^\/r\/rev_[A-Za-z0-9]{1,64}\/status$/) : undefined
+  if (!r.ok || !child || !REVIEW_ID.test(child) || !statusUrl) {
+    await $.ui.toast(`OhMyBug: the deep hunt did not start: ${(!r.ok && NOT_STARTED[r.status]) || 'the server did not answer as expected; ask for it in the chat'}.`)
+    return
+  }
+  const started = r.body.started === true
+  const now = await $.clock.now()
+  const cwd = await $.session.cwd()
+  const list = huntList.filter(h => h.id !== child)
+  list.push({ id: child, mode: 'deep', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false, nextAt: now + 60_000 })
+  deepNotes = [...deepNotes.filter(n => n.child !== child), { parent, child, started, at: now }]
+  await save($, list)
+  await refreshStatus($)
+  await $.ui.toast(`OhMyBug: ${started ? 'the deep hunt started' : 'the deep hunt is already running'}: ${child}.`)
+}
+
+/** Not today, on an offer that carries its snooze URL: the server keeps the one-day pause for every session. */
+async function snoozeDeep($: Engine, url: string) {
+  const r = await pressUrl($, url)
+  await $.ui.toast(r.ok ? 'OhMyBug: no deep hunt offers for the next 24 hours. Asking for one still works.'
+    : `OhMyBug: the pause was not saved: ${NOT_STARTED[r.status] ?? 'the server did not answer as expected'}.`)
+}
 
 const isOpen = (h: BughunterHunt) => h.state === 'running' || h.state === 'needs_files'
 /** Done, read by the agent, and no verdicts seen for it: the one next step left. */
@@ -186,11 +247,16 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
       findings: state === 'done' ? findingsOf(body).length : list[at]!.findings }
     if (bandNow?.kind === 'hunt' && bandNow.id === id) setBand($, null)
     if (heldId === id) heldId = undefined
+    // The agent read the deep hunt a press started: nothing more to tell it.
+    if (deepNotes.some(n => n.child === id)) deepNotes = deepNotes.filter(n => n.child !== id)
     // The deep offer comes in the answer for this tracked hunt, and only there.
     const offer = body.deep_offer as Record<string, unknown> | undefined
     if (kind === 'get_findings' && state === 'done' && offer && typeof offer === 'object' && str(offer.pitch)) {
       // A strong offer is the server's recommendation, with its reasons in the pitch; the price is the server's quote.
-      setBand($, { kind: 'deep', id, text: str(offer.pitch)!.slice(0, 280), strong: offer.strength === 'strong', price: num(offer.price_usd) })
+      // Its buttons POST to the server when the offer names where, on the hunt's own server; else they ask the agent.
+      const home = list[at]!.statusUrl
+      setBand($, { kind: 'deep', id, text: str(offer.pitch)!.slice(0, 280), strong: offer.strength === 'strong', price: num(offer.price_usd),
+        startUrl: sameServer(offer.start_url, home, START_PATH), snoozeUrl: sameServer(offer.snooze_url, home, SNOOZE_PATH) })
     }
   } else if (at >= 0 && kind === 'confirm_findings' && num(body.confirmed) !== undefined) {
     list[at] = { ...list[at]!, judged: true }
@@ -357,7 +423,19 @@ export const register: Register = on => {
   // the same unless another hunt that runs or waits to be read holds it: a hunt it read whose verdicts it has not sent. Keyed by hunt id,
   // gone once confirm_findings for that id is seen or the hunt is 6 hours old.
   on('prompt.compose', async ($, e, next) => {
-    const composed = await next(e)
+    let composed = await next(e)
+    // A deep hunt the person's press started is a fact the agent must know, whatever the status setting: it must
+    // not submit one again, and it reads this one. Gone once it reads that hunt, or after 6 hours.
+    try {
+      const now = await $.clock.now()
+      deepNotes = deepNotes.filter(n => now - n.at < STALE_MS)
+      if (deepNotes.length) {
+        const text = deepNotes.map(n => `The person pressed "Run deep hunt" for OhMyBug hunt ${n.parent}; the server ${n.started ? 'started' : 'already runs'} deep hunt ${n.child} for it. Do not call submit_review for it. Read it with get_findings (review_id ${n.child}) when it is done.`).join('\n')
+        composed = { sections: [...composed.sections, { id: 'bughunter:deep-started', text, scope: 'session' as const }] }
+      }
+    } catch {
+      // The note is a courtesy to the agent; the composed prompt stands without it.
+    }
     // Shown to the person or not told to the agent: OHMYBUG_STATUS=0 drops both.
     if (!ctx.showStatus) return composed
     try {
@@ -422,13 +500,17 @@ export const register: Register = on => {
       lead = `Deep hunt ${b.strong ? 'recommended' : 'offered'} for ${b.id}${b.price !== undefined ? ` (${b.price} USD, only if a real bug is confirmed)` : ''}: `
       actions = [
         <Button key="deep-yes" label="Run deep hunt" hotkey="1" variant="primary" onPress={async () => {
-          close(); await $.prompt.submit({ text: `Yes, run the deep hunt for ${b.id}.` })
+          close()
+          if (b.startUrl) await startDeep($, b.id, b.startUrl)
+          else await $.prompt.submit({ text: `Yes, run the deep hunt for ${b.id}.` })
         }} />,
         <Button key="deep-no" label="Not now" hotkey="2" role="dismiss" onPress={close} />,
         // The person's own word: the offer stays quiet for a day. The agent writes it down (set_policy
         // snooze), because the server keeps it for every session; asking for a deep hunt still works.
         <Button key="deep-snooze" label="Not today" hotkey="3" onPress={async () => {
-          close(); await $.prompt.submit({ text: 'Not today: do not offer me the deep hunt for the next 24 hours. Call set_policy with snooze {"deep": 24}, and say when it ends.' })
+          close()
+          if (b.snoozeUrl) await snoozeDeep($, b.snoozeUrl)
+          else await $.prompt.submit({ text: 'Not today: do not offer me the deep hunt for the next 24 hours. Call set_policy with snooze {"deep": 24}, and say when it ends.' })
         }} />,
       ]
     } else if (b.kind === 'gate') {
