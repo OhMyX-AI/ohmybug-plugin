@@ -625,6 +625,28 @@ test('Run deep hunt with a start URL posts it with the press header: no chat mes
   expect(await note($)).not.toContain('rev_deep1 from the offer button')
 })
 
+test('a pressed deep hunt is polled by the mod: nobody else watches it', async ($, on) => {
+  const { seen, clock } = await offered($, on)
+  postReply = () => started('rev_deep1')
+  await press($, 'deep-yes')
+  seen.urls.length = 0
+  await clock.advance(60_000)
+  await $.turn.start({ prompt: 'x' } as never)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't9', reason: 'end_turn' } as never)
+  expect(seen.urls.some(u => u.startsWith('https://status.test/r/rev_deep1/status'))).toBe(true)
+})
+
+test('a press does not bring back a stale stored copy of a hunt this session holds newer', async ($, on) => {
+  await offered($, on)
+  const mine = hunts($).find(x => x.id === 'rev_1')!
+  expect(mine).toMatchObject({ state: 'done' })
+  // Another session saved its older copy of rev_1 since: running, unread.
+  stored.hunts = [{ ...mine, state: 'running', seen: false }]
+  postReply = () => started('rev_deep1')
+  await press($, 'deep-yes')
+  expect(hunts($).find(x => x.id === 'rev_1')).toMatchObject({ state: 'done' })
+})
+
 test('the press note is told to the agent with the status line off too', async ($, on) => {
   mock.clock(on)
   readableStore(on)

@@ -376,7 +376,7 @@ const SNOOZE_IN_CHAT = 'Not today: do not offer me the deep hunt for the next 24
  *  A deep hunt the server answered with is said first, then tracked: added when this machine does not track it,
  *  taken over by this chat when another session tracks it (as a submit answered "already running" is), and kept as
  *  it is when this chat already tracks it. The store is read again first, so a session that started tracking it since
- *  this one loaded is seen. */
+ *  this one loaded is seen; for hunts this session holds, its own copy wins. */
 async function pressStart($: Engine, parent: string, url: string) {
   const r = await pressUrl($, url)
   if (r.kind === 'refused') { await $.ui.toast(`OhMyBug: deep hunt not started: ${REFUSED[r.status]}.`); return }
@@ -393,9 +393,10 @@ async function pressStart($: Engine, parent: string, url: string) {
     const now = await $.clock.now()
     const cwd = await $.session.cwd()
     const saved = (await $.store.get('hunts')) as BughunterHunt[] | undefined
-    // Every await before the snapshot: the stored list, with this session's own records it may not hold yet.
-    const stored = Array.isArray(saved) ? saved : []
-    const list = [...stored, ...huntList.filter(h => !stored.some(x => x.id === h.id))]
+    // Every await before the snapshot. This session's own copies win: the store may hold another session's older copy
+    // of the same hunt. From the store only what this session does not hold, pruned as session.start prunes.
+    const stored = Array.isArray(saved) ? saved.filter(h => now - h.startedAt < STALE_MS) : []
+    const list = [...huntList, ...stored.filter(x => !huntList.some(h => h.id === x.id))]
     const at = list.findIndex(h => h.id === id)
     if (at >= 0 && ours(list[at]!, cwd)) return
     if (at >= 0) list[at] = { ...list[at]!, session: sessionId, cwd, pressed: list[at]!.pressed ?? { parent } }
