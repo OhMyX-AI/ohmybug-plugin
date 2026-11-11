@@ -56,13 +56,25 @@ function engine(on: On) {
   on('ui.render', async ($, e) => { const { Text } = $.ui.resolve(e); return Text({ children: 'engine drawing' } as never) })
 }
 
+/** What a POST answers in `world` (the deep offer's buttons): a status and a body, or null for no answer at all. */
+let postReply: (url: string) => { status: number; text: string } | null = () => ({ status: 404, text: '{}' })
 function world(on: On, status: string | null | string[] | (() => Promise<string>)) {
+  postReply = () => ({ status: 404, text: '{}' })
   const replies = Array.isArray(status) ? [...status] : null
-  const seen = { toasts: [] as string[], status: [] as (string | undefined)[], prompts: [] as string[], urls: [] as string[] }
+  const seen = { toasts: [] as string[], status: [] as (string | undefined)[], prompts: [] as string[], urls: [] as string[],
+    posts: [] as { url: string; press?: string }[] }
   engine(on)
-  on('http.fetch', async ($, e) => (seen.urls.push(String((e as { url?: unknown }).url)), status === null ? { deny: 'refused by policy' }
+  const statusReply = async (url: string) => (seen.urls.push(url), status === null ? { deny: 'refused by policy' }
     : { value: { status: 200, ok: true, headers: {}, text: typeof status === 'function' ? await status()
-      : replies ? (replies.length > 1 ? replies.shift()! : replies[0]!) : status } }) as never)
+      : replies ? (replies.length > 1 ? replies.shift()! : replies[0]!) : status } }) as never
+  on('http.fetch', async ($, e) => {
+    const { url, init } = e as { url?: unknown; init?: { method?: string; headers?: Record<string, string> } }
+    if (init?.method !== 'POST') return statusReply(String(url))
+    seen.posts.push({ url: String(url), press: init.headers?.['x-ohmybug-press'] })
+    const r = postReply(String(url))
+    if (r === null) return { deny: 'refused by policy' } as never
+    return { value: { status: r.status, ok: r.status >= 200 && r.status < 300, headers: {}, text: r.text } } as never
+  })
   on('ui.toast', async ($, e) => { seen.toasts.push(e.text); return { value: undefined } as never })
   on('ui.status', async ($, e) => { seen.status.push(e.text); return { value: undefined } as never })
   on('prompt.submit', async ($, e) => { seen.prompts.push(e.text); return { text: e.text } })
@@ -558,6 +570,201 @@ test('a deep_offer for a hunt the mod does not track draws no band', async ($, o
   await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
   await $.tool.call({ tool: GET, review_id: 'rev_x' } as never)
   expect(await buttons($)).toEqual([])
+})
+
+// The deep offer's own buttons (#3307): one test per row of the table on the ticket.
+const START = 'https://status.test/deep-offer/rev_1/' + 'a'.repeat(48) + '/start'
+const SNOOZE = 'https://status.test/deep-offer/rev_1/' + 'a'.repeat(48) + '/snooze'
+const withButtons = (extra: Record<string, unknown> = {}) => findingsWith({ deep_offer: { pitch: 'Go deep.', start_url: START, snooze_url: SNOOZE, ...extra } })
+async function note($: Dollar) {
+  const { sections } = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] })
+  return sections.filter(x => x.id === 'bughunter:next-step').map(x => x.text).join('\n')
+}
+/** A store the test reads back: the mod's hunts list as it saved it. */
+let stored: Record<string, unknown> = {}
+function readableStore(on: On) {
+  stored = {}
+  on('store.get', async ($, e) => ({ value: stored[(e as { key: string }).key] }) as never)
+  on('store.set', async ($, e) => { const { key, value } = e as { key: string; value: unknown }; stored[key] = value; return { value: undefined } as never })
+}
+/** A session with the fast hunt rev_1 tracked and its offer, with buttons, on the band. */
+/** What the stubbed tools answer next: switched by a test after it started (hooks are registered before). */
+const answer = { get: '', submit: '' }
+async function offered($: Dollar, on: On, offer = withButtons()) {
+  mock.clock(on)
+  readableStore(on)
+  mock.env(on, {})
+  answer.get = offer; answer.submit = submitted
+  on('prompt.compose', async () => ({ sections: [] }))
+  on('tool.call', { tool: GET }, async () => ({ result: { content: [] }, text: answer.get }))
+  on('tool.call', { tool: SUBMIT }, async () => ({ result: { content: [] }, text: answer.submit }))
+  const seen = world(on, JSON.stringify({ status: 'running' }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  return { seen }
+}
+const started = (id: string, isNew = true) => ({ status: 200, text: JSON.stringify({ review_id: id, started: isNew, status_url: `https://status.test/r/${id}/status` }) })
+const hunts = async (_$?: Dollar) => (stored.hunts ?? []) as { id: string; mode: string; state: string; session?: string; cwd: string; pressed?: { parent: string }; startedAt: number }[]
+
+test('Run deep hunt with a start URL posts it with the press header: no chat message, the band closes, the hunt is tracked and the agent told until it reads it', async ($, on) => {
+  const { seen } = await offered($, on)
+  postReply = () => started('rev_deep1')
+  await press($, 'deep-yes')
+  expect(seen.posts).toEqual([{ url: START, press: '1' }])
+  expect(seen.prompts).toEqual([])
+  expect(await buttons($)).toEqual([])
+  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep1 started for rev_1.')
+  const h = (await hunts($)).find(x => x.id === 'rev_deep1')
+  expect(h).toMatchObject({ mode: 'full', state: 'running', session: 's1', cwd: '/repo', pressed: { parent: 'rev_1' } })
+  expect(await note($)).toContain('The person started OhMyBug deep hunt rev_deep1 from the offer button for rev_1')
+  // Read to its end by the agent: the note goes.
+  answer.get = JSON.stringify({ review_id: 'rev_deep1', status: 'done', mode: 'full', findings: [] })
+  await $.tool.call({ tool: GET, review_id: 'rev_deep1' } as never)
+  expect(await note($)).not.toContain('rev_deep1 from the offer button')
+})
+
+test('the press note is told to the agent with the status line off too', async ($, on) => {
+  mock.clock(on)
+  readableStore(on)
+  mock.env(on, { OHMYBUG_STATUS: '0' })
+  on('prompt.compose', async () => ({ sections: [] }))
+  on('tool.call', { tool: GET }, async () => ({ result: { content: [] }, text: withButtons() }))
+  world(on, JSON.stringify({ status: 'running' }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  postReply = () => started('rev_deep1')
+  await press($, 'deep-yes')
+  expect(await note($)).toContain('rev_deep1 from the offer button')
+})
+
+test('started:false for a deep hunt this session tracks keeps the record exactly as it was', async ($, on) => {
+  const { seen } = await offered($, on)
+  postReply = () => started('rev_deep1')
+  await press($, 'deep-yes')
+  const before = (await hunts($)).find(x => x.id === 'rev_deep1')
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  postReply = () => started('rev_deep1', false)
+  await press($, 'deep-yes')
+  expect((await hunts($)).filter(x => x.id === 'rev_deep1')).toEqual([before])
+  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep1 already exists for rev_1.')
+})
+
+test('started:false for a deep hunt another session or checkout tracks leaves that record untouched', async ($, on) => {
+  const { seen } = await offered($, on)
+  const theirs = { id: 'rev_deep2', mode: 'full', state: 'running', statusUrl: 'https://status.test/r/rev_deep2/status', cwd: '/other', session: 's9',
+    startedAt: 1, seen: false, nextAt: 1 }
+  stored.hunts = [...await hunts($), theirs]
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  postReply = () => started('rev_deep2', false)
+  await press($, 'deep-yes')
+  expect((await hunts($)).filter(x => x.id === 'rev_deep2')).toEqual([theirs])
+  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep2 already exists for rev_1, followed in another session.')
+  expect(await note($)).not.toContain('rev_deep2')
+})
+
+test('started:false for a deep hunt nobody here tracks is tracked as pressed, and the agent told', async ($, on) => {
+  const { seen } = await offered($, on)
+  postReply = () => started('rev_deep3', false)
+  await press($, 'deep-yes')
+  expect((await hunts($)).find(x => x.id === 'rev_deep3')).toMatchObject({ state: 'running', pressed: { parent: 'rev_1' } })
+  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep3 already exists for rev_1.')
+  expect(await note($)).toContain('rev_deep3 from the offer button')
+})
+
+test('a 4xx is "not started" in the status\'s own words, and nothing is tracked or told', async ($, on) => {
+  const { seen } = await offered($, on)
+  const words: [number, string][] = [[400, 'the button is out of date, update the plugin'], [402, 'no credit for a deep hunt'],
+    [403, 'the key that ran this review is revoked or expired'], [404, 'this offer is no longer valid'], [409, 'ask in the chat to see why'],
+    [429, 'a limit is reached, try later'], [418, 'the server refused (418)']]
+  for (const [status, said] of words) {
+    await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+    postReply = () => ({ status, text: '{"error":"x"}' })
+    await press($, 'deep-yes')
+    expect(seen.toasts.at(-1)).toBe(`OhMyBug: deep hunt not started: ${said}.`)
+  }
+  expect((await hunts($)).map(h => h.id)).toEqual(['rev_1'])
+  expect(seen.prompts).toEqual([])
+  expect(await note($)).not.toContain('offer button')
+})
+
+test('503 is unknown, never "not started": a proxy or a down server answers it too', async ($, on) => {
+  const { seen } = await offered($, on)
+  postReply = () => ({ status: 503, text: '{}' })
+  await press($, 'deep-yes')
+  expect(seen.toasts.at(-1)).toBe('OhMyBug: no answer from the server: ask in the chat whether the deep hunt started.')
+  expect((await hunts($)).map(h => h.id)).toEqual(['rev_1'])
+})
+
+test('no answer, a 5xx, an unreadable 2xx or one without a review id or status URL is unknown, never "not started"', async ($, on) => {
+  const { seen } = await offered($, on)
+  const replies: ({ status: number; text: string } | null)[] = [null, { status: 500, text: '{}' }, { status: 200, text: 'not json' },
+    { status: 200, text: '{"started":true}' }, { status: 200, text: '{"review_id":"rev_x","started":true}' }]
+  for (const r of replies) {
+    await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+    postReply = () => r
+    await press($, 'deep-yes')
+    expect(seen.toasts.at(-1), JSON.stringify(r)).toBe('OhMyBug: no answer from the server: ask in the chat whether the deep hunt started.')
+  }
+  expect((await hunts($)).map(h => h.id)).toEqual(['rev_1'])
+})
+
+test('Not today with a snooze URL posts it: the pause said with its end, refusals and lost answers said apart, nothing stored', async ($, on) => {
+  const { seen } = await offered($, on)
+  const until = '2026-11-12T10:00:00.000Z'
+  postReply = () => ({ status: 200, text: JSON.stringify({ snoozed_until: until }) })
+  await press($, 'deep-snooze')
+  expect(seen.posts).toEqual([{ url: SNOOZE, press: '1' }])
+  expect(seen.prompts).toEqual([])
+  expect(seen.toasts.at(-1)).toBe(`OhMyBug: deep offers paused until ${new Date(until).toLocaleString()}.`)
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  postReply = () => ({ status: 404, text: '{}' })
+  await press($, 'deep-snooze')
+  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep offers not paused: this offer is no longer valid.')
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  postReply = () => null
+  await press($, 'deep-snooze')
+  expect(seen.toasts.at(-1)).toBe('OhMyBug: no answer from the server: the pause may not be saved.')
+  expect((await hunts($)).map(h => h.id)).toEqual(['rev_1'])
+})
+
+test('button URLs off the hunt\'s own server, not https, with a query or off the door\'s path keep the chat buttons: nothing is posted', async ($, on) => {
+  const offers = [
+    { start_url: 'https://evil.test/deep-offer/rev_1/x/start', snooze_url: 'https://evil.test/deep-offer/rev_1/x/snooze' },
+    { start_url: 'http://status.test/deep-offer/rev_1/x/start', snooze_url: 'http://status.test/deep-offer/rev_1/x/snooze' },
+    { start_url: `${START}?force=1`, snooze_url: `${SNOOZE}#x` },
+    { start_url: 'https://status.test/live/x/start', snooze_url: 'https://status.test/live/x/snooze' },
+  ]
+  let offer = withButtons(offers[0])
+  mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  on('tool.call', { tool: GET }, async () => ({ result: { content: [] }, text: offer }))
+  const seen = world(on, JSON.stringify({ status: 'running' }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  for (const o of offers) {
+    offer = withButtons(o); seen.prompts.length = 0
+    await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+    await press($, 'deep-yes')
+    await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+    await press($, 'deep-snooze')
+    expect(seen.posts).toEqual([])
+    expect(seen.prompts[0]).toBe('Yes, run the deep hunt for rev_1.')
+    expect(seen.prompts[1]).toContain('{"deep": 24}')
+  }
+})
+
+test('the agent\'s own escalation answered already_escalated keeps the pressed record as it is', async ($, on) => {
+  await offered($, on)
+  postReply = () => started('rev_deep1')
+  await press($, 'deep-yes')
+  const before = (await hunts($)).find(x => x.id === 'rev_deep1')
+  answer.submit = JSON.stringify({ review_id: 'rev_deep1', already_escalated: true, mode: 'full', status_url: 'https://status.test/r/rev_deep1/status' })
+  await $.tool.call({ tool: SUBMIT, deep: 'rev_1' } as never)
+  expect((await hunts($)).find(x => x.id === 'rev_deep1')).toEqual(before)
 })
 
 test('a status URL the network refuses is said in the status line, not hidden', async ($, on) => {

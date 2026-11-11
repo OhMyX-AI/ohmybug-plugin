@@ -181,7 +181,7 @@ what happened.
 | Merge gate, secret scan, hunt records | yes | yes | yes |
 | Hunt status in the status line, a toast when a hunt finishes or asks for files | yes | — | — |
 | Band above the prompt when a tracked hunt finishes, fails or asks for files: the news only, no button; it goes once the agent reads the hunt or the next turn starts | yes | — | — |
-| Deep-hunt offer (the `deep_offer` of a tracked hunt's `get_findings`) as **Run deep hunt** — pressing it is your consent — **Not now**, which sends nothing, and **Not today**, which asks the agent to pause the offer for 24 hours | yes | — | — |
+| Deep-hunt offer (the `deep_offer` of a tracked hunt's `get_findings`) as **Run deep hunt** — pressing it is your consent, sent to the server itself when the offer carries its button addresses (else asked of the agent) — **Not now**, which sends nothing, and **Not today**, which pauses the offer for 24 hours the same way | yes | — | — |
 | A merge the gate refused: the gate's own words in the band, no button; it goes when the next turn starts | yes | — | — |
 | Findings drawn as a card (`show the raw answer` keeps the original) | yes | — | — |
 | `/hunts` pane | yes | — | — |

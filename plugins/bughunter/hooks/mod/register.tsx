@@ -51,13 +51,16 @@ type BughunterHunt = {
   nextAt: number
   /** The session that submitted it: the store is shared by every session of this machine. */
   session?: string
+  /** Started (or found) by the person's Run deep hunt press on the offer for `parent`, not by the agent: the agent is
+   *  told about it in the prompt until it reads the result (#3307). */
+  pressed?: { parent: string }
 }
 
 /** The one band above the prompt. `id` is always a tracked hunt; `state` is the
  *  state the mod saw it move into, re-checked before any action. */
 type BughunterBand =
   | { kind: 'hunt'; id: string; state: BughunterHunt['state']; text: string }
-  | { kind: 'deep'; id: string; text: string; strong?: boolean; price?: number }
+  | { kind: 'deep'; id: string; text: string; strong?: boolean; price?: number; start?: string; snooze?: string }
   | { kind: 'gate'; id?: string; text: string }
   | null
 
@@ -169,7 +172,8 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     // input: nothing started, nothing charged. Keep the record as it is.
     // The hunt belongs to the chat that asked for it just now: adopt it, or the
     // chat that was told "already running" would track nothing.
-    if (at >= 0 && body.already_running === true) {
+    // A second escalation is answered with the review's first deep hunt (`already_escalated`, #3318): the same.
+    if (at >= 0 && (body.already_running === true || body.already_escalated === true)) {
       if (list[at]!.session !== sessionId) { list[at] = { ...list[at]!, session: sessionId }; await save($, list); await refreshStatus($) }
       return
     }
@@ -190,7 +194,9 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     const offer = body.deep_offer as Record<string, unknown> | undefined
     if (kind === 'get_findings' && state === 'done' && offer && typeof offer === 'object' && str(offer.pitch)) {
       // A strong offer is the server's recommendation, with its reasons in the pitch; the price is the server's quote.
-      setBand($, { kind: 'deep', id, text: str(offer.pitch)!.slice(0, 280), strong: offer.strength === 'strong', price: num(offer.price_usd) })
+      // Its own buttons when the server sends their addresses (#3307); an older server's offer keeps the chat buttons.
+      setBand($, { kind: 'deep', id, text: str(offer.pitch)!.slice(0, 280), strong: offer.strength === 'strong', price: num(offer.price_usd),
+        start: buttonUrl(offer.start_url, list[at]!.statusUrl), snooze: buttonUrl(offer.snooze_url, list[at]!.statusUrl) })
     }
   } else if (at >= 0 && kind === 'confirm_findings' && num(body.confirmed) !== undefined) {
     list[at] = { ...list[at]!, judged: true }
@@ -317,6 +323,80 @@ async function apply($: Engine, id: string, change: (cur: BughunterHunt) => Part
   return next
 }
 
+const httpsUrl = (v: unknown): string | undefined => { const s = str(v); return s && /^https:\/\//.test(s) ? s : undefined }
+/** A button's address, only on the hunt's own server (the status URL's origin), https, with no query or fragment:
+ *  anything else keeps the chat buttons, so a press never posts somewhere the hunt does not live. */
+function buttonUrl(v: unknown, statusUrl: string | undefined): string | undefined {
+  const s = httpsUrl(v)
+  if (!s || !statusUrl) return undefined
+  try {
+    const u = new URL(s)
+    return u.origin === new URL(statusUrl).origin && !u.search && !u.hash && u.pathname.startsWith('/deep-offer/') ? s : undefined
+  } catch { return undefined }
+}
+
+/** One press of an offer button: the server's answer, sorted the one way the table on #3307 allows. Only a 4xx is a
+ *  refusal ("not started"); no answer, a 5xx or a 2xx that cannot be read is unknown. */
+type Pressed = { kind: 'ok'; body: Record<string, unknown> } | { kind: 'refused'; status: number } | { kind: 'unknown' }
+async function pressUrl($: Engine, url: string): Promise<Pressed> {
+  let res
+  try { res = await $.http.fetch(url, { method: 'POST', headers: { 'x-ohmybug-press': '1' } }) } catch { return { kind: 'unknown' } }
+  if (res.status >= 400 && res.status < 500) return { kind: 'refused', status: res.status }
+  if (!res.ok) return { kind: 'unknown' }
+  try {
+    const body = JSON.parse(res.text) as unknown
+    return body && typeof body === 'object' ? { kind: 'ok', body: body as Record<string, unknown> } : { kind: 'unknown' }
+  } catch { return { kind: 'unknown' } }
+}
+
+const REFUSED: Record<number, string> = {
+  400: 'the button is out of date, update the plugin',
+  402: 'no credit for a deep hunt',
+  403: 'the key that ran this review is revoked or expired',
+  404: 'this offer is no longer valid',
+  409: 'ask in the chat to see why',
+  429: 'a limit is reached, try later',
+}
+const refusedWords = (status: number) => REFUSED[status] ?? `the server refused (${status})`
+
+/** Run deep hunt, pressed: the row of #3307's table the answer falls in. A record is added only for a deep hunt this
+ *  machine does not track; a tracked one, here or in another session, is never replaced or touched. */
+async function pressStart($: Engine, parent: string, url: string) {
+  const r = await pressUrl($, url)
+  if (r.kind === 'refused') { await $.ui.toast(`OhMyBug: deep hunt not started: ${refusedWords(r.status)}.`); return }
+  const id = r.kind === 'ok' ? str(r.body.review_id) : undefined
+  const statusUrl = r.kind === 'ok' ? httpsUrl(r.body.status_url) : undefined
+  if (!id || !statusUrl) { await $.ui.toast('OhMyBug: no answer from the server: ask in the chat whether the deep hunt started.'); return }
+  const started = r.kind === 'ok' && r.body.started === true
+  // Every await before the snapshot, as observe() takes it.
+  const now = await $.clock.now()
+  const cwd = await $.session.cwd()
+  const held = huntList.find(h => h.id === id)
+  if (held) {
+    await $.ui.toast(`OhMyBug: deep hunt ${id} already exists for ${parent}${ours(held, cwd) ? '' : ', followed in another session'}.`)
+    return
+  }
+  await save($, [...huntList, { id, mode: 'full', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false,
+    nextAt: now + 15_000, pressed: { parent } }])
+  await $.ui.toast(started ? `OhMyBug: deep hunt ${id} started for ${parent}.` : `OhMyBug: deep hunt ${id} already exists for ${parent}.`)
+  await refreshStatus($)
+}
+
+/** Not today, pressed: the server's pause, said as the server answered it. Nothing is stored here. */
+async function pressSnooze($: Engine, url: string) {
+  const r = await pressUrl($, url)
+  if (r.kind === 'refused') { await $.ui.toast(`OhMyBug: deep offers not paused: ${refusedWords(r.status)}.`); return }
+  const until = r.kind === 'ok' ? str(r.body.snoozed_until) : undefined
+  const at = until ? new Date(until) : undefined
+  await $.ui.toast(at && !Number.isNaN(at.getTime())
+    ? `OhMyBug: deep offers paused until ${at.toLocaleString()}.`
+    : 'OhMyBug: no answer from the server: the pause may not be saved.')
+}
+
+/** What the agent is told about a deep hunt the person started from the band: it did not call submit_review for it. */
+const pressedNote = (h: BughunterHunt) =>
+  `The person started OhMyBug deep hunt ${h.id} from the offer button for ${h.pressed!.parent}; it is tracked. Do not call submit_review for it. Read it with get_findings (review_id ${h.id}) when it ends.`
+
 export const register: Register = on => {
   // Read from the environment, not the manifest's userConfig: older Claude Code
   // validates plugin.json strictly and refuses keys it does not know, and a
@@ -358,16 +438,20 @@ export const register: Register = on => {
   // gone once confirm_findings for that id is seen or the hunt is 6 hours old.
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
-    // Shown to the person or not told to the agent: OHMYBUG_STATUS=0 drops both.
-    if (!ctx.showStatus) return composed
     try {
       const cwd = await $.session.cwd()
       const now = await $.clock.now()
-      if (!huntList.some(h => awaitsVerdicts(h, cwd, now))) return composed
-      const text = huntList.filter(h => awaitsVerdicts(h, cwd, now)).map(h => h.findings === 0
-        ? `OhMyBug hunt ${h.id} is done with 0 findings and is not confirmed yet. Next: confirm_findings for ${h.id} with verdicts: [].`
-        : `OhMyBug hunt ${h.id} is done and its verdicts are not sent. Next: verify each finding, then confirm_findings for ${h.id}.`).join('\n')
-      return { sections: [...composed.sections, { id: 'bughunter:next-step', text, scope: 'session' as const }] }
+      const lines = [
+        // A deep hunt the person started from the band, until the agent reads it (#3307): the agent did not submit it.
+        ...huntList.filter(h => ours(h, cwd) && h.pressed && !h.seen && now - h.startedAt < STALE_MS).map(pressedNote),
+        // Shown to the person or not told to the agent: OHMYBUG_STATUS=0 drops the verdicts line (the press note is not
+        // a status-line line: the person pressed, and the agent must know the hunt is not its own).
+        ...huntList.filter(h => ctx.showStatus && awaitsVerdicts(h, cwd, now)).map(h => h.findings === 0
+          ? `OhMyBug hunt ${h.id} is done with 0 findings and is not confirmed yet. Next: confirm_findings for ${h.id} with verdicts: [].`
+          : `OhMyBug hunt ${h.id} is done and its verdicts are not sent. Next: verify each finding, then confirm_findings for ${h.id}.`),
+      ]
+      if (!lines.length) return composed
+      return { sections: [...composed.sections, { id: 'bughunter:next-step', text: lines.join('\n'), scope: 'session' as const }] }
     } catch {
       return composed
     }
@@ -422,13 +506,18 @@ export const register: Register = on => {
       lead = `Deep hunt ${b.strong ? 'recommended' : 'offered'} for ${b.id}${b.price !== undefined ? ` (${b.price} USD, only if a real bug is confirmed)` : ''}: `
       actions = [
         <Button key="deep-yes" label="Run deep hunt" hotkey="1" variant="primary" onPress={async () => {
-          close(); await $.prompt.submit({ text: `Yes, run the deep hunt for ${b.id}.` })
+          // Closed before the request: a second press cannot happen while the first is in flight.
+          close()
+          if (b.start) await pressStart($, b.id, b.start)
+          else await $.prompt.submit({ text: `Yes, run the deep hunt for ${b.id}.` })
         }} />,
         <Button key="deep-no" label="Not now" hotkey="2" role="dismiss" onPress={close} />,
         // The person's own word: the offer stays quiet for a day. The agent writes it down (set_policy
         // snooze), because the server keeps it for every session; asking for a deep hunt still works.
         <Button key="deep-snooze" label="Not today" hotkey="3" onPress={async () => {
-          close(); await $.prompt.submit({ text: 'Not today: do not offer me the deep hunt for the next 24 hours. Call set_policy with snooze {"deep": 24}, and say when it ends.' })
+          close()
+          if (b.snooze) await pressSnooze($, b.snooze)
+          else await $.prompt.submit({ text: 'Not today: do not offer me the deep hunt for the next 24 hours. Call set_policy with snooze {"deep": 24}, and say when it ends.' })
         }} />,
       ]
     } else if (b.kind === 'gate') {
