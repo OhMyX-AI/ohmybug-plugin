@@ -23,7 +23,7 @@
 
 import type { EngineInterface as Engine, Register, RenderChildren } from 'claude-code'
 
-import { bodyOf, catchOf, findingsOf, gateReason, halfBlocks, mascotOf, minutes, num, pollState, speciesOf, str, toolKind } from './parse'
+import { bodyOf, catchOf, findingsOf, gateReason, halfBlocks, huntLabel, mascotOf, minutes, num, pollState, speciesOf, str, toolKind } from './parse'
 
 /** The status door journals which waiter polled (`w`): the skill's watch loop sends `loop`, the mod `mod`. */
 export const tagged = (url: string): string => {
@@ -169,7 +169,7 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     if (!statusUrl) return
     if (bandNow?.kind === 'deep' || bandNow?.kind === 'gate') setBand($, null)
     const done = str(body.status) === 'done'
-    const h: BughunterHunt = { id, mode: str(body.mode) ?? 'fast', state: done ? 'done' : 'running', statusUrl,
+    const h: BughunterHunt = { id, mode: huntLabel(body, 'fast'), state: done ? 'done' : 'running', statusUrl,
       cwd, session: sessionId, startedAt: now, median: num(body.recent_median_minutes), seen: done,
       nextAt: now + 60_000 }
     // The server answered with the hunt already queued or running for this input (or, for a second escalation, the
@@ -662,7 +662,7 @@ export const register: Register = on => {
       } else {
         const found = findingsOf(body).sort((a, b) => SEVERITY.indexOf(a.severity) - SEVERITY.indexOf(b.severity))
         rows = [
-          withMascot(<Text>{str(body.mode) ?? 'fast'} hunt {id} · done · {found.length} finding{found.length === 1 ? '' : 's'}</Text>),
+          withMascot(<Text>{huntLabel(body, 'fast')} hunt {id} · done · {found.length} finding{found.length === 1 ? '' : 's'}</Text>),
           ...found.map(f => (
             <Box flexDirection="column">
               <Text>

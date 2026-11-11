@@ -16,10 +16,11 @@ OhMyBug is a cloud service: it reviews a diff with an orchestrated fleet of
 adversarial reviewers on its own models and returns findings. This agent then
 verifies each finding against the local codebase and reports verdicts.
 Billing is flat per review whose verdicts confirm at least one real major
-bug – no matter how many: 4 USD for a fast hunt, 12 USD for a deep hunt,
-24 USD for a deep hunt over a wide change (11 or more folder chunks). The
-server is the authority on prices: when `get_balance` `prices` or a
-`deep_offer.price_usd` names a different figure, quote that one. Severity uses the merge boundary: a finding
+bug – no matter how many: by the hunt mode, 1 USD cheap, 2 USD ultrafast or
+4 USD fast (see "Hunt modes" below); 12 USD for a deep hunt, 24 USD for a deep
+hunt over a wide change (11 or more folder chunks). The server is the
+authority on prices: when `get_balance` `modes` or `prices`, or a
+`deep_offer.price_usd`, names a different figure, quote that one. Severity uses the merge boundary: a finding
 is a billable major when a reviewer would refuse the merge over it
 (`critical` / `high` / `medium`); a `low` nit is confirmed for stats and
 never billed.
@@ -466,7 +467,8 @@ This works in two cases, checked server-side in this order:
 - No error and a `review_id` → it worked; skip context packing entirely, go
   to the monitor step. The mode is `fast` – stage one – unless this submit
   carried `deep: true` on the user's word (§3b): then it is `deep`, and the
-  watcher is the deep one. Readable repo access means the reviewers fetch the
+  watcher is the deep one. A stage-one answer's `hunt_mode` (`cheap` or
+  `ultrafast`, §3a) names the watcher's mode instead of `fast`. Readable repo access means the reviewers fetch the
   files they need themselves instead of asking you.
 - Error `diff_required` (private repo without the App) → this is rung 2 above:
   offer the one-click App install FIRST and retry, because it removes the payload
@@ -669,7 +671,7 @@ refused each one, and the agent sent the same refused call again for the rest
 of the turn.
 
 ```bash
-mode=fast # deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)
+mode=fast # the submit answer's hunt_mode (cheap, ultrafast or fast); deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)
 url='<status_url>'; case $url in *\?*) url="$url&w=loop" ;; *) url="$url?w=loop" ;; esac # names this waiter on the server's read journal
 watch="$HOME/.ohmybug/watch/<review_id>"; mkdir -p "${watch%/*}"
 every=<watch_poll_s> # seconds between polls: the submit response's watch_poll_s seeds it
@@ -913,6 +915,47 @@ Do not stall: if the user is away and the files pass the exclusion rules,
 send them – the manifest keeps it auditable. If nothing can be sent, call
 `provide_files` with an empty list so the review proceeds without waiting.
 
+### 3a. Hunt modes: cheap, ultrafast, fast
+
+The first stage runs in one of three modes. Each bills only when the user's
+verdicts confirm a real bug, and the server's figures win over these:
+
+| mode | price | time |
+|---|---|---|
+| `cheap` | 1 USD | about 3 minutes, up to 10 |
+| `ultrafast` | 2 USD | about 1 minute, up to 2 |
+| `fast` | 4 USD | up to 15 minutes |
+
+- **The mode is the user's word.** When they name one – "cheap hunt",
+  "ultrafast review", `cheap` / `ultrafast` / `fast` or `--mode <m>` as the
+  argument of `/bughunter:review` – send it as `submit_review`'s top-level
+  `mode`. Otherwise send no `mode`: the server runs the key's default mode,
+  else the account's, else `fast`. Never pick a mode on your own to save or
+  spend the user's money.
+- **Before the submit**, say in one line what will run: the mode, its price
+  and its time, read from `get_balance` `modes` (`price_usd`,
+  `minutes_typical`, `minutes_up_to`; `default: true` marks the one that runs
+  when no mode is sent). No `modes` there (an older server): name the mode only.
+- **A default.** "Make cheap my default" (any mode, any language): call
+  `set_policy` with `default_mode: "<mode>"` and say it is set for the whole
+  account. A key's own default (set on https://app.ohmybug.ai/me, per key)
+  wins over the account's: when `get_balance` `modes` marks another mode as
+  `default` after the change, say so. `/bughunter:stats` shows the default.
+- **The repository.** `cheap` and `ultrafast` read the repository, so they
+  need rung 1's `meta` (`repo` + `ref` = the pushed head sha + `base_branch`)
+  or a snapshot; on a diff alone the server refuses them. `ultrafast` takes a
+  diff under 1 MB.
+- **A refusal starts nothing and charges nothing.** `mode_unavailable` (it
+  lists `modes_available`), `mode_needs_repo`, `mode_too_large`,
+  `mode_with_deep`: show the server's answer verbatim, then offer what it says
+  to send instead (usually `mode: "fast"`) with ONE yes/no question – never
+  switch modes silently.
+- **Deep is not a mode.** Never send `mode` with `deep`; a default mode never
+  applies to a deep hunt. The deep offer after any mode is the same.
+- **The monitor.** The submit answer's `hunt_mode` is the mode that runs: the
+  watch loop's `mode=` takes it, so the compact line reads
+  `bughunt · cheap · running`. No `hunt_mode` (an older server): `fast`.
+
 ### 3b. Two stages: the fast hunt, then maybe the deep one
 
 **A review starts fast** – the diff plus whatever files the reviewers ask
@@ -1035,8 +1078,8 @@ sees the table before you send it.
 
 Honesty rules (non-negotiable):
 - The verdict is the billing meter. A review with at least one `REAL` major
-  (`critical`/`high`/`medium`) costs the user its flat price – 4 USD fast, 12 or
-  24 USD deep (extra REALs and `low` nits are free); `NOT_REAL`
+  (`critical`/`high`/`medium`) costs the user its flat price – 1, 2 or 4 USD
+  by mode (cheap, ultrafast, fast), 12 or 24 USD deep (extra REALs and `low` nits are free); `NOT_REAL`
   and `UNCLEAR` cost nothing and count against OhMyBug's quality stats.
 - Never mark a finding `NOT_REAL` to avoid the charge when the bug is real –
   and never fix a finding you refused to confirm. OhMyBug audits later diffs;

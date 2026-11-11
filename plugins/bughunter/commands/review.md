@@ -25,3 +25,8 @@ If the server refuses (`repo_required`, `repo_too_big`, `commit_required`,
 `fast_running`, `deep_at_capacity`), show its answer verbatim and offer the
 fast hunt instead; never downgrade silently. Without those words the hunt is
 fast, and deep only when the server offers it and the user agrees.
+
+`cheap`, `ultrafast` or `fast` (bare or as `--mode <m>`) picks the hunt mode:
+send it as `submit_review`'s `mode`, following the skill's "Hunt modes"
+section; without one, send no `mode` and the user's default runs. A mode does
+not go with `deep`.

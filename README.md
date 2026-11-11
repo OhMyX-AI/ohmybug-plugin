@@ -6,18 +6,22 @@
 
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/6d7g8J44C7)
 [![#1 on ReviewBench](https://img.shields.io/badge/ReviewBench-%231-0F7B5F)](https://review-bench.ai)
-[![Price: from $4](https://img.shields.io/badge/price-from%20%244-0F7B5F)](https://ohmybug.ai)
+[![Price: from $1](https://img.shields.io/badge/price-from%20%241-0F7B5F)](https://ohmybug.ai)
 [![Listed on mcp.so](https://img.shields.io/badge/listed%20on-mcp.so-111111)](https://mcp.so/servers/ohmybug)
 
 [![OhMyBug: a cloud bug hunt for your coding agent's changes](https://ohmybug.ai/og.png)](https://ohmybug.ai)
 
 We find the bugs your Claude Code missed. You pay only when your own Claude
-confirms real bugs: $4 per bug-finding review (however many bugs it
+confirms real bugs: from $1 per bug-finding review (however many bugs it
 holds), $12 for a deep hunt you choose ($24 on a wide change), minor findings
 free, first review free.
 
-- **Fast review** · $4 · finds 73% of significant bugs · up to 15 minutes
+- **Cheap review** · $1 · about 3 minutes, up to 10
+- **Ultrafast review** · $2 · about 1 minute, up to 2
+- **Fast review** (the default) · $4 · finds 73% of significant bugs · up to 15 minutes
 - **Deep review** · $12 ($24 on a wide change) · finds 90% of significant bugs · up to 2 hours
+
+Pick a mode for one hunt with `/bughunter:review cheap` (or `ultrafast`, `fast`), or tell your agent "make cheap my default". Cheap and ultrafast read the repository, so they need a pushed GitHub commit; a key's own default is set on [app.ohmybug.ai/me](https://app.ohmybug.ai/me).
 
 See the bug species our hunts keep finding in the [Bugarium](https://mcp.ohmybug.ai/bugs).
 
@@ -155,7 +159,7 @@ repository per week, and is not a merge gate.
 - Your own agent verifies each finding against your codebase and reports
   REAL / NOT_REAL / UNCLEAR. You see and approve the verdicts.
 - Billing: one flat price per review with confirmed real bugs — one or ten,
-  same price: $4 fast, $12 deep, $24 deep on a wide change (11+ folder chunks). Minor findings, review runs, false positives, unclear — $0.
+  same price: $1 cheap, $2 ultrafast, $4 fast, $12 deep, $24 deep on a wide change (11+ folder chunks). Minor findings, review runs, false positives, unclear — $0.
 - `/bughunter:stats` shows your record: bugs found, reviews run, balance.
 - Before a diff or file contents leave your machine (`submit_review`,
   `provide_files`), a secret scan refuses a payload that carries a credential

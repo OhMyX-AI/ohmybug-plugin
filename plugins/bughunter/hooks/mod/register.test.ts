@@ -104,6 +104,23 @@ test('a hunt that finishes raises a toast and a band, and starts no turn by itse
   expect(seen.prompts).toHaveLength(0)
 })
 
+for (const [hunt_mode, label] of [['cheap', 'cheap'], ['ultrafast', 'ultrafast'], ['x\u001b[2J', 'fast']] as const) {
+  test(`a hunt whose submit answer carries hunt_mode ${JSON.stringify(hunt_mode)} reads "bughunt ${label}" on the status line`, async ($, on) => {
+    mock.clock(on)
+    mock.store(on)
+    mock.env(on, {})
+    const status: (string | undefined)[] = []
+    engine(on)
+    on('http.fetch', async () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ status: 'running', next_poll_after_s: 60 }) } }) as never)
+    on('ui.status', async ($, e) => { status.push(e.text); return { value: undefined } as never })
+    on('tool.call', { tool: SUBMIT }, async () => ({ result: { content: [] }, text: JSON.stringify({ review_id: 'rev_m', status: 'running',
+      mode: 'fast', hunt_mode, status_url: 'https://status.test/r/rev_m/status', recent_median_minutes: 3 }) }))
+    await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+    await $.tool.call({ tool: SUBMIT, meta: { repo: 'o/r', ref: 'abc', base_branch: 'main' } } as never)
+    expect(status.at(-1)).toMatch(new RegExp(`^bughunt ${label} 0/~3 min`))
+  })
+}
+
 test('every status poll the mod makes names its waiter: w=mod, appended after any query the URL already has', async ($, on) => {
   const clock = mock.clock(on)
   mock.store(on)

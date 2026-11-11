@@ -815,7 +815,14 @@ for phrase in ("**Deep first, only on the user's word.**",
                "the compact line reads `bughunt · deep · running`"):
     assert phrase in skill, phrase
 assert "unless the user asked for\nthe deep hunt outright" in skill
-assert "mode=fast # deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)" in monitor_code
+assert "mode=fast # the submit answer's hunt_mode (cheap, ultrafast or fast); deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)" in monitor_code
+# Hunt modes (#3342): the user's word picks one, none sent otherwise; refusals verbatim; never with deep.
+for phrase in ("### 3a. Hunt modes: cheap, ultrafast, fast", "send it as `submit_review`'s top-level\n  `mode`", "Otherwise send no `mode`",
+               "`set_policy` with `default_mode: \"<mode>\"`", "`mode_unavailable`", "`mode_needs_repo`", "`mode_too_large`",
+               "`mode_with_deep`", "never\n  switch modes silently", "Never send `mode` with `deep`", "`bughunt · cheap · running`"):
+    assert phrase in skill, phrase
+review_cmd = open(str(Path(router).parent.parent / "commands/review.md"), encoding="utf-8").read()
+assert "send it as `submit_review`'s `mode`" in review_cmd and "A mode does\nnot go with `deep`." in review_cmd
 command = open(str(Path(router).parent.parent / "commands/review.md"), encoding="utf-8").read()
 for phrase in ("except `deep` / `--deep`", "carries\n`deep: true`", "no fast stage first, no second question", "show its answer verbatim and offer the\nfast hunt instead; never downgrade silently"):
     assert phrase in command, phrase

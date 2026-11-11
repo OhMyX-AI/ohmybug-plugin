@@ -1,7 +1,7 @@
 {
   "name": "bughunter",
-  "version": "0.152.0",
-  "description": "OhMyBug: cloud bug-hunt as your code review, as soon as a change is ready. Your agent verifies each finding; from $4 per review that finds real bugs, first review free.",
+  "version": "0.153.0",
+  "description": "OhMyBug: cloud bug-hunt as your code review, as soon as a change is ready. Your agent verifies each finding; from $1 per review that finds real bugs, first review free.",
   "author": {
     "name": "OhMyBug",
     "email": "hi@ohmybug.ai",
