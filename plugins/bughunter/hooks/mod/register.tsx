@@ -158,60 +158,82 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
   if (!body) return
   const id = str(body.review_id) ?? str(input.review_id)
   if (!id) return
-  // Every await before the snapshot: a tool result read meanwhile must not be
-  // undone by a stale copy of the list.
   const now = await $.clock.now()
   const cwd = await $.session.cwd()
-  const list = [...huntList]
-  const at = list.findIndex(h => h.id === id)
 
   if (kind === 'submit_review') {
     const statusUrl = str(body.status_url)
     if (!statusUrl) return
     if (bandNow?.kind === 'deep' || bandNow?.kind === 'gate') setBand($, null)
-    // The server answered with the hunt already queued or running for this
-    // input: nothing started, nothing charged. Keep the record as it is.
-    // The hunt belongs to the chat that asked for it just now: adopt it, or the
-    // chat that was told "already running" would track nothing.
-    // A second escalation is answered with the review's first deep hunt (`already_escalated`): the same.
-    if (at >= 0 && (body.already_running === true || body.already_escalated === true)) {
-      if (list[at]!.session !== sessionId) { list[at] = { ...list[at]!, session: sessionId }; await save($, list); await refreshStatus($) }
-      return
-    }
     const done = str(body.status) === 'done'
     const h: BughunterHunt = { id, mode: str(body.mode) ?? 'fast', state: done ? 'done' : 'running', statusUrl,
       cwd, session: sessionId, startedAt: now, median: num(body.recent_median_minutes), seen: done,
       nextAt: now + 60_000 }
-    if (at >= 0) list[at] = h; else list.push(h)
-  } else if (at >= 0 && (kind === 'get_findings' || kind === 'wait_review')) {
-    const state = pollState(body) ?? list[at]!.state
+    // The server answered with the hunt already queued or running for this input (or, for a second escalation, the
+    // review's first deep hunt): nothing started, nothing charged. The hunt belongs to the chat that asked for it just
+    // now: kept when it is this chat's, adopted when another chat tracks it, or the chat told "already running" would
+    // track nothing.
+    const again = body.already_running === true || body.already_escalated === true
+    await put($, id, cur => !cur ? h : again ? (ours(cur, cwd) ? undefined : adopt(cur, cwd)) : h)
+  } else if (kind === 'get_findings' || kind === 'wait_review') {
+    const state = pollState(body)
     const terminal = state === 'done' || state === 'failed'
     // Read here: whatever the server said before, this session now owes the verdicts.
-    list[at] = { ...list[at]!, state, seen: terminal || list[at]!.seen, settled: terminal ? false : list[at]!.settled,
-      findings: state === 'done' ? findingsOf(body).length : list[at]!.findings }
+    const next = await put($, id, cur => cur && {
+      ...cur, state: state ?? cur.state, seen: terminal || cur.seen, settled: terminal ? false : cur.settled,
+      findings: state === 'done' ? findingsOf(body).length : cur.findings })
+    if (!next) return
     if (bandNow?.kind === 'hunt' && bandNow.id === id) setBand($, null)
     if (heldId === id) heldId = undefined
     // The deep offer comes in the answer for this tracked hunt, and only there.
     const offer = body.deep_offer as Record<string, unknown> | undefined
-    if (kind === 'get_findings' && state === 'done' && offer && typeof offer === 'object' && str(offer.pitch)) {
+    if (kind === 'get_findings' && next.state === 'done' && offer && typeof offer === 'object' && str(offer.pitch)) {
       // A strong offer is the server's recommendation, with its reasons in the pitch; the price is the server's quote.
       // Its own buttons when the server sends their addresses; an older server's offer keeps the chat buttons.
       setBand($, { kind: 'deep', id, text: str(offer.pitch)!.slice(0, 280), strong: offer.strength === 'strong', price: num(offer.price_usd),
-        start: buttonUrl(offer.start_url, list[at]!.statusUrl), snooze: buttonUrl(offer.snooze_url, list[at]!.statusUrl) })
+        start: buttonUrl(offer.start_url, next.statusUrl), snooze: buttonUrl(offer.snooze_url, next.statusUrl) })
     }
-  } else if (at >= 0 && kind === 'confirm_findings' && num(body.confirmed) !== undefined) {
-    list[at] = { ...list[at]!, judged: true }
+  } else if (kind === 'confirm_findings' && num(body.confirmed) !== undefined) {
+    const next = await put($, id, cur => cur && { ...cur, judged: true })
+    if (!next) return
     if (bandNow?.id === id && bandNow.kind === 'hunt') setBand($, null)
   } else {
     return
   }
-  await save($, list)
   await refreshStatus($)
 }
 
-async function save($: Engine, list: BughunterHunt[]) {
-  setHunts($, list)
-  await $.store.set('hunts', list)
+/** The stored hunts, pruned to STALE_MS: the one list every session shares. */
+async function loadHunts($: Engine, now: number): Promise<BughunterHunt[]> {
+  const saved = (await $.store.get('hunts')) as BughunterHunt[] | undefined
+  return Array.isArray(saved) ? saved.filter(h => now - h.startedAt < STALE_MS) : []
+}
+
+/** Taking over a hunt another chat tracks. What its agent did is not this agent's: unread here until this agent reads
+ *  it, so it is told to read before it owes verdicts (a verdict sent stays sent: `judged` is the server's). */
+const adopt = (h: BughunterHunt, cwd: string): BughunterHunt => ({ ...h, session: sessionId, cwd, seen: false })
+
+/** The one way a hunt is written: the store is read again, this one record changed as it stands there NOW, and the
+ *  store written back and taken as this session's view. Another session's records are never written from this
+ *  session's copy of them. `change` gets the stored record (undefined when none) and returns the new one, or undefined
+ *  to write nothing. One write at a time per session: an await inside must not interleave two of them.
+ *  shortcut: get-then-set is not atomic across sessions; two chats writing within the same few ms can still lose one
+ *  write (the store has no compare-and-set). */
+let writing: Promise<unknown> = Promise.resolve()
+function put($: Engine, id: string, change: (cur: BughunterHunt | undefined) => BughunterHunt | undefined) {
+  const run = writing.then(async () => {
+    const list = await loadHunts($, await $.clock.now())
+    const at = list.findIndex(h => h.id === id)
+    const next = change(at >= 0 ? list[at] : undefined)
+    if (next) {
+      if (at >= 0) list[at] = next; else list.push(next)
+      await $.store.set('hunts', list)
+    }
+    setHunts($, list)
+    return next
+  })
+  writing = run.catch(() => undefined)
+  return run
 }
 
 async function refreshStatus($: Engine) {
@@ -261,6 +283,8 @@ async function tick($: Engine) {
 async function pollDue($: Engine) {
   const cwd = await $.session.cwd()
   const now = await $.clock.now()
+  // Another chat may have taken a hunt over, read or judged it since: poll only what the store says is this chat's.
+  setHunts($, await loadHunts($, now))
   // A done hunt nobody here has read yet is asked again on the slow clock: the
   // server knows when another session read or judged it, and the nudges (band,
   // auto-resume) then read that here with no network call of their own.
@@ -276,7 +300,8 @@ async function pollDue($: Engine) {
     const cur = huntList.find(x => x.id === h.id)
     if (!cur || cur.seen) continue
     const settle = dealtWith(body)
-    await save($, huntList.map(x => (x.id === h.id ? { ...x, nextAt: now + 240_000, ...(settle ? settledBy(body) : {}) } : x)))
+    const next = await put($, h.id, x => x && ours(x, cwd) && !x.seen ? { ...x, nextAt: now + 240_000, ...(settle ? settledBy(body) : {}) } : undefined)
+    if (!next) continue
     if (settle && bandNow?.kind === 'hunt' && bandNow.id === h.id) setBand($, null)
     if (settle && heldId === h.id) heldId = undefined
   }
@@ -314,14 +339,11 @@ async function pollDue($: Engine) {
   await refreshStatus($)
 }
 
-/** Change one hunt as it stands NOW: the fetch awaited above may have let the
- *  agent read it, or submit another, and a stale copy would undo both. */
+/** Change one open hunt of this chat as it stands NOW: the fetch awaited above may have let the agent read it, or
+ *  another chat take it over, and a stale copy would undo either. */
 async function apply($: Engine, id: string, change: (cur: BughunterHunt) => Partial<BughunterHunt>) {
-  const cur = huntList.find(x => x.id === id)
-  if (!cur || !isOpen(cur)) return undefined
-  const next = { ...cur, ...change(cur) }
-  await save($, huntList.map(x => (x.id === id ? next : x)))
-  return next
+  const cwd = await $.session.cwd()
+  return put($, id, cur => cur && isOpen(cur) && ours(cur, cwd) ? { ...cur, ...change(cur) } : undefined)
 }
 
 const httpsUrl = (v: unknown): string | undefined => { const s = str(v); return s && /^https:\/\//.test(s) ? s : undefined }
@@ -373,10 +395,8 @@ const SNOOZE_IN_CHAT = 'Not today: do not offer me the deep hunt for the next 24
 
 /** Run deep hunt, pressed. A refusal is said and nothing changes. An unknown answer falls back to the chat button: a
  *  second escalation of the same review starts nothing on the server, so asking the agent cannot start a second hunt.
- *  A deep hunt the server answered with is looked up, said, then tracked only when no chat tracks it yet: kept as it
- *  is when this chat tracks it, and left untouched when another chat does (said so). Moving a record between chats is
- *  not safe while every session saves its whole list. The store is read again first, so a session that started
- *  tracking it since this one loaded is seen. */
+ *  A deep hunt the server answered with is said first, then tracked through put(): added when no chat tracks it,
+ *  kept as it is when this chat does, and adopted from another chat (unread here, so this agent is told to read it). */
 async function pressStart($: Engine, parent: string, url: string) {
   const r = await pressUrl($, url)
   if (r.kind === 'refused') { await $.ui.toast(`OhMyBug: deep hunt not started: ${REFUSED[r.status]}.`); return }
@@ -387,25 +407,14 @@ async function pressStart($: Engine, parent: string, url: string) {
     await $.prompt.submit({ text: START_IN_CHAT(parent) })
     return
   }
-  let held: BughunterHunt[] = []
-  let cwd = ''
+  await $.ui.toast(r.body.started === true ? `OhMyBug: deep hunt ${id} started for ${parent}.` : `OhMyBug: deep hunt ${id} already exists for ${parent}.`)
   try {
-    cwd = await $.session.cwd()
+    const cwd = await $.session.cwd()
     const now = await $.clock.now()
-    const saved = (await $.store.get('hunts')) as BughunterHunt[] | undefined
-    const stored = Array.isArray(saved) ? saved.filter(h => now - h.startedAt < STALE_MS) : []
-    held = [...huntList, ...stored].filter(h => h.id === id)
-  } catch {
-    // Unread: tracked here as new; the toast still says the hunt exists.
-  }
-  const elsewhere = held.length > 0 && !held.some(h => ours(h, cwd))
-  await $.ui.toast(elsewhere ? `OhMyBug: deep hunt ${id} already running for ${parent}, tracked in another chat.`
-    : r.body.started === true ? `OhMyBug: deep hunt ${id} started for ${parent}.` : `OhMyBug: deep hunt ${id} already exists for ${parent}.`)
-  if (held.length) return
-  try {
-    const now = await $.clock.now()
-    await save($, [...huntList, { id, mode: str(r.body.mode) ?? 'full', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now,
-      seen: false, nextAt: now + 15_000, pressed: { parent } }])
+    await put($, id, cur => !cur
+      ? { id, mode: str(r.body.mode) ?? 'full', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false,
+          nextAt: now + 15_000, pressed: { parent } }
+      : ours(cur, cwd) ? undefined : { ...adopt(cur, cwd), pressed: cur.pressed ?? { parent } })
     await refreshStatus($)
   } catch {
     // Said already; a bookkeeping slip must not hide that the hunt exists.

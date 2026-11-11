@@ -599,6 +599,7 @@ async function offered($: Dollar, on: On, offer = withButtons()) {
   on('prompt.compose', async () => ({ sections: [] }))
   on('tool.call', { tool: GET }, async () => ({ result: { content: [] }, text: answer.get }))
   on('tool.call', { tool: SUBMIT }, async () => ({ result: { content: [] }, text: answer.submit }))
+  on('tool.call', { tool: CONFIRM }, async () => ({ result: { content: [] }, text: confirmed('rev_1') }))
   const seen = world(on, JSON.stringify({ status: 'running' }))
   await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
   await $.tool.call({ tool: SUBMIT } as never)
@@ -636,33 +637,6 @@ test('a pressed deep hunt is polled by the mod: nobody else watches it', async (
   expect(seen.urls.some(u => u.startsWith('https://status.test/r/rev_deep1/status'))).toBe(true)
 })
 
-test('a press does not bring back a stale stored copy of a hunt this session holds newer', async ($, on) => {
-  await offered($, on)
-  const mine = hunts($).find(x => x.id === 'rev_1')!
-  expect(mine).toMatchObject({ state: 'done' })
-  // Another session saved its older copy of rev_1 since: running, unread.
-  stored.hunts = [{ ...mine, state: 'running', seen: false }]
-  postReply = () => started('rev_deep1')
-  await press($, 'deep-yes')
-  expect(hunts($).find(x => x.id === 'rev_1')).toMatchObject({ state: 'done' })
-})
-
-test('a press for a deep hunt another chat tracks and has read leaves it to that chat: this agent owes no verdicts for it', async ($, on) => {
-  const { seen } = await offered($, on)
-  const now = hunts($).find(x => x.id === 'rev_1')!.startedAt
-  const theirs = { id: 'rev_deep6', mode: 'full', state: 'done', statusUrl: 'https://status.test/r/rev_deep6/status', cwd: '/repo', session: 's9',
-    startedAt: now, seen: true, nextAt: now }
-  stored.hunts = [...hunts($), theirs]
-  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
-  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
-  const before = stored.hunts
-  postReply = () => started('rev_deep6', false)
-  await press($, 'deep-yes')
-  expect(stored.hunts).toEqual(before)
-  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep6 already running for rev_1, tracked in another chat.')
-  expect(await note($)).not.toContain('rev_deep6')
-})
-
 test('a stored record older than 6 hours does not count as tracked: the press tracks the hunt here', async ($, on) => {
   await offered($, on)
   const now = hunts($).find(x => x.id === 'rev_1')!.startedAt
@@ -672,6 +646,131 @@ test('a stored record older than 6 hours does not count as tracked: the press tr
   await press($, 'deep-yes')
   // Older than the window: nobody tracks it any more, so this chat does, from the press.
   expect(hunts($).filter(h => h.id === 'rev_old')).toMatchObject([{ session: 's1', pressed: { parent: 'rev_1' }, startedAt: now }])
+})
+
+// Hunts shared between chats (one per-hunt write, and an owner change): one test per row of the table
+// writer x who holds the record x what the other chat sees next.
+const TURN = { answer: 'ok', durationMs: 1, isAborted: false, turnId: 't9', reason: 'end_turn' } as never
+const theirs = (id: string, at: number, extra: Record<string, unknown> = {}) => ({ id, mode: 'fast', state: 'running',
+  statusUrl: `https://status.test/r/${id}/status`, cwd: '/repo', session: 's9', startedAt: at, seen: false, nextAt: at, ...extra })
+const t0 = () => hunts().find(x => x.id === 'rev_1')!.startedAt
+
+test('a write here never undoes another chat\'s record written since: only the one hunt is written', async ($, on) => {
+  await offered($, on)
+  const other = theirs('rev_6', t0())
+  stored.hunts = [...hunts(), other]
+  answer.get = JSON.stringify({ review_id: 'rev_1', status: 'done', mode: 'fast', findings: [] })
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  expect(hunts().find(x => x.id === 'rev_6')).toEqual(other)
+  expect(hunts().find(x => x.id === 'rev_1')).toMatchObject({ findings: 0, seen: true })
+})
+
+test('a hunt another chat adopted since is no longer polled or announced here', async ($, on) => {
+  const { seen, clock } = await offered($, on)
+  answer.submit = JSON.stringify({ review_id: 'rev_9', status: 'running', mode: 'fast', status_url: 'https://status.test/r/rev_9/status' })
+  await $.tool.call({ tool: SUBMIT } as never)
+  stored.hunts = hunts().map(h => h.id === 'rev_9' ? { ...h, session: 's9' } : h)
+  seen.urls.length = 0
+  await clock.advance(120_000)
+  await $.turn.start({ prompt: 'x' } as never)
+  await $.turn.complete(TURN)
+  expect(seen.urls.filter(u => u.includes('rev_9'))).toEqual([])
+  expect(hunts().find(x => x.id === 'rev_9')).toMatchObject({ session: 's9' })
+})
+
+test('already_running for a hunt another chat read: adopted unread, no verdicts owed until this agent reads it', async ($, on) => {
+  await offered($, on)
+  stored.hunts = [...hunts(), theirs('rev_8', t0(), { state: 'done', seen: true, findings: 0 })]
+  answer.submit = JSON.stringify({ review_id: 'rev_8', status: 'done', mode: 'fast', already_running: true, status_url: 'https://status.test/r/rev_8/status' })
+  await $.tool.call({ tool: SUBMIT } as never)
+  expect(hunts().find(x => x.id === 'rev_8')).toMatchObject({ session: 's1', cwd: '/repo', seen: false, state: 'done' })
+  expect(await note($)).not.toContain('rev_8')
+  answer.get = JSON.stringify({ review_id: 'rev_8', status: 'done', mode: 'fast', findings: [] })
+  await $.tool.call({ tool: GET, review_id: 'rev_8' } as never)
+  expect(await note($)).toContain('confirm_findings for rev_8')
+})
+
+test('already_escalated for a deep hunt another chat judged: adopted, and a verdict sent stays sent', async ($, on) => {
+  await offered($, on)
+  stored.hunts = [...hunts(), theirs('rev_7', t0(), { mode: 'full', state: 'done', seen: true, findings: 0, judged: true })]
+  answer.submit = JSON.stringify({ review_id: 'rev_7', mode: 'full', already_escalated: true, status_url: 'https://status.test/r/rev_7/status' })
+  await $.tool.call({ tool: SUBMIT, deep: 'rev_1' } as never)
+  expect(hunts().find(x => x.id === 'rev_7')).toMatchObject({ session: 's1', seen: false, judged: true })
+  answer.get = JSON.stringify({ review_id: 'rev_7', status: 'done', mode: 'full', findings: [] })
+  await $.tool.call({ tool: GET, review_id: 'rev_7' } as never)
+  expect(await note($)).not.toContain('rev_7')
+})
+
+test('a poll answer for a hunt another chat adopted during the fetch writes nothing: the new owner keeps it', async ($, on) => {
+  const clock = mock.clock(on)
+  readableStore(on)
+  mock.env(on, {})
+  on('prompt.compose', async () => ({ sections: [] }))
+  answer.submit = submitted
+  on('tool.call', { tool: SUBMIT }, async () => ({ result: { content: [] }, text: answer.submit }))
+  // The status read lands after another chat took the hunt over.
+  world(on, async () => { stored.hunts = hunts().map(h => ({ ...h, session: 's9' })); return JSON.stringify({ status: 'done', findings: 2 }) })
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await clock.advance(120_000)
+  await $.turn.start({ prompt: 'x' } as never)
+  await $.turn.complete(TURN)
+  expect(hunts().find(x => x.id === 'rev_1')).toMatchObject({ session: 's9', state: 'running' })
+})
+
+test('two writes in one chat at once both land: one write at a time per session', async ($, on) => {
+  await offered($, on)
+  stored.hunts = hunts().map(h => h.id === 'rev_1' ? { ...h, seen: false, judged: undefined } : h)
+  await Promise.all([$.tool.call({ tool: GET, review_id: 'rev_1' } as never), $.tool.call({ tool: CONFIRM, review_id: 'rev_1' } as never)])
+  expect(hunts().find(x => x.id === 'rev_1')).toMatchObject({ seen: true, judged: true })
+})
+
+test('the slow re-read of a done hunt another chat adopted during the fetch leaves that chat\'s schedule alone', async ($, on) => {
+  const clock = mock.clock(on)
+  readableStore(on)
+  mock.env(on, {})
+  on('prompt.compose', async () => ({ sections: [] }))
+  answer.submit = submitted
+  on('tool.call', { tool: SUBMIT }, async () => ({ result: { content: [] }, text: answer.submit }))
+  let reads = 0
+  world(on, async () => {
+    // The first read finds it done (announced, unread here); the slow re-read lands after another chat took it over.
+    if (++reads > 1) stored.hunts = hunts().map(h => ({ ...h, session: 's9', nextAt: 42 }))
+    return JSON.stringify({ status: 'done', findings: 2 })
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await clock.advance(120_000)
+  await $.turn.start({ prompt: 'x' } as never)
+  await $.turn.complete(TURN)
+  expect(hunts().find(x => x.id === 'rev_1')).toMatchObject({ state: 'done', seen: false })
+  await clock.advance(600_000)
+  await $.turn.start({ prompt: 'x' } as never)
+  await $.turn.complete(TURN)
+  expect(reads).toBeGreaterThan(1)
+  expect(hunts().find(x => x.id === 'rev_1')).toMatchObject({ session: 's9', nextAt: 42 })
+})
+
+test('started:false for a deep hunt another chat tracks: adopted by this chat that pressed, unread here, and its agent told', async ($, on) => {
+  const { seen } = await offered($, on)
+  const other = theirs('rev_deep2', t0(), { mode: 'full', cwd: '/other' })
+  stored.hunts = [...hunts(), other]
+  postReply = () => started('rev_deep2', false)
+  await press($, 'deep-yes')
+  expect(hunts().find(x => x.id === 'rev_deep2')).toEqual({ ...other, session: 's1', cwd: '/repo', seen: false, pressed: { parent: 'rev_1' } })
+  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep2 already exists for rev_1.')
+  expect(await note($)).toContain('rev_deep2 from the offer button')
+})
+
+test('a press for a deep hunt another chat already read: adopted unread, told to read it, and no verdicts owed yet', async ($, on) => {
+  await offered($, on)
+  stored.hunts = [...hunts(), theirs('rev_deep6', t0(), { mode: 'full', state: 'done', seen: true, findings: 0 })]
+  postReply = () => started('rev_deep6', false)
+  await press($, 'deep-yes')
+  expect(hunts().find(x => x.id === 'rev_deep6')).toMatchObject({ session: 's1', seen: false, pressed: { parent: 'rev_1' } })
+  const told = await note($)
+  expect(told).toContain('rev_deep6 from the offer button')
+  expect(told).not.toContain('confirm_findings for rev_deep6')
 })
 
 test('the press note is told to the agent with the status line off too', async ($, on) => {
@@ -704,20 +803,6 @@ test('started:false for a deep hunt this session tracks keeps the record exactly
   await press($, 'deep-yes')
   expect(hunts($).filter(x => x.id === 'rev_deep1')).toEqual([before])
   expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep1 already exists for rev_1.')
-})
-
-test('started:false for a deep hunt another session began tracking after this one loaded: seen in the store, said tracked in another chat, and left untouched', async ($, on) => {
-  const { seen } = await offered($, on)
-  const theirs = { id: 'rev_deep2', mode: 'full', state: 'running', statusUrl: 'https://status.test/r/rev_deep2/status', cwd: '/other', session: 's9',
-    startedAt: hunts($).find(x => x.id === 'rev_1')!.startedAt, seen: false, nextAt: 1 }
-  // Another session's record, written to the shared store while this one runs: no reload here.
-  const before = [...hunts($), theirs]
-  stored.hunts = before
-  postReply = () => started('rev_deep2', false)
-  await press($, 'deep-yes')
-  expect(stored.hunts).toEqual(before)
-  expect(seen.toasts.at(-1)).toBe('OhMyBug: deep hunt rev_deep2 already running for rev_1, tracked in another chat.')
-  expect(await note($)).not.toContain('rev_deep2')
 })
 
 test('started:false for the deep hunt the agent itself started here keeps its record: not marked pressed, so the agent is not told it is someone else\'s', async ($, on) => {
