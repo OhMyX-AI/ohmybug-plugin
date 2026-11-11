@@ -9,10 +9,12 @@
 // Quiet: a status-line entry while a hunt runs, a toast and one band above the
 // prompt when something happened; a button only where the person must decide (the
 // deep offer, which spends money — #2343). No sound, no turn of its own unless
-// the person sets OHMYBUG_AUTO_RESUME=1. The one line it adds to the system
-// prompt (a read hunt whose verdicts are not sent) the status line shows the
-// person in the same words, unless a hunt that runs or waits to be read holds
-// the status line; the line comes back when that one is read.
+// the person sets OHMYBUG_AUTO_RESUME=1. The line it adds to the system prompt
+// for a read hunt whose verdicts are not sent the status line shows the person
+// in the same words, unless a hunt that runs or waits to be read holds the
+// status line; the line comes back when that one is read. One more line, kept
+// whatever the status setting: a deep hunt the person started with the band's
+// button, until the agent reads it to its end.
 //
 // The rule every action obeys: a button or an auto-resume acts only on a hunt
 // this mod tracks by review_id, in a state it saw that hunt move into itself.
@@ -51,6 +53,8 @@ type BughunterHunt = {
   nextAt: number
   /** The session that submitted it: the store is shared by every session of this machine. */
   session?: string
+  /** A deep hunt the person started with the band's button, from this hunt: the agent is told of it until it reads it. */
+  pressedFrom?: string
 }
 
 /** The one band above the prompt. `id` is always a tracked hunt; `state` is the
@@ -78,9 +82,6 @@ let sessionId = ''
 let heldId: string | undefined
 const ours = (h: BughunterHunt, cwd: string) => h.cwd === cwd && !!sessionId && h.session === sessionId
 const rawOpen = new Set<string>()
-/** Deep hunts the person's press started (or found running), each for the session that pressed: told to that
- *  session's agent until it reads the child to its end (done or failed), or for 6 hours. */
-let deepNotes: { parent: string; child: string; started: boolean; at: number; session: string }[] = []
 
 function setHunts($: Engine, list: BughunterHunt[]) { huntList = list; $.ui.invalidate('ui.render') }
 function setBand($: Engine, b: BughunterBand) { bandNow = b; $.ui.invalidate('ui.render') }
@@ -103,7 +104,8 @@ function sameServer(url: unknown, statusUrl: string | undefined, path: RegExp): 
 }
 const START_PATH = /^\/live\/[0-9a-f]{16,128}\/deep$/
 const SNOOZE_PATH = /^\/live\/[0-9a-f]{16,128}\/snooze-deep$/
-/** Why a press did not land, in the mod's own words by the answer's status (no server text is drawn). */
+/** The server's own refusals of a start, in the mod's words (no server text is drawn): only these prove nothing
+ *  started. Any other status (a 5xx, a proxy's 502 or 504, a 408) may come after the hunt was queued. */
 const NOT_STARTED: Record<number, string> = {
   403: 'the key that ran this hunt is revoked',
   404: 'the offer has expired',
@@ -113,7 +115,7 @@ const NOT_STARTED: Record<number, string> = {
 const NOT_SAVED: Record<number, string> = {
   403: 'the key that ran this hunt is revoked',
   404: 'the offer has expired',
-  429: 'too many presses; try again in a minute',
+  429: 'too many presses',
 }
 /** A start whose answer did not come back whole: the server may have started it, so nothing is said as fact. */
 const START_UNKNOWN = 'OhMyBug: no clear answer from the server, so the deep hunt may have started. Ask in the chat to check before starting another.'
@@ -134,33 +136,38 @@ async function pressUrl($: Engine, url: string): Promise<{ ok: boolean; status: 
 async function startDeep($: Engine, parent: string, url: string) {
   const r = await pressUrl($, url)
   if (!r.ok) {
-    await $.ui.toast(r.status === 0 ? START_UNKNOWN : `OhMyBug: the deep hunt did not start: ${NOT_STARTED[r.status] ?? 'the server refused it; ask for it in the chat'}.`)
+    await $.ui.toast(NOT_STARTED[r.status] ? `OhMyBug: the deep hunt did not start: ${NOT_STARTED[r.status]}.` : START_UNKNOWN)
     return
   }
   const child = str(r.body?.review_id)
   if (!child || !REVIEW_ID.test(child)) { await $.ui.toast(START_UNKNOWN); return }
-  // A 2xx with an id: the hunt exists. What follows only decides whether this mod can watch it too.
-  const started = r.body!.started === true
-  const statusUrl = sameServer(r.body!.status_url, huntList.find(h => h.id === parent)?.statusUrl, new RegExp(`^/r/${child}/status$`))
-  const now = await $.clock.now()
-  const cwd = await $.session.cwd()
-  const list = [...huntList]
-  const at = list.findIndex(h => h.id === child)
-  // Already tracked (an earlier press, or the agent's own submit): kept as it is, as a submit answered
-  // already_running keeps it, so a hunt read or judged here is not asked for again.
-  if (at >= 0) { if (list[at]!.session !== sessionId) list[at] = { ...list[at]!, session: sessionId } }
-  else if (statusUrl) list.push({ id: child, mode: 'deep', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false, nextAt: now + 60_000 })
-  deepNotes = [...deepNotes.filter(n => n.child !== child), { parent, child, started, at: now, session: sessionId }]
-  await save($, list)
-  await refreshStatus($)
-  await $.ui.toast(`OhMyBug: ${started ? 'the deep hunt started' : 'the deep hunt is already running'}: ${child}.`)
+  // A 2xx with an id: the hunt exists. Said first, so nothing below can swallow it.
+  const tracked = huntList.find(h => h.id === child)
+  await $.ui.toast(`OhMyBug: ${tracked && !isOpen(tracked) ? `the deep hunt ${child} has already ended` : r.body!.started === true ? `the deep hunt started: ${child}` : `the deep hunt is already running: ${child}`}.`)
+  try {
+    // Watched only on its own status URL, on the parent's server; without one the toast is all this mod can do.
+    const statusUrl = sameServer(r.body!.status_url, huntList.find(h => h.id === parent)?.statusUrl, new RegExp(`^/r/${child}/status$`))
+    const now = await $.clock.now()
+    const cwd = await $.session.cwd()
+    const list = [...huntList]
+    const at = list.findIndex(h => h.id === child)
+    // Already tracked (an earlier press, or the agent's own submit): kept as it is, as a submit answered
+    // already_running keeps it, so a hunt read or judged here is not asked for again.
+    if (at >= 0) { if (list[at]!.session === sessionId) return; list[at] = { ...list[at]!, session: sessionId } }
+    else if (statusUrl) list.push({ id: child, mode: 'deep', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false, nextAt: now + 60_000, pressedFrom: parent })
+    else return
+    await save($, list)
+    await refreshStatus($)
+  } catch {
+    // The hunt started and the person was told; a bookkeeping slip only costs the watch.
+  }
 }
 
 /** Not today, on an offer that carries its snooze URL: the server keeps the one-day pause for every session. */
 async function snoozeDeep($: Engine, url: string) {
   const r = await pressUrl($, url)
   await $.ui.toast(r.ok ? 'OhMyBug: no deep hunt offers for the next 24 hours. Asking for one still works.'
-    : `OhMyBug: the pause was not saved: ${NOT_SAVED[r.status] ?? 'the server did not take it; ask for the pause in the chat'}.`)
+    : `OhMyBug: the pause was not saved: ${NOT_SAVED[r.status] ?? (r.status === 0 ? 'no answer from the server' : 'the server did not take it')}; ask for the pause in the chat if you still want it.`)
 }
 
 const isOpen = (h: BughunterHunt) => h.state === 'running' || h.state === 'needs_files'
@@ -261,9 +268,6 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
       findings: state === 'done' ? findingsOf(body).length : list[at]!.findings }
     if (bandNow?.kind === 'hunt' && bandNow.id === id) setBand($, null)
     if (heldId === id) heldId = undefined
-    // The agent read the deep hunt a press started to its end: nothing more to tell it. A read while it runs
-    // keeps the note: the agent must still not submit another.
-    if (terminal) deepNotes = deepNotes.filter(n => n.child !== id)
     // The deep offer comes in the answer for this tracked hunt, and only there.
     const offer = body.deep_offer as Record<string, unknown> | undefined
     if (kind === 'get_findings' && state === 'done' && offer && typeof offer === 'object' && str(offer.pitch)) {
@@ -434,25 +438,26 @@ export const register: Register = on => {
     return ran
   })
 
-  // The one thing the mod tells the agent, and the status line tells the person
-  // the same unless another hunt that runs or waits to be read holds it: a hunt it read whose verdicts it has not sent. Keyed by hunt id,
-  // gone once confirm_findings for that id is seen or the hunt is 6 hours old.
+  // What the mod tells the agent. A deep hunt the person started with the band's button (below). And, as the status
+  // line tells the person unless another hunt that runs or waits to be read holds it: a hunt it read whose verdicts it
+  // has not sent. Keyed by hunt id, gone once confirm_findings for that id is seen or the hunt is 6 hours old.
   on('prompt.compose', async ($, e, next) => {
     let composed = await next(e)
-    // A deep hunt the person's press started is a fact the agent must know, whatever the status setting: it must
-    // not submit one again, and it reads this one. Gone once it reads that hunt, or after 6 hours.
+    // A deep hunt the person started with the band's button is a fact the agent must know, whatever the status
+    // setting: it must not submit one again, and it reads this one. Read off the hunt's own record, so it goes
+    // when the agent reads that hunt to its end (seen), and with the record after 6 hours.
     try {
       const now = await $.clock.now()
-      deepNotes = deepNotes.filter(n => now - n.at < STALE_MS)
-      const mine = deepNotes.filter(n => !!sessionId && n.session === sessionId)
+      const cwd = await $.session.cwd()
+      const mine = huntList.filter(h => h.pressedFrom && ours(h, cwd) && !h.seen && now - h.startedAt < STALE_MS)
       if (mine.length) {
-        const text = mine.map(n => `The person pressed "Run deep hunt" for OhMyBug hunt ${n.parent}; the server ${n.started ? 'started' : 'already runs'} deep hunt ${n.child} for it. Do not call submit_review for it. Read it with get_findings (review_id ${n.child}).`).join('\n')
+        const text = mine.map(h => `The person pressed "Run deep hunt" for OhMyBug hunt ${h.pressedFrom}; the server runs deep hunt ${h.id} for it. Do not call submit_review for it. Read it with get_findings (review_id ${h.id}).`).join('\n')
         composed = { sections: [...composed.sections, { id: 'bughunter:deep-started', text, scope: 'session' as const }] }
       }
     } catch {
       // The note is a courtesy to the agent; the composed prompt stands without it.
     }
-    // Shown to the person or not told to the agent: OHMYBUG_STATUS=0 drops both.
+    // Shown to the person or not told to the agent: OHMYBUG_STATUS=0 drops both (the deep line above stays).
     if (!ctx.showStatus) return composed
     try {
       const cwd = await $.session.cwd()
@@ -512,7 +517,7 @@ export const register: Register = on => {
     let actions: RenderChildren[] = []
     let lead = ''
     if (b.kind === 'deep') {
-      // Pressing Run is the person's consent; Not now sends nothing; Not today asks for a one-day pause.
+      // Pressing Run is the person's consent; Not now sends nothing; Not today pauses the offer for a day.
       lead = `Deep hunt ${b.strong ? 'recommended' : 'offered'} for ${b.id}${b.price !== undefined ? ` (${b.price} USD, only if a real bug is confirmed)` : ''}: `
       actions = [
         <Button key="deep-yes" label="Run deep hunt" hotkey="1" variant="primary" onPress={async () => {
