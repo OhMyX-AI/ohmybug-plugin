@@ -548,11 +548,9 @@ curl -sS -w '\nHTTP %{http_code}\n' -X POST -H 'content-type: application/json' 
 
 3. The review starts on upload – arm the background monitor on `status_url`
    as usual once the last line reads `HTTP 200`; any other code is a refusal,
-   and the body above it says why. For a cheap or ultrafast hunt the upload can answer 409 with
-   `{error, code}` (`mode_needs_repo`, `mode_too_large`): nothing started, the
-   upload address stays open. Show `error` verbatim and offer what it says (a
-   snapshot or a smaller diff to the same address, or a new submit with
-   `mode: "fast"`) with one yes/no question. When the server can read the repo, context files are mostly
+   and the body above it says why. Cheap and ultrafast never take this path:
+   a submit with `upload: true` in one of those modes is refused
+   `mode_needs_repo` (see "Hunt modes"). When the server can read the repo, context files are mostly
    redundant (reviewers fetch what they need themselves) – diff + meta is
    enough.
 
@@ -950,7 +948,8 @@ verdicts confirm a real bug, and the server's figures win over these:
   `default` after the change, say so. `/bughunter:stats` shows the default.
 - **The repository.** `cheap` and `ultrafast` read the repository, so they
   need rung 1's `meta` (`repo` + `ref` = the pushed head sha + `base_branch`)
-  or a snapshot; on a diff alone the server refuses them. `ultrafast` takes a
+  on a commit the server can read; on a diff alone or an upload the server
+  refuses them (`mode_needs_repo`). `ultrafast` takes a
   diff under 1 MB.
 - **A refusal starts nothing and charges nothing.** `mode_unavailable` (it
   lists `modes_available`), `mode_needs_repo`, `mode_too_large`,

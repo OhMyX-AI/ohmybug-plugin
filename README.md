@@ -21,7 +21,7 @@ free, first review free.
 - **Fast review** (the default unless you set another) · $4 · finds 73% of significant bugs · up to 15 minutes
 - **Deep review** · $12 ($24 on a wide change) · finds 90% of significant bugs · up to 2 hours
 
-Pick a mode for one hunt with `/bughunter:review cheap` (or `ultrafast`, `fast`), or tell your agent "make cheap my default". Cheap and ultrafast read the repository, so they need a pushed GitHub commit (or a snapshot), and ultrafast a diff under 1 MB; a key's own default is set on [app.ohmybug.ai/me](https://app.ohmybug.ai/me).
+Pick a mode for one hunt with `/bughunter:review cheap` (or `ultrafast`, `fast`), or tell your agent "make cheap my default". Cheap and ultrafast read the repository, so they need a pushed GitHub commit the service can read, and ultrafast a diff under 1 MB; a key's own default is set on [app.ohmybug.ai/me](https://app.ohmybug.ai/me).
 
 See the bug species our hunts keep finding in the [Bugarium](https://mcp.ohmybug.ai/bugs).
 
