@@ -41,7 +41,8 @@ type BughunterHunt = {
   median?: number
   findings?: number
   /** Nothing left to tell this session: its agent read the terminal result
-   *  (get_findings or wait_review), or the server said someone did (`settled`). */
+   *  (get_findings or wait_review), or the server said someone did (`settled`).
+   *  Reset when another chat takes the hunt over (adopt). */
   seen: boolean
   /** confirm_findings for this hunt's id answered with the verdicts recorded. */
   judged?: boolean
@@ -50,10 +51,12 @@ type BughunterHunt = {
    *  nothing is owed from here, so no nudge, no next-step line. */
   settled?: boolean
   nextAt: number
-  /** The session that submitted it: the store is shared by every session of this machine. */
+  /** The chat that owns it now (submitted it, or took it over: adopt): the store is shared by every session of this
+   *  machine, and only the owner polls it, announces it and tells its agent about it. */
   session?: string
   /** Started (or found) by the person's Run deep hunt press on the offer for `parent`, not by the agent: the agent is
-   *  told about it in the prompt until it reads the result. */
+   *  told about it in the prompt until this chat's agent reads the result (not `seen`: the server saying another chat
+   *  read it must not end the note). */
   pressed?: { parent: string }
 }
 
@@ -129,7 +132,7 @@ function resumeText(h: BughunterHunt): string {
 function actionable(b: BughunterBand): BughunterHunt | undefined {
   if (b?.kind !== 'hunt') return undefined
   const h = huntList.find(x => x.id === b.id)
-  return h && h.state === b.state && !h.seen ? h : undefined
+  return h && h.session === sessionId && h.state === b.state && !h.seen ? h : undefined
 }
 
 /** The open tracked hunt of this repository a gate refusal is about: the band keeps its id, and the turn end
@@ -178,10 +181,14 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
   } else if (kind === 'get_findings' || kind === 'wait_review') {
     const state = pollState(body)
     const terminal = state === 'done' || state === 'failed'
-    // Read here: whatever the server said before, this session now owes the verdicts.
-    const next = await put($, id, cur => cur && {
-      ...cur, state: state ?? cur.state, seen: terminal || cur.seen, settled: terminal ? false : cur.settled,
-      findings: state === 'done' ? findingsOf(body).length : cur.findings })
+    // Read here: the hunt is this chat's now, and whatever the server said before, this chat owes the verdicts. Read
+    // to its end, a press note has done its job.
+    const next = await put($, id, cur => {
+      if (!cur) return undefined
+      const h = adopt(cur, cwd)
+      return { ...h, state: state ?? h.state, seen: terminal || h.seen, settled: terminal ? false : h.settled,
+        findings: state === 'done' ? findingsOf(body).length : h.findings, pressed: terminal ? undefined : h.pressed }
+    })
     if (!next) return
     if (bandNow?.kind === 'hunt' && bandNow.id === id) setBand($, null)
     if (heldId === id) heldId = undefined
@@ -209,9 +216,12 @@ async function loadHunts($: Engine, now: number): Promise<BughunterHunt[]> {
   return Array.isArray(saved) ? saved.filter(h => now - h.startedAt < STALE_MS) : []
 }
 
-/** Taking over a hunt another chat tracks. What its agent did is not this agent's: unread here until this agent reads
- *  it, so it is told to read before it owes verdicts (a verdict sent stays sent: `judged` is the server's). */
-const adopt = (h: BughunterHunt, cwd: string): BughunterHunt => ({ ...h, session: sessionId, cwd, seen: false })
+/** A hunt claimed by this chat in `cwd`. Taken from another chat, what that chat's agent did is not this agent's:
+ *  unread here until this agent reads it, so it is told to read before it owes verdicts (a verdict sent stays sent:
+ *  `judged` is the server's), and the other chat's press is not this one's. This chat's own hunt only moves to `cwd`. */
+const adopt = (h: BughunterHunt, cwd: string): BughunterHunt => h.session === sessionId
+  ? { ...h, cwd }
+  : { ...h, session: sessionId, cwd, seen: false, pressed: undefined }
 
 /** The one way a hunt is written: the store is read again, this one record changed as it stands there NOW, and the
  *  store written back and taken as this session's view. Another session's records are never written from this
@@ -220,6 +230,8 @@ const adopt = (h: BughunterHunt, cwd: string): BughunterHunt => ({ ...h, session
  *  shortcut: get-then-set is not atomic across sessions; two chats writing within the same few ms can still lose one
  *  write (the store has no compare-and-set). */
 let writing: Promise<unknown> = Promise.resolve()
+/** The store taken as this session's view, in the write queue: a read outside it could land after a write and undo it. */
+const reload = ($: Engine) => put($, '', () => undefined)
 function put($: Engine, id: string, change: (cur: BughunterHunt | undefined) => BughunterHunt | undefined) {
   const run = writing.then(async () => {
     const list = await loadHunts($, await $.clock.now())
@@ -284,7 +296,8 @@ async function pollDue($: Engine) {
   const cwd = await $.session.cwd()
   const now = await $.clock.now()
   // Another chat may have taken a hunt over, read or judged it since: poll only what the store says is this chat's.
-  setHunts($, await loadHunts($, now))
+  // An unreadable store keeps the view this session has.
+  try { await reload($) } catch { /* kept */ }
   // A done hunt nobody here has read yet is asked again on the slow clock: the
   // server knows when another session read or judged it, and the nudges (band,
   // auto-resume) then read that here with no network call of their own.
@@ -414,7 +427,7 @@ async function pressStart($: Engine, parent: string, url: string) {
     await put($, id, cur => !cur
       ? { id, mode: str(r.body.mode) ?? 'full', state: 'running', statusUrl, cwd, session: sessionId, startedAt: now, seen: false,
           nextAt: now + 15_000, pressed: { parent } }
-      : ours(cur, cwd) ? undefined : { ...adopt(cur, cwd), pressed: cur.pressed ?? { parent } })
+      : ours(cur, cwd) ? undefined : { ...adopt(cur, cwd), pressed: { parent } })
     await refreshStatus($)
   } catch {
     // Said already; a bookkeeping slip must not hide that the hunt exists.
@@ -434,7 +447,7 @@ async function pressSnooze($: Engine, url: string) {
 
 /** What the agent is told about a deep hunt the person started from the band: it did not call submit_review for it. */
 const pressedNote = (h: BughunterHunt) =>
-  `The person started OhMyBug deep hunt ${h.id} from the offer button for ${h.pressed!.parent}; it is tracked. Do not call submit_review for it. Read it with get_findings (review_id ${h.id}) when it ends.`
+  `The person started OhMyBug deep hunt ${h.id} from the offer button for ${h.pressed!.parent}; it is tracked. Do not call submit_review for it. Read it with get_findings (review_id ${h.id}) ${h.state === 'done' || h.state === 'failed' ? 'now: it has ended' : 'when it ends'}.`
 
 export const register: Register = on => {
   // Read from the environment, not the manifest's userConfig: older Claude Code
@@ -449,8 +462,7 @@ export const register: Register = on => {
     heldId = undefined
     ctx.working = false
     const now = await $.clock.now()
-    const saved = (await $.store.get('hunts')) as BughunterHunt[] | undefined
-    setHunts($, Array.isArray(saved) ? saved.filter(h => now - h.startedAt < STALE_MS) : [])
+    setHunts($, await loadHunts($, now))
     await $.command.register({ name: 'hunts', description: 'OhMyBug: the hunts of this repository, in a pane' })
     $.clock.every(15_000, () => { void tick($) })
     await refreshStatus($)
@@ -482,7 +494,7 @@ export const register: Register = on => {
       const now = await $.clock.now()
       const lines = [
         // A deep hunt the person started from the band, until the agent reads it: the agent did not submit it.
-        ...huntList.filter(h => ours(h, cwd) && h.pressed && !h.seen && now - h.startedAt < STALE_MS).map(pressedNote),
+        ...huntList.filter(h => ours(h, cwd) && h.pressed && now - h.startedAt < STALE_MS).map(pressedNote),
         // Shown to the person or not told to the agent: OHMYBUG_STATUS=0 drops the verdicts line (the press note is not
         // a status-line line: the person pressed, and the agent must know the hunt is not its own).
         ...huntList.filter(h => ctx.showStatus && awaitsVerdicts(h, cwd, now)).map(h => h.findings === 0
@@ -509,7 +521,7 @@ export const register: Register = on => {
     }
     // An empty band, or the gate refusal for this very hunt: the hunt finished, so the refusal is obsolete.
     else if (!ctx.autoResume && (!bandNow || (bandNow.kind === 'gate' && bandNow.id === heldId))) {
-      const u = huntList.find(x => x.id === heldId && !x.seen && x.state !== 'running')
+      const u = huntList.find(x => x.id === heldId && x.session === sessionId && !x.seen && x.state !== 'running')
       heldId = undefined
       if (u) setBand($, { kind: 'hunt', id: u.id, state: u.state, text: news(u) })
     }
