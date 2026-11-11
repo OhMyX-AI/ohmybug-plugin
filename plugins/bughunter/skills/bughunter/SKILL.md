@@ -1064,15 +1064,20 @@ disproving its own report. If a charge looks wrong, quote the receipt.
 
 ### 6. Fix
 
-Fix the confirmed bugs as part of the normal workflow. Findings include a
-suggested fix; treat it as a hint, not gospel.
+Fix the confirmed majors (`critical` / `high` / `medium`) as part of the
+normal workflow. Findings include a suggested fix; treat it as a hint, not
+gospel.
 
-**A real `low`: neither fix it blindly nor drop it.** It does not hold the
-merge. Record it where the next agent and the next review will see it: a short
-comment at the site that names the risk and why it is accepted, or a line in
-the project's docs or tickets. Our recommendation: re-check recorded lows on a
-schedule, or when code near them changes, because a low can grow into a
-critical.
+**A real `low` does not hold the merge.** Do not fix it unasked, and do not let
+it vanish: offer the user to record it where the next agent and the next review
+will see it, and write the record only on their word. The place is theirs to
+pick. The change's ticket or PR description leaves the hunted diff as it is; a
+comment at the site or a docs line changes the diff, so it goes into the next
+change, or into this one followed by a fresh hunt. A record that may be public
+names the risk, never the steps to exploit it. Pass on our recommendation too:
+re-check recorded lows on a schedule, or when code near them changes, because a
+low can grow into a critical. A re-check hunt starts on the user's word, like
+any hunt.
 
 **Three hunts in a row that each confirm a major end the fix-and-re-hunt
 loop.** Two ways forward: ship it dark – the feature behind a flag that
