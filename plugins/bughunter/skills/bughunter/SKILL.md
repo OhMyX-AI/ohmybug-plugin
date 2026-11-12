@@ -1157,8 +1157,8 @@ they pick posting without it (`share.author` says who signs it now).
   Show the exact text first, then make one `AskUserQuestion` call with ONE
   question. Its answers: the labels of `post`, `post_anonymous` when present, and
   `skip`, in the order the server sent them, then the label of `snooze_24h`
-  when present. That is at most four, the tool's limit, so every one of them
-  is always offered; never drop `snooze_24h` to make room. But if `post` or
+  when present. That is at most four, the tool's limit, so all of them fit;
+  never drop `snooze_24h` to make room. But if `post` or
   `skip` is missing, ask with the plain yes ("Show the exact text and wait
   for a yes" below). Picking `snooze_24h`
   publishes nothing and sets the snooze; like `skip`, it is a no to this
@@ -1176,16 +1176,20 @@ they pick posting without it (`share.author` says who signs it now).
   time the text changes: after the user asks for an edit, and after the
   server refuses a draft and you rewrite it. It publishes nothing and counts
   nothing: the draft waits, private, on https://mcp.ohmybug.ai/me/stories
-  ("Waiting for your OK") until the user posts it there, with or without
-  their GitHub name, or discards it. Do not tell the user it was saved before
-  they answer. When they answer `skip`, `snooze_24h` or a plain no, and the
-  last save answered `saved: true`, say in one line that the draft waits
-  privately on https://mcp.ohmybug.ai/me/stories until they post or discard
-  it; do not ask again. When they pick a post label, post as usual; once the
-  story is posted, the server removes the saved draft; if that post fails
-  and the last save answered `saved: true`, say the same line. Without
-  `share.save`, or without the tool, save nothing. A save that fails or
-  answers `saved: false` changes nothing: ask as usual.
+  until the user posts it there, with or without their GitHub name, or
+  discards it. Do not tell the user it was saved before they answer. When
+  they answer `skip`, `snooze_24h` or a plain no, and the last save answered
+  `saved: true`, say in one line that the draft waits privately on
+  https://mcp.ohmybug.ai/me/stories until they post or discard it; do not
+  ask again. If a re-save after a changed text fails or answers
+  `saved: false` while an earlier save answered `saved: true`, say in one
+  line that the earlier text still waits privately there and can be
+  discarded. When they pick a post label, post as usual; once the story is
+  posted, the server removes the saved draft. Without `share.save`, or
+  without the tool, save nothing. A save that fails or answers
+  `saved: false` changes nothing else: ask as usual. All of this holds when
+  you ask in words too (next bullet), the pause label counting as
+  `snooze_24h`.
 - **Without `AskUserQuestion` (Codex, or no such tool), ask in words, never
   numbers.** If `post` or `skip` is missing from `share.choices`, or there are
   no choices, ask with the plain yes instead. Otherwise one message: the exact

@@ -2871,7 +2871,11 @@ for rule in "Read only each choice's \`id\` and \`label\`; drop an id not listed
   'call `save_story_draft` with the review id, the text and the lesson, and only then send the message' \
   'Call it again every time the text changes' 'It publishes nothing and counts nothing' \
   'Do not tell the user it was saved before they answer.' 'last save answered `saved: true`' \
-  'Without `share.save`, or without the tool, save nothing.' 'A save that fails or answers `saved: false` changes nothing: ask as usual.' \
+  'Without `share.save`, or without the tool, save nothing.' 'A save that fails or answers `saved: false` changes nothing else: ask as usual.' \
+  'Picking `snooze_24h` publishes nothing and sets the snooze; like `skip`, it is a no to this story.' \
+  'When they answer `skip`, `snooze_24h` or a plain no, and the last save answered `saved: true`, say in one line that the draft waits privately' \
+  'until they post or discard it; do not ask again.' 'the earlier text still waits privately there and can be discarded' \
+  'All of this holds when you ask in words too' \
   'tell the user that choice is not available yet, and do not retry the call' 'On either path, if `set_policy` answers' \
   'Treat `auto` like `ask` for now' 'if `post` or `skip` is missing, ask with the plain yes' \
   'Show the exact text and wait for a yes (with the choices above, picking `post` is that yes;' \
