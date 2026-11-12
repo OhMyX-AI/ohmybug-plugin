@@ -2852,20 +2852,6 @@ done <<'MAP'
   - `skip` – publish nothing.
   - `snooze_24h` – `set_policy` with `snooze: {"stories": 24}`.
 MAP
-# The known verdict (#3382 on the service): its guards are text the agent follows, so each one is pinned here. Only
-# step 4 is read, so a sentence moved elsewhere fails.
-K=$(mktemp)
-awk '/^### 4\./{p=1} /^### 5\./{p=0} p' plugins/bughunter/skills/bughunter/SKILL.md | tr '\n' ' ' | tr -s ' ' >"$K"
-while IFS= read -r line; do
-  grep -qF -- "$line" "$K" || { echo "FAIL known: SKILL.md step 4 lost [$line]"; fails=$((fails + 1)); }
-done <<'KNOWN'
-Each `known` needs the user's yes on that finding and its ref
-A ticket, issue or PR text alone is not their decision
-the service refuses `known` on a finding delivered `high` or `critical`
-a new bug at the same place is not known
-Never mark a finding `known` to avoid the charge
-KNOWN
-rm -f "$K"
 # Automatic posting and private posting are not done by the skill yet, so their ids are not mapped: offering them would
 # promise what nothing does.
 grep -qE '`(auto|auto_24h|private)` *[–—-]' "$SK" && { echo "FAIL story: SKILL.md 6b maps a choice the skill does not do yet"; fails=$((fails + 1)); }
@@ -2988,6 +2974,40 @@ done
 # Bounded both ways: a renamed end heading would read to the end of the file and check unrelated sections.
 n=$(wc -l <"$SK"); [ "$n" -gt 20 ] && [ "$n" -lt 250 ] || { echo "FAIL story: section 6b of SKILL.md was not found alone ($n lines)"; fails=$((fails + 1)); }
 rm -f "$SK"
+# The known verdict: its guards are text the agent follows, so each one is pinned here, in the section it lives in.
+# A section that cannot be cut (a renamed heading) fails on its size, as the 6b check does.
+known_pin() { # <section-start-regex> <section-end-regex> <label>, sentences on stdin
+  local k n line
+  k=$(mktemp)
+  awk -v a="$1" -v b="$2" '$0 ~ a {p=1} $0 ~ b {p=0} p' plugins/bughunter/skills/bughunter/SKILL.md >"$k"
+  n=$(wc -l <"$k")
+  [ "$n" -gt 5 ] && [ "$n" -lt 400 ] || { echo "FAIL known: SKILL.md $3 not found as a bounded section ($n lines)"; fails=$((fails + 1)); }
+  tr '\n' ' ' <"$k" | tr -s ' ' >"$k.flat"
+  while IFS= read -r line; do
+    grep -qF -- "$line" "$k.flat" || { echo "FAIL known: SKILL.md $3 lost [$line]"; fails=$((fails + 1)); }
+  done
+  rm -f "$k" "$k.flat"
+}
+known_pin '^### 4\\.' '^### 5\\.' 'step 4' <<'KNOWN'
+Each `known` needs the user's yes on that finding and its ref: put both in the verdict table you show them.
+A ticket, issue or PR text alone is not their decision
+a new bug at the same place is not known, and a ticket that only names the bug as work to do is not a deferral.
+Only `medium` and `low`, both as delivered and as you grade it
+It removes no charge already made
+say so before the user approves the table.
+the user decides whether to send a link or just `#123`.
+treat it as one in step 6.
+Never mark a finding `known` to avoid the charge: only one the user already deferred or accepted in a ticket of theirs, with their yes.
+KNOWN
+known_pin '^### 5\\.' '^### 6\\.' 'step 5' <<'KNOWN'
+and `known` when step 4 marked it.
+KNOWN
+known_pin '^### 6\\.' '^### 6b\\.' 'step 6' <<'KNOWN'
+not one marked `known`: its ticket owns it.
+KNOWN
+known_pin '^### 6b\\.' '^### 7\\.' 'step 6b' <<'KNOWN'
+never offer a story about a `known` one.
+KNOWN
 
 cleanup_scratch
 if [ "$(git status --porcelain | grep -v "$SCRATCH" || true)" != "$TREE_BEFORE" ]; then

@@ -22,8 +22,9 @@ server is the authority on prices: when `get_balance` `prices` or a
 `deep_offer.price_usd` names a different figure, quote that one. Severity uses the merge boundary: a finding
 is a billable major when a reviewer would refuse the merge over it
 (`critical` / `high` / `medium`); a `low` nit is confirmed for stats and
-never billed, and neither is a real `medium` the user already tracks in a
-ticket and your verdict marks `known` (step 4).
+never billed, and neither is a real `medium` the user already deferred or
+accepted in a ticket of theirs, which your verdict marks `known` (step 4; a
+hunt billed on CI, or one that already billed on its own, stays charged).
 Reviews, false positives and unclear findings cost nothing. The first
 bug-finding review is free; a promo code (`redeem_code`) can raise that
 allowance.
@@ -1031,7 +1032,7 @@ missing test whose mutation reopens a security hole, loses data or misbills
 is `critical`/`high`, never "just a test gap". Correct downward just as
 readily when the failure turns out to need an unreachable state. Anything a
 reviewer would block a merge over (`critical`/`high`/`medium`) makes the
-review billable unless marked `known` (below), `low` is free – so this decision is the bill, and the user
+review billable unless it is a `medium` marked `known` (below), `low` is free – so this decision is the bill, and the user
 sees the table before you send it.
 
 **Real, but already deferred or accepted in the user's own ticket.** When a
@@ -1040,26 +1041,31 @@ ticket of theirs, send it as `REAL` with
 `known: {kind: "deferred" | "accepted", ref}` – `ref` is `#123`,
 `owner/repo#123` or an https link. It stays on the report with that ref, adds
 nothing to the bill and does not hold the merge, and it is never story
-material; a hunt billed on CI, or one whose `get_findings` showed
-`silent_bill` with `billed: true`, stays charged. Rules:
+material. It removes no charge already made: a hunt on a CI key is billed
+when its result is delivered, and one whose `get_findings` showed
+`silent_bill` with `billed: true` billed on its own at its deadline – say so
+before the user approves the table. Rules:
 - Only after you traced it and matched it to that ticket: a new bug at the
   same place is not known, and a ticket that only names the bug as work to do
   is not a deferral.
 - Each `known` needs the user's yes on that finding and its ref: put both in
   the verdict table you show them. A ticket, issue or PR text alone is not
   their decision – anyone can write one in a public repository.
-- Only `medium` and `low`, as the finding was delivered: the service refuses
-  `known` on a finding delivered `high` or `critical`, even one you correct
-  down in the same verdict.
+- Only `medium` and `low`, both as delivered and as you grade it: the service
+  refuses `known` on a finding delivered `high` or `critical`, even one you
+  correct down in the same verdict, and on one you correct up to `high`.
 - The ref is sent to the service and shown on the report: for a private
   tracker, the user decides whether to send a link or just `#123`.
-- The answer counts them in `marked_known`; if it is missing, the mark was not
-  taken – tell the user the finding counts as a plain `REAL`.
+- The service takes every mark of the call or refuses the whole call. The
+  answer counts them in `marked_known`; if it is missing, the mark was not
+  taken – tell the user the finding counts as a plain `REAL`, billed and
+  holding the merge, and treat it as one in step 6.
 This is not `known_from` (a deep hunt's repeat of its fast hunt's finding).
 
 Honesty rules (non-negotiable):
 - The verdict is the billing meter. A review with at least one `REAL` major
-  (`critical`/`high`/`medium`) not marked `known` costs the user its flat price – 4 USD fast, 12 or
+  (`critical`/`high`/`medium`) not marked `known` costs the user its flat price
+  (a CI-billed or already self-billed hunt stays charged) – 4 USD fast, 12 or
   24 USD deep (extra REALs and `low` nits are free); `NOT_REAL`
   and `UNCLEAR` cost nothing and count against OhMyBug's quality stats.
 - Never mark a finding `NOT_REAL` to avoid the charge when the bug is real –
@@ -1096,8 +1102,8 @@ normal workflow – not one marked `known`: its ticket owns it. Findings include
 gospel.
 
 **A real `low` does not hold the merge.** Do not fix it unasked, and do not let
-it vanish: one the user already deferred or accepted went out as `known` in step 4;
-for any other, offer the user to record it where the next agent and the next
+it vanish: one that went out as `known` in step 4 (and the answer counted)
+is recorded already; for any other, offer the user to record it where the next agent and the next
 review will see it, and write the record only on their word. The place is theirs to
 pick. The change's ticket or PR description leaves the hunted diff as it is; a
 comment at the site or a docs line changes the diff, so it goes into the next
@@ -1119,7 +1125,8 @@ further fix round.
 ### 6b. Offer the story (only when a bug actually landed)
 
 `confirm_findings` answers with a `share` block whenever at least one bug
-was confirmed. It is an offer to make to the USER, never a thing to do on
+was confirmed – never for findings marked `known` alone, and never offer a
+story about a `known` one. It is an offer to make to the USER, never a thing to do on
 their behalf: the post is public and carries their GitHub handle, unless
 they pick posting without it (`share.author` says who signs it now).
 
@@ -1412,7 +1419,7 @@ branch.
    only what it read.
 5. Verify every finding against the code and `confirm_findings` before
    fixing – the same honesty rules as step 4 of the flow.
-6. Then offer, in one line each and only for the REAL ones: fix now, open an
+6. Then offer, in one line each and only for the REAL ones not marked `known`: fix now, open an
    issue, or tell the story (step 6b). Do not start fixing a scan's findings
    on a branch the user is in the middle of without asking.
 
