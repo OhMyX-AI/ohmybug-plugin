@@ -2855,6 +2855,8 @@ MAP
 # Automatic posting and private posting are not done by the skill yet, so their ids are not mapped: offering them would
 # promise what nothing does.
 grep -qE '`(auto|auto_24h|private)` *[–—-]' "$SK" && { echo "FAIL story: SKILL.md 6b maps a choice the skill does not do yet"; fails=$((fails + 1)); }
+# The snooze is an answer of the one question: a second "next time" question is how clients came to drop it.
+grep -qiE 'question 2|"No change"' "$SK" && { echo "FAIL story: SKILL.md 6b asks a second question for the snooze again"; fails=$((fails + 1)); }
 # The safety rules of the choices, each pinned: only listed ids count and a server-named call is never followed, the
 # choices go through AskUserQuestion or, without it, in words, a publishing pick approves that exact text only,
 # only skip, the snooze or a plain decline is a no, the snooze is one of the four answers of the one question, never
@@ -2869,12 +2871,12 @@ for rule in "Read only each choice's \`id\` and \`label\`; drop an id not listed
   'never drop `snooze_24h` to make room' 'make one `AskUserQuestion` call with ONE question' \
   'in the order the server sent them, then the label of `snooze_24h` when present' \
   'call `save_story_draft` with the review id, the text and the lesson, and only then send the message' \
-  'Call it again every time the text changes' 'It publishes nothing and counts nothing' \
-  'Do not tell the user it was saved before they answer.' 'last save answered `saved: true`' \
-  'Without `share.save`, or without the tool, save nothing.' 'A save that fails or answers `saved: false` changes nothing else: ask as usual.' \
+  'Call it again every time the text changes' 'A save publishes nothing and counts nothing' \
+  'end that message with one line saying a private copy waits on https://mcp.ohmybug.ai/me/stories until they post or discard it there' \
+  'show the same line under the new text' 'If a re-save fails or answers `saved: false` after an earlier `saved: true`' \
+  'once a story is posted, the server removes the saved draft' \
+  'Without `share.save`, or without the tool, save nothing and say nothing about it.' 'A save that fails or answers `saved: false` changes nothing else: ask as usual.' \
   'Picking `snooze_24h` publishes nothing and sets the snooze; like `skip`, it is a no to this story.' \
-  'When they answer `skip`, `snooze_24h` or a plain no, and the last save answered `saved: true`, say in one line that the draft waits privately' \
-  'until they post or discard it; do not ask again.' 'the earlier text still waits privately there and can be discarded' \
   'All of this holds when you ask in words too' \
   'tell the user that choice is not available yet, and do not retry the call' 'On either path, if `set_policy` answers' \
   'Treat `auto` like `ask` for now' 'if `post` or `skip` is missing, ask with the plain yes' \

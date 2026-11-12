@@ -1095,7 +1095,9 @@ was confirmed. It is an offer to make to the USER, never a thing to do on
 their behalf: the post is public and carries their GitHub handle, unless
 they pick posting without it (`share.author` says who signs it now).
 
-- Relay `share.ask_user`, and **draft it yourself in the same message** –
+- Relay `share.ask_user`, and **draft it yourself in the same message**
+  (with `share.save`, save it just before that message: "Save the draft
+  first" below) –
   finished, to the format in `share.format`. Do not ask the user how long it
   should be, what to redact, or whether to translate it; do not make them ask
   you to shorten it. They approve or edit; they do not brief you.
@@ -1172,24 +1174,19 @@ they pick posting without it (`share.author` says who signs it now).
 - **Save the draft first when `share.save` is present and you have the
   `save_story_draft` tool.** Write the draft, call `save_story_draft` with
   the review id, the text and the lesson, and only then send the message that
-  relays `share.ask_user` and shows the finished text. Call it again every
-  time the text changes: after the user asks for an edit, and after the
-  server refuses a draft and you rewrite it. It publishes nothing and counts
-  nothing: the draft waits, private, on https://mcp.ohmybug.ai/me/stories
-  until the user posts it there, with or without their GitHub name, or
-  discards it. Do not tell the user it was saved before they answer. When
-  they answer `skip`, `snooze_24h` or a plain no, and the last save answered
-  `saved: true`, say in one line that the draft waits privately on
-  https://mcp.ohmybug.ai/me/stories until they post or discard it; do not
-  ask again. If a re-save after a changed text fails or answers
-  `saved: false` while an earlier save answered `saved: true`, say in one
-  line that the earlier text still waits privately there and can be
-  discarded. When they pick a post label, post as usual; once the story is
-  posted, the server removes the saved draft. Without `share.save`, or
-  without the tool, save nothing. A save that fails or answers
+  relays `share.ask_user` and shows the finished text. When the save answered
+  `saved: true`, end that message with one line saying a private copy waits
+  on https://mcp.ohmybug.ai/me/stories until they post or discard it there,
+  whatever they answer here. Call it again every time the text changes:
+  after the user asks for an edit, and after the server refuses a draft and
+  you rewrite it; show the same line under the new text. If a re-save fails
+  or answers `saved: false` after an earlier `saved: true`, say instead that
+  the earlier text, not this one, waits there and can be discarded. A save
+  publishes nothing and counts nothing; once a story is posted, the server
+  removes the saved draft. Without `share.save`, or without the tool, save
+  nothing and say nothing about it. A save that fails or answers
   `saved: false` changes nothing else: ask as usual. All of this holds when
-  you ask in words too (next bullet), the pause label counting as
-  `snooze_24h`.
+  you ask in words too.
 - **Without `AskUserQuestion` (Codex, or no such tool), ask in words, never
   numbers.** If `post` or `skip` is missing from `share.choices`, or there are
   no choices, ask with the plain yes instead. Otherwise one message: the exact
@@ -1415,4 +1412,6 @@ branch.
 
 Only the diff and the manifest files are uploaded. The review runs in memory
 on OhMyBug's cloud and payloads are deleted after the review. Nothing is used
-for model training.
+for model training. A story draft is uploaded only when the server offers to keep
+it (`share.save`): it then waits privately on the user's stories page until
+they post or discard it, and the user is told so beside the text.
