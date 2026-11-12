@@ -820,18 +820,37 @@ stats = open(str(Path(router).parent.parent / "commands/stats.md"), encoding="ut
 # Hunt modes: the user's word picks one, none sent otherwise; refusals verbatim; never with deep.
 for phrase in ("### Hunt modes: lite, snap, fast", "send it as `submit_review`'s top-level\n  `mode`", "Otherwise send no `mode`",
                "`get_balance` `modes` lists for the key", "`mode_unavailable`", "`mode_needs_repo`", "`mode_too_large`",
-               "`mode_with_deep`", "never\n  switch modes silently", "Never send `mode` with `deep`", "`bughunt · lite · running`"):
+               "`mode_with_deep`", "never switch modes silently", "Never send `mode` with `deep`", "`bughunt · lite · running`"):
     assert phrase in skill, phrase
 # The upload prints the refusal's body and code on any curl (no -f, no 7.76-only flag).
 assert "curl -sS -w '\\nHTTP %{http_code}\\n' -X POST" in skill and "--fail-with-body" not in skill
 assert "once the last line reads `HTTP 200`" in skill and "ask which one they want" in skill
 review_cmd = open(str(Path(router).parent.parent / "commands/review.md"), encoding="utf-8").read()
 assert "send it as `submit_review`'s `mode`" in review_cmd and "A mode does\nnot go with `deep`:" in review_cmd
-assert "the first stage, in the mode the user named (else fast)" in review_cmd and "default" not in review_cmd and "`lite`, `snap` and `fast`" in review_cmd
+assert "the first stage, in the mode the user named (else fast, or the skill's\nroute when `get_balance` carries `route`)" in review_cmd and "default" not in review_cmd and "`lite`, `snap` and `fast`" in review_cmd
+# The route (snap, then fast), read from get_balance.route: every branch pinned in the skill and in the Codex text,
+# so a dropped clause cannot ship green.
+for phrase in ("on rung 1\n  (`meta` with `repo` + `ref` = the pushed head sha + `base_branch`, empty `diff`, no\n  `upload`), read `get_balance`",
+               "send `mode: \"snap\"`", "Naming a mode\n  (`fast` too) skips the route", "No `route`, an inline diff, an upload or uncommitted work:\n  send no `mode`",
+               "do not offer its `deep_offer`", "send the verdicts with `confirm_findings` BEFORE the next submit",
+               "**Snap has a real medium+** (REAL, not marked `known`): snap's result is the answer", "No fast follows.",
+               "An UNCLEAR medium+ blocks like on any hunt", "submit again with NO `mode` and exactly the `meta` you sent for snap",
+               "retire snap's", "**Snap failed** (`status: failed`) **or was cut short** (`review_of_record: false`)",
+               "the refusal rule below does not apply", "on a mode the user named: show the server's answer verbatim",
+               "A routed snap is not a named mode"):
+    # Whitespace-blind: a rewrap of the paragraph is not a dropped clause.
+    assert " ".join(phrase.split()) in " ".join(skill.split()), phrase
+for phrase in ("read get_balance; when it carries route {first: snap, then: fast}", "with no diff and no upload", "and send mode snap",
+               "do not relay its clean summary or its deep_offer", "call confirm_findings before the next submit",
+               "A real medium+ in snap (REAL, not marked known; an UNCLEAR one blocks until settled) makes snap the answer and no fast follows",
+               "a failed snap, a cut-short snap (review_of_record false) or a refused snap (mode_*, the route's fallback, not a user's mode: no yes/no question)",
+               "submit again with no mode and the same meta", "retire snap's", "An inline diff, an upload or uncommitted work never takes the route",
+               "A refusal of a mode the user named (mode_unavailable"):
+    assert phrase in router_text, phrase
 assert "`deep` / `--deep` is the user asking for the deep hunt up front" in review_cmd and "ask which one they want" in review_cmd
 # The Codex sentence is what Codex sessions get: pinned in the emitted text, and mode asks are routed.
 for phrase in ("goes as submit_review's top-level mode; with none named send no mode", "never mode: fast",
-               "(mode_unavailable, mode_needs_repo, mode_too_large, mode_with_deep)", "never a silent switch", "Never send mode with deep",
+               "(mode_unavailable, mode_needs_repo, mode_too_large, mode_with_deep) starts nothing", "never a silent switch", "Never send mode with deep",
                "The heartbeat's <mode> is the submit answer's hunt_mode", "with none named send no mode, and the hunt is fast"):
     assert phrase in router_text, phrase
 # Slice 1 has no default mode and no typical minutes: nothing may promise them.

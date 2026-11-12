@@ -935,22 +935,30 @@ others are refused before anything starts.
   argument of `/bughunter:review` – send it as `submit_review`'s top-level
   `mode`. Otherwise send no `mode`: the hunt is `fast`, or the route below when the server
   turned it on. Never pick a mode on your own to save or spend the user's money.
-- **The route.** When `get_balance` carries `route` (`{first: "snap", then: "fast"}`),
-  the user named no mode and no deep, and rung 1's `meta` applies (a pushed commit the
-  server reads), send `mode: "snap"` and say in one line: a quick snap pass first, the
-  full fast hunt follows when it finds nothing major. Judge snap's findings as usual,
-  all of them, before anything else. Then:
-  - snap left no real medium+ (no findings, only lows, or every medium+ NOT_REAL):
-    submit again with NO `mode` and the same `meta` (same `ref`, same `change_id`), arm
-    the monitor with `mode=fast`, and that hunt's result is THE answer: show its summary,
-    findings and report as for any fast hunt; of snap say one line ("quick pass: nothing
-    major"). The deep offer after it is the usual one (3b).
-  - snap has a real medium+: snap's result is the answer, and no fast follows. An
-    UNCLEAR medium+ is not real: settle it first, as on any hunt.
-  - snap failed or was cut short: say so in one line and submit the fast hunt as above.
-  - no `route`, an inline diff, an upload or uncommitted work: send no `mode`.
-  - snap refused (`mode_*`): say so in one line and send no `mode`: the route falls back
-    to the hunt the user would have had without it.
+- **The route.** Before a hunt the user named no mode and no deep for, on rung 1
+  (`meta` with `repo` + `ref` = the pushed head sha + `base_branch`, empty `diff`, no
+  `upload`), read `get_balance`. When it carries `route` (`{first: "snap", then: "fast"}`),
+  the server turned the route on: send `mode: "snap"` and say in one line what runs and
+  costs: a snap pass first at its `price_usd` from `modes`, then, when it finds nothing
+  major, the full fast hunt at its own price, so the wait can be both hunts. Naming a mode
+  (`fast` too) skips the route. No `route`, an inline diff, an upload or uncommitted work:
+  send no `mode`, as above. When snap ends:
+  - **Snap is not the answer yet.** Do not relay its clean `summary` as the result and do
+    not offer its `deep_offer`: the answer is the hunt that ends the route. Judge every snap
+    finding and send the verdicts with `confirm_findings` BEFORE the next submit, so the
+    fast submit is not held for unjudged findings.
+  - **Snap has a real medium+** (REAL, not marked `known`): snap's result is the answer,
+    shown and handled like any finished hunt, deep offer included (3b). No fast follows.
+    An UNCLEAR medium+ blocks like on any hunt: snap is the answer until it is settled.
+  - **Snap has no real medium+** (no findings, only lows, every medium+ NOT_REAL or marked
+    `known`): submit again with NO `mode` and exactly the `meta` you sent for snap. Arm the
+    monitor for the new `review_id` per "The monitor" below, and retire snap's. That hunt's
+    result is THE answer, with its own summary, report and deep offer (3b); of snap say one
+    line ("snap pass: nothing major").
+  - **Snap failed** (`status: failed`) **or was cut short** (`review_of_record: false`):
+    say so in one line and submit the fast hunt as above.
+  - **Snap refused** (`mode_*`): the route's own fallback, not a mode the user chose, so
+    the refusal rule below does not apply: say it in one line and submit with no `mode`.
 - **Before the submit** of a named mode, say in one line what will run: the
   mode and its price, read from `get_balance` `modes` (`price_usd`). A mode
   not listed there is not running for this key: say so and offer `fast`
@@ -963,9 +971,9 @@ others are refused before anything starts.
   diff under 1 MB.
 - **A refusal starts nothing and charges nothing.** `mode_unavailable`,
   `mode_needs_repo`, `mode_too_large`,
-  `mode_with_deep`: show the server's answer verbatim, then offer what it says
-  to send instead (usually `mode: "fast"`) with ONE yes/no question – never
-  switch modes silently.
+  `mode_with_deep` on a mode the user named: show the server's answer verbatim, then
+  offer what it says to send instead (usually `mode: "fast"`) with ONE yes/no question –
+  never switch modes silently. A routed snap is not a named mode: see "The route".
 - **Deep is not a mode.** Never send `mode` with `deep`. The deep offer after any mode is the same. When the
   user names both a mode and the deep hunt, ask which one they want.
 - **"Fast" elsewhere in this skill is the stage.** "The fast hunt", "a review
