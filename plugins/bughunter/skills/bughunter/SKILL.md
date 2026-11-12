@@ -933,8 +933,24 @@ others are refused before anything starts.
 - **The mode is the user's word.** When they name one – "lite hunt",
   "snap review", `lite` / `snap` / `fast` or `--mode <m>` as the
   argument of `/bughunter:review` – send it as `submit_review`'s top-level
-  `mode`. Otherwise send no `mode`: the hunt is `fast`. Never pick a mode on your own to save or
-  spend the user's money.
+  `mode`. Otherwise send no `mode`: the hunt is `fast`, or the route below when the server
+  turned it on. Never pick a mode on your own to save or spend the user's money.
+- **The route.** When `get_balance` carries `route` (`{first: "snap", then: "fast"}`),
+  the user named no mode and no deep, and rung 1's `meta` applies (a pushed commit the
+  server reads), send `mode: "snap"` and say in one line: a quick snap pass first, the
+  full fast hunt follows when it finds nothing major. Judge snap's findings as usual,
+  all of them, before anything else. Then:
+  - snap left no real medium+ (no findings, only lows, or every medium+ NOT_REAL):
+    submit again with NO `mode` and the same `meta` (same `ref`, same `change_id`), arm
+    the monitor with `mode=fast`, and that hunt's result is THE answer: show its summary,
+    findings and report as for any fast hunt; of snap say one line ("quick pass: nothing
+    major"). The deep offer after it is the usual one (3b).
+  - snap has a real medium+: snap's result is the answer, and no fast follows. An
+    UNCLEAR medium+ is not real: settle it first, as on any hunt.
+  - snap failed or was cut short: say so in one line and submit the fast hunt as above.
+  - no `route`, an inline diff, an upload or uncommitted work: send no `mode`.
+  - snap refused (`mode_*`): say so in one line and send no `mode`: the route falls back
+    to the hunt the user would have had without it.
 - **Before the submit** of a named mode, say in one line what will run: the
   mode and its price, read from `get_balance` `modes` (`price_usd`). A mode
   not listed there is not running for this key: say so and offer `fast`

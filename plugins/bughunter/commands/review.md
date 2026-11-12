@@ -29,5 +29,6 @@ and the user agrees.
 
 `lite`, `snap` and `fast` (bare or as `--mode <m>`) pick the hunt mode:
 send it as `submit_review`'s `mode`, following the skill's "Hunt modes"
-section; without one, send no `mode` and the hunt is fast. A mode does
+section; without one, send no `mode` and the hunt is fast, or the skill's
+route (snap, then fast) when `get_balance` carries `route`. A mode does
 not go with `deep`: when the user names both, ask which one they want.
