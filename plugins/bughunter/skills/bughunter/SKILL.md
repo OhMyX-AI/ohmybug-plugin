@@ -1158,9 +1158,9 @@ they pick posting without it (`share.author` says who signs it now).
   question. Its answers: the labels of `post`, `post_anonymous` when present, and
   `skip`, in the order the server sent them, then the label of `snooze_24h`
   when present. That is at most four, the tool's limit, so every one of them
-  is always offered; never drop `snooze_24h` to make room. When the list
-  cannot be read that way, if `post` or `skip` is missing, ask with the plain yes
-  ("Show the exact text and wait for a yes" below). Picking `snooze_24h`
+  is always offered; never drop `snooze_24h` to make room. But if `post` or
+  `skip` is missing, ask with the plain yes ("Show the exact text and wait
+  for a yes" below). Picking `snooze_24h`
   publishes nothing and sets the snooze; like `skip`, it is a no to this
   story. Picking `post` or
   `post_anonymous` is the yes to that exact text and to nothing else: if the
@@ -1169,18 +1169,23 @@ they pick posting without it (`share.author` says who signs it now).
   a re-ask. Only the
   `skip` or `snooze_24h` label or a plain decline is a no; answer a typed
   question, then ask again.
-- **Save the draft first when `share.save` is present.** Right after you
-  draft the text and BEFORE you show it and ask, call `save_story_draft`
-  with the review id, the text and the lesson; call it again with the new
-  text after the user asks for an edit. It publishes nothing and counts
-  nothing: the draft waits, private, on the user's page /me/stories ("Waiting for
-  your OK"), where they can post it later, with or without their GitHub
-  name, or discard it. Do not tell the user it was saved before they answer.
-  When they answer `skip`, `snooze_24h` or a plain no, and the save answered
-  `saved: true`, say in one line that the draft waits on /me/stories and can be
-  posted from there. When they pick a post label, post as usual: the saved
-  draft goes by itself. Without `share.save`, save nothing. A save that
-  fails or answers `saved: false` changes nothing: ask as usual.
+- **Save the draft first when `share.save` is present and you have the
+  `save_story_draft` tool.** Write the draft, call `save_story_draft` with
+  the review id, the text and the lesson, and only then send the message that
+  relays `share.ask_user` and shows the finished text. Call it again every
+  time the text changes: after the user asks for an edit, and after the
+  server refuses a draft and you rewrite it. It publishes nothing and counts
+  nothing: the draft waits, private, on https://mcp.ohmybug.ai/me/stories
+  ("Waiting for your OK") until the user posts it there, with or without
+  their GitHub name, or discards it. Do not tell the user it was saved before
+  they answer. When they answer `skip`, `snooze_24h` or a plain no, and the
+  last save answered `saved: true`, say in one line that the draft waits
+  privately on https://mcp.ohmybug.ai/me/stories until they post or discard
+  it; do not ask again. When they pick a post label, post as usual; once the
+  story is posted, the server removes the saved draft; if that post fails
+  and the last save answered `saved: true`, say the same line. Without
+  `share.save`, or without the tool, save nothing. A save that fails or
+  answers `saved: false` changes nothing: ask as usual.
 - **Without `AskUserQuestion` (Codex, or no such tool), ask in words, never
   numbers.** If `post` or `skip` is missing from `share.choices`, or there are
   no choices, ask with the plain yes instead. Otherwise one message: the exact
