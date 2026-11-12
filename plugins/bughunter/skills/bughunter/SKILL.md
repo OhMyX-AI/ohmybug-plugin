@@ -1033,6 +1033,16 @@ reviewer would block a merge over (`critical`/`high`/`medium`) makes the
 review billable, `low` is free – so this decision is the bill, and the user
 sees the table before you send it.
 
+**Real, but already in the user's own ticket.** When a real `medium` or `low`
+is one the user already deferred to, or accepted in, a ticket you can name,
+send it as `REAL` with `known: {kind: "deferred" | "accepted", ref}` – `ref`
+is `#123`, `owner/repo#123` or an https link. It stays on the report with
+that ref, adds nothing to the bill and does not hold the merge; a hunt
+billed on CI, or one that already billed on its own (`silent_bill`), stays
+charged. Only after you traced it and matched it to that ticket: a new bug at
+the same place is not known. `high`/`critical` cannot be marked known. When
+the match is not certain, ask the user.
+
 Honesty rules (non-negotiable):
 - The verdict is the billing meter. A review with at least one `REAL` major
   (`critical`/`high`/`medium`) costs the user its flat price – 4 USD fast, 12 or
@@ -1042,6 +1052,8 @@ Honesty rules (non-negotiable):
   and never fix a finding you refused to confirm. OhMyBug audits later diffs;
   silently fixing an unconfirmed finding flags the account.
 - Never mark `REAL` without actually tracing the scenario.
+- Never mark a finding `known` to avoid the charge: only one the user's
+  ticket already names.
 - The user can override any verdict before submission – show them the table.
 
 ### 5. Report verdicts BEFORE fixing
@@ -1069,8 +1081,9 @@ normal workflow. Findings include a suggested fix; treat it as a hint, not
 gospel.
 
 **A real `low` does not hold the merge.** Do not fix it unasked, and do not let
-it vanish: offer the user to record it where the next agent and the next review
-will see it, and write the record only on their word. The place is theirs to
+it vanish: one the user's ticket already names went out as `known` in step 4;
+for any other, offer the user to record it where the next agent and the next
+review will see it, and write the record only on their word. The place is theirs to
 pick. The change's ticket or PR description leaves the hunted diff as it is; a
 comment at the site or a docs line changes the diff, so it goes into the next
 change, or into this one followed by a fresh hunt. A record that may be public
