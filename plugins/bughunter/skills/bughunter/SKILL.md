@@ -16,8 +16,8 @@ OhMyBug is a cloud service: it reviews a diff with an orchestrated fleet of
 adversarial reviewers on its own models and returns findings. This agent then
 verifies each finding against the local codebase and reports verdicts.
 Billing is flat per review whose verdicts confirm at least one real major
-bug – no matter how many: by the hunt mode, 1 USD cheap, 2 USD ultrafast or
-4 USD fast (see "Hunt modes" below); 12 USD for a deep hunt, 24 USD for a deep
+bug – no matter how many: 4 USD for a fast hunt (a lite or snap hunt: the
+price `get_balance` `modes` lists, see "Hunt modes" below); 12 USD for a deep hunt, 24 USD for a deep
 hunt over a wide change (11 or more folder chunks). The server is the
 authority on prices: when `get_balance` `modes` or `prices`, or a
 `deep_offer.price_usd`, names a different figure, quote that one. Severity uses the merge boundary: a finding
@@ -469,8 +469,8 @@ This works in two cases, checked server-side in this order:
 - No error and a `review_id` → it worked; skip context packing entirely, go
   to the monitor step. The mode is `fast` – stage one – unless this submit
   carried `deep: true` on the user's word (§3b): then it is `deep`, and the
-  watcher is the deep one. A stage-one answer's `hunt_mode` (`cheap` or
-  `ultrafast`, see "Hunt modes") names the watcher's mode instead of `fast`. Readable repo access means the reviewers fetch the
+  watcher is the deep one. A stage-one answer's `hunt_mode` (`lite` or
+  `snap`, see "Hunt modes") names the watcher's mode instead of `fast`. Readable repo access means the reviewers fetch the
   files they need themselves instead of asking you.
 - Error `diff_required` (private repo without the App) → this is rung 2 above:
   offer the one-click App install FIRST and retry, because it removes the payload
@@ -550,7 +550,7 @@ curl -sS -w '\nHTTP %{http_code}\n' -X POST -H 'content-type: application/json' 
 
 3. The review starts on upload – arm the background monitor on `status_url`
    as usual once the last line reads `HTTP 200`; any other code is a refusal,
-   and the body above it says why. Cheap and ultrafast never take this path:
+   and the body above it says why. Lite and snap never take this path:
    a submit with `upload: true` in one of those modes is refused
    `mode_needs_repo` (see "Hunt modes"). When the server can read the repo, context files are mostly
    redundant (reviewers fetch what they need themselves) – diff + meta is
@@ -676,7 +676,7 @@ refused each one, and the agent sent the same refused call again for the rest
 of the turn.
 
 ```bash
-mode=fast # REPLACE with the submit answer's hunt_mode (cheap, ultrafast or fast) when it has one; deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)
+mode=fast # REPLACE with the submit answer's hunt_mode (lite, snap or fast) when it has one; deep for a deep submit – an escalation or a deep-first hunt (`deep: true`)
 url='<status_url>'; case $url in *\?*) url="$url&w=loop" ;; *) url="$url?w=loop" ;; esac # names this waiter on the server's read journal
 watch="$HOME/.ohmybug/watch/<review_id>"; mkdir -p "${watch%/*}"
 every=<watch_poll_s> # seconds between polls: the submit response's watch_poll_s seeds it
@@ -920,22 +920,18 @@ Do not stall: if the user is away and the files pass the exclusion rules,
 send them – the manifest keeps it auditable. If nothing can be sent, call
 `provide_files` with an empty list so the review proceeds without waiting.
 
-### Hunt modes: cheap, ultrafast, fast
+### Hunt modes: lite, snap, fast
 
-The first stage runs in one of three modes. Each bills only when the user's
-verdicts confirm a real bug, and the server's figures win over these:
-
-| mode | price |
-|---|---|
-| `cheap` | 1 USD |
-| `ultrafast` | 2 USD |
-| `fast` | 4 USD |
+The first stage runs in one of three modes: `lite`, `snap` or `fast`. Each
+bills only when the user's verdicts confirm a real bug. Each mode's price is
+the `price_usd` that `get_balance` `modes` lists: quote that figure, never one
+from memory.
 
 The server runs only the modes `get_balance` `modes` lists for the key; the
 others are refused before anything starts.
 
-- **The mode is the user's word.** When they name one – "cheap hunt",
-  "ultrafast review", `cheap` / `ultrafast` / `fast` or `--mode <m>` as the
+- **The mode is the user's word.** When they name one – "lite hunt",
+  "snap review", `lite` / `snap` / `fast` or `--mode <m>` as the
   argument of `/bughunter:review` – send it as `submit_review`'s top-level
   `mode`. Otherwise send no `mode`: the hunt is `fast`. Never pick a mode on your own to save or
   spend the user's money.
@@ -944,10 +940,10 @@ others are refused before anything starts.
   not listed there is not running for this key: say so and offer `fast`
   instead of sending it. No `modes` at all (an older server): name the mode
   only.
-- **The repository.** `cheap` and `ultrafast` read the repository, so they
+- **The repository.** `lite` and `snap` read the repository, so they
   need rung 1's `meta` (`repo` + `ref` = the pushed head sha + `base_branch`)
   on a commit the server can read; on a diff alone or an upload the server
-  refuses them (`mode_needs_repo`). `ultrafast` takes a
+  refuses them (`mode_needs_repo`). `snap` takes a
   diff under 1 MB.
 - **A refusal starts nothing and charges nothing.** `mode_unavailable`,
   `mode_needs_repo`, `mode_too_large`,
@@ -961,7 +957,7 @@ others are refused before anything starts.
   mode the user named or none: never `mode: "fast"` on your own.
 - **The monitor.** The submit answer's `hunt_mode` is the mode that runs: the
   watch loop's `mode=` takes it, so the compact line reads
-  `bughunt · cheap · running`. No `hunt_mode` (an older server): `fast`.
+  `bughunt · lite · running`. No `hunt_mode` (an older server): `fast`.
 
 ### 3b. Two stages: the fast hunt, then maybe the deep one
 

@@ -105,8 +105,8 @@ test('a hunt that finishes raises a toast and a band, and starts no turn by itse
 })
 
 // The stage-one mode the server echoes, else the stage, else fast; a deep (full) answer stays full; nothing else is drawn.
-for (const [mode, hunt_mode, label] of [['fast', 'cheap', 'cheap'], ['fast', 'ultrafast', 'ultrafast'], ['fast', 'x\u001b[2J', 'fast'],
-  ['x\u001b[2J', undefined, 'fast'], ['full', 'cheap', 'full']] as const) {
+for (const [mode, hunt_mode, label] of [['fast', 'lite', 'lite'], ['fast', 'snap', 'snap'], ['fast', 'x\u001b[2J', 'fast'],
+  ['x\u001b[2J', undefined, 'fast'], ['full', 'lite', 'full']] as const) {
   test(`a submit answer with mode ${JSON.stringify(mode)} and hunt_mode ${JSON.stringify(hunt_mode)} reads "bughunt ${label}" on the status line`, async ($, on) => {
     mock.clock(on)
     mock.store(on)
@@ -1204,10 +1204,10 @@ test('OHMYBUG_STATUS=0 keeps the status line clear and the prompt line out', asy
   expect(await nextStep($)).toBe('')
 })
 
-test('the findings card heads a cheap hunt with its mode, and a deep one with full', async ($, on) => {
+test('the findings card heads a lite hunt with its mode, and a deep one with full', async ($, on) => {
   mock.store(on)
   engine(on)
-  for (const [extra, head] of [[{ hunt_mode: 'cheap' }, 'cheap hunt rev_1 · done'], [{ mode: 'full', hunt_mode: 'cheap' }, 'full hunt rev_1 · done']] as const) {
+  for (const [extra, head] of [[{ hunt_mode: 'lite' }, 'lite hunt rev_1 · done'], [{ mode: 'full', hunt_mode: 'lite' }, 'full hunt rev_1 · done']] as const) {
     const output = JSON.stringify({ ...JSON.parse(done), ...extra })
     const ui = await $.ui.mount({ plugin: 'bughunter', surface: 'terminal', component: 'ToolResult', requestId: 't1',
       props: { tool_use_id: 't1', tool: GET, output, isErrored: false } } as never)

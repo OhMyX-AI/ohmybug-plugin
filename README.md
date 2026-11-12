@@ -16,12 +16,11 @@ confirms real bugs: $4 per bug-finding review (however many bugs it
 holds), $12 for a deep hunt you choose ($24 on a wide change), minor findings
 free, first review free.
 
-- **Cheap review** · $1, where the service runs it
-- **Ultrafast review** · $2, where the service runs it
+- **Lite review** and **snap review**: the price `get_balance` lists, where the service runs them
 - **Fast review** · $4 · finds 73% of significant bugs · up to 15 minutes
 - **Deep review** · $12 ($24 on a wide change) · finds 90% of significant bugs · up to 2 hours
 
-Pick a mode for one hunt with `/bughunter:review cheap` (or `ultrafast`, `fast`); without one the hunt is fast. Cheap and ultrafast read the repository, so they need a pushed GitHub commit the service can read, and ultrafast a diff under 1 MB. `/bughunter:stats` lists the modes the service runs for your key.
+Pick a mode for one hunt with `/bughunter:review lite` (or `snap`, `fast`); without one the hunt is fast. Lite and snap read the repository, so they need a pushed GitHub commit the service can read, and snap a diff under 1 MB. `/bughunter:stats` lists the modes the service runs for your key.
 
 See the bug species our hunts keep finding in the [Bugarium](https://mcp.ohmybug.ai/bugs).
 
@@ -234,7 +233,7 @@ Turn the mod off with
 
 | Tool | In | Out |
 |---|---|---|
-| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}`, `mode?` (`cheap`, `ultrafast` or `fast`; absent: fast) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}` |
+| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}`, `mode?` (`lite`, `snap` or `fast`; absent: fast) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}` |
 | `get_findings` | `review_id` | `{status: running\|needs_files\|done\|failed, findings[{finding_id, severity, file, line?, title, failure_scenario, suggested_fix?}]}` |
 | `provide_files` | `review_id`, `paths[]` (Claude Code: the plugin's hook reads them from disk) or `files[{path, content}]` | `{status, delivered}` |
 | `confirm_findings` | `review_id`, `verdicts[{finding_id, verdict: REAL\|NOT_REAL\|UNCLEAR, reason, severity?, known?: {kind: deferred\|accepted, ref}}]` | `{confirmed, minor_confirmed, marked_known?, billed_usd, free_review_used, balance_usd, receipt_id}` |

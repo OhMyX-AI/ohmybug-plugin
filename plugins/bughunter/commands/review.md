@@ -27,7 +27,7 @@ fast hunt instead; never downgrade silently. Without those words the hunt is
 the first stage, in the mode the user named (else fast), and deep only when the server offers it
 and the user agrees.
 
-`cheap`, `ultrafast` and `fast` (bare or as `--mode <m>`) pick the hunt mode:
+`lite`, `snap` and `fast` (bare or as `--mode <m>`) pick the hunt mode:
 send it as `submit_review`'s `mode`, following the skill's "Hunt modes"
 section; without one, send no `mode` and the hunt is fast. A mode does
 not go with `deep`: when the user names both, ask which one they want.
