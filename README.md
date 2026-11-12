@@ -155,7 +155,8 @@ repository per week, and is not a merge gate.
 - Your own agent verifies each finding against your codebase and reports
   REAL / NOT_REAL / UNCLEAR. You see and approve the verdicts.
 - Billing: one flat price per review with confirmed real bugs — one or ten,
-  same price: $4 fast, $12 deep, $24 deep on a wide change (11+ folder chunks). Minor findings, review runs, false positives, unclear — $0.
+  same price: $4 fast, $12 deep, $24 deep on a wide change (11+ folder chunks). Minor findings, review runs, false positives, unclear — $0,
+  and so is a real medium you already deferred or accepted in your own ticket, once your agent marks it known.
 - `/bughunter:stats` shows your record: bugs found, reviews run, balance.
 - Before a diff or file contents leave your machine (`submit_review`,
   `provide_files`), a secret scan refuses a payload that carries a credential
@@ -231,7 +232,7 @@ Turn the mod off with
 | `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}` | `{review_id, status, mode, pending_verdicts[]}` |
 | `get_findings` | `review_id` | `{status: running\|needs_files\|done\|failed, findings[{finding_id, severity, file, line?, title, failure_scenario, suggested_fix?}]}` |
 | `provide_files` | `review_id`, `paths[]` (Claude Code: the plugin's hook reads them from disk) or `files[{path, content}]` | `{status, delivered}` |
-| `confirm_findings` | `review_id`, `verdicts[{finding_id, verdict: REAL\|NOT_REAL\|UNCLEAR, reason}]` | `{confirmed, minor_confirmed, billed_usd, free_review_used, balance_usd, receipt_id}` |
+| `confirm_findings` | `review_id`, `verdicts[{finding_id, verdict: REAL\|NOT_REAL\|UNCLEAR, reason, severity?, known?: {kind: deferred\|accepted, ref}}]` | `{confirmed, minor_confirmed, marked_known?, billed_usd, free_review_used, balance_usd, receipt_id}` |
 | `get_balance` | — | `{balance_usd, free_reviews_left, confirmed_total, stats{…}}` |
 
 Errors: `payment_required` (top up), `pending_verdicts` (resolve previous

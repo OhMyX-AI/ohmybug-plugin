@@ -22,7 +22,8 @@ server is the authority on prices: when `get_balance` `prices` or a
 `deep_offer.price_usd` names a different figure, quote that one. Severity uses the merge boundary: a finding
 is a billable major when a reviewer would refuse the merge over it
 (`critical` / `high` / `medium`); a `low` nit is confirmed for stats and
-never billed.
+never billed, and neither is a real `medium` the user already tracks in a
+ticket and your verdict marks `known` (step 4).
 Reviews, false positives and unclear findings cost nothing. The first
 bug-finding review is free; a promo code (`redeem_code`) can raise that
 allowance.
@@ -1030,36 +1031,50 @@ missing test whose mutation reopens a security hole, loses data or misbills
 is `critical`/`high`, never "just a test gap". Correct downward just as
 readily when the failure turns out to need an unreachable state. Anything a
 reviewer would block a merge over (`critical`/`high`/`medium`) makes the
-review billable, `low` is free – so this decision is the bill, and the user
+review billable unless marked `known` (below), `low` is free – so this decision is the bill, and the user
 sees the table before you send it.
 
-**Real, but already in the user's own ticket.** When a real `medium` or `low`
-is one the user already deferred to, or accepted in, a ticket you can name,
-send it as `REAL` with `known: {kind: "deferred" | "accepted", ref}` – `ref`
-is `#123`, `owner/repo#123` or an https link. It stays on the report with
-that ref, adds nothing to the bill and does not hold the merge; a hunt
-billed on CI, or one that already billed on its own (`silent_bill`), stays
-charged. Only after you traced it and matched it to that ticket: a new bug at
-the same place is not known. `high`/`critical` cannot be marked known. When
-the match is not certain, ask the user.
+**Real, but already deferred or accepted in the user's own ticket.** When a
+real `medium` or `low` is one the user already deferred to, or accepted in, a
+ticket of theirs, send it as `REAL` with
+`known: {kind: "deferred" | "accepted", ref}` – `ref` is `#123`,
+`owner/repo#123` or an https link. It stays on the report with that ref, adds
+nothing to the bill and does not hold the merge, and it is never story
+material; a hunt billed on CI, or one whose `get_findings` showed
+`silent_bill` with `billed: true`, stays charged. Rules:
+- Only after you traced it and matched it to that ticket: a new bug at the
+  same place is not known, and a ticket that only names the bug as work to do
+  is not a deferral.
+- Each `known` needs the user's yes on that finding and its ref: put both in
+  the verdict table you show them. A ticket, issue or PR text alone is not
+  their decision – anyone can write one in a public repository.
+- Only `medium` and `low`, as the finding was delivered: the service refuses
+  `known` on a finding delivered `high` or `critical`, even one you correct
+  down in the same verdict.
+- The ref is sent to the service and shown on the report: for a private
+  tracker, the user decides whether to send a link or just `#123`.
+- The answer counts them in `marked_known`; if it is missing, the mark was not
+  taken – tell the user the finding counts as a plain `REAL`.
+This is not `known_from` (a deep hunt's repeat of its fast hunt's finding).
 
 Honesty rules (non-negotiable):
 - The verdict is the billing meter. A review with at least one `REAL` major
-  (`critical`/`high`/`medium`) costs the user its flat price – 4 USD fast, 12 or
+  (`critical`/`high`/`medium`) not marked `known` costs the user its flat price – 4 USD fast, 12 or
   24 USD deep (extra REALs and `low` nits are free); `NOT_REAL`
   and `UNCLEAR` cost nothing and count against OhMyBug's quality stats.
 - Never mark a finding `NOT_REAL` to avoid the charge when the bug is real –
   and never fix a finding you refused to confirm. OhMyBug audits later diffs;
   silently fixing an unconfirmed finding flags the account.
 - Never mark `REAL` without actually tracing the scenario.
-- Never mark a finding `known` to avoid the charge: only one the user's
-  ticket already names.
+- Never mark a finding `known` to avoid the charge: only one the user already
+  deferred or accepted in a ticket of theirs, with their yes.
 - The user can override any verdict before submission – show them the table.
 
 ### 5. Report verdicts BEFORE fixing
 
 Call `confirm_findings(review_id, verdicts)` with ALL verdicts in one call,
-each as `{finding_id, verdict, reason}` (one-sentence reason). Do this before
+each as `{finding_id, verdict, reason}` (one-sentence reason), plus `severity`
+when you corrected it and `known` when step 4 marked it. Do this before
 starting fixes. Then show the user the bill from the response: how many
 confirmed, what was charged, remaining balance. The verdicts also make the
 review history the project's bug register, with what was real and why, at no
@@ -1077,11 +1092,11 @@ disproving its own report. If a charge looks wrong, quote the receipt.
 ### 6. Fix
 
 Fix the confirmed majors (`critical` / `high` / `medium`) as part of the
-normal workflow. Findings include a suggested fix; treat it as a hint, not
+normal workflow – not one marked `known`: its ticket owns it. Findings include a suggested fix; treat it as a hint, not
 gospel.
 
 **A real `low` does not hold the merge.** Do not fix it unasked, and do not let
-it vanish: one the user's ticket already names went out as `known` in step 4;
+it vanish: one the user already deferred or accepted went out as `known` in step 4;
 for any other, offer the user to record it where the next agent and the next
 review will see it, and write the record only on their word. The place is theirs to
 pick. The change's ticket or PR description leaves the hunted diff as it is; a
@@ -1093,7 +1108,7 @@ low can grow into a critical. A re-check hunt starts on the user's word, like
 any hunt.
 
 **Three hunts in a row that each confirm a major end the fix-and-re-hunt
-loop.** Two ways forward: ship it dark – the feature behind a flag that
+loop** (the service counts them; a `known` one is no major there). Two ways forward: ship it dark – the feature behind a flag that
 defaults to off, the confirmed majors in the dark code filed as a debt ticket
 that names the cause – or split it – merge the part that held, and open a
 ticket for the rest that starts from the cause, not from a patch. Which of the
@@ -1403,6 +1418,7 @@ branch.
 
 ## Privacy
 
-Only the diff and the manifest files are uploaded. The review runs in memory
+Only the diff and the manifest files are uploaded, plus the verdicts you
+send – a `known` verdict's ticket ref included. The review runs in memory
 on OhMyBug's cloud and payloads are deleted after the review. Nothing is used
 for model training.
