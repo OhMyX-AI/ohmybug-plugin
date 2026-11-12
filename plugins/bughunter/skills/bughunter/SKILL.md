@@ -1189,19 +1189,19 @@ they pick posting without it (`share.author` says who signs it now).
   story): this skill does not do them, so offering them would promise what it
   does not do.
 
-  Show the exact text first, then make one `AskUserQuestion` call. Question
-  1, this story: the labels of `post`, `post_anonymous` when present, and
-  `skip`, in the order the server sent them; if `post` or `skip` is missing,
-  ask with the plain yes ("Show the exact text and wait for a yes" below).
-  Question 2, next time: "No change" (the one label of your own, since
-  keeping the setting needs no call), then the label of `snooze_24h`; leave
-  question 2 out when `snooze_24h` is not present. Picking `post` or
+  Show the exact text first, then make one `AskUserQuestion` call with ONE
+  question. Its answers: the labels of `post`, `post_anonymous` when present,
+  and `skip`, in the order the server sent them, then the label of
+  `snooze_24h` when present. That is at most four, the tool's limit, so all
+  of them fit; never drop `snooze_24h` to make room. But if `post` or `skip`
+  is missing, ask with the plain yes ("Show the exact text and wait for a
+  yes" below). Picking `snooze_24h` publishes nothing and sets the snooze;
+  like `skip`, it is a no to this story. Picking `post` or
   `post_anonymous` is the yes to that exact text and to nothing else: if the
   text changes after it (the user asks for an edit, or the server refuses the
   draft), show the new text and ask again – a new text is a new question, not
-  a re-ask. Only the
-  `skip` label or a plain decline is a no; answer a typed question, then ask
-  question 1 again.
+  a re-ask. Only the `skip` or `snooze_24h` label or a plain decline is a no;
+  answer a typed question, then ask again.
 - **Without `AskUserQuestion` (Codex, or no such tool), ask in words, never
   numbers.** If `post` or `skip` is missing from `share.choices`, or there are
   no choices, ask with the plain yes instead. Otherwise one message: the exact
