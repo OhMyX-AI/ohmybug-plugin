@@ -110,39 +110,35 @@ codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp
 
 `codex mcp add` detects OAuth and opens the GitHub sign-in flow automatically.
 
-Then add the `X-OhMyBug-Follows` header, which the plugin install sends on its
-own. It tells the service that this client follows a hunt to the review that
-finishes it, so the service may answer a first step and continue the hunt from
-there. The skill does that from the version the first line above installs; an
-older copy of the skill does not, so refresh it first. `codex mcp add` has no
-header option: put this table in Codex's `config.toml` (`~/.codex/config.toml`,
-or under `$CODEX_HOME`), after the `[mcp_servers.ohmybug]` entry:
+For headless CI, use an operator-issued raw `omb_` key — write to
+[hi@ohmybug.ai](mailto:hi@ohmybug.ai) or DM [@ohmybug](https://x.com/ohmybug)
+to get one:
+
+```bash
+export OHMYBUG_API_KEY=omb_...
+codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp \
+  --bearer-token-env-var OHMYBUG_API_KEY
+```
+
+Then, by hand, put this table in Codex's `config.toml` (`~/.codex/config.toml`,
+or under `$CODEX_HOME`), after the `[mcp_servers.ohmybug]` entry, once:
 
 ```toml
 [mcp_servers.ohmybug.http_headers]
 "X-OhMyBug-Follows" = "continued_by"
 ```
 
-`codex mcp add` rewrites the entry without it, so add the table again after
-each `codex mcp add`, once: Codex refuses a config that has it twice.
+It is the header the plugin install sends on its own: it tells the service that
+this client follows a hunt to the review that finishes it, so the service may
+answer a first step and continue the hunt from there. The skill follows it from
+the version the `npx skills add` line installs; an older copy does not, so
+refresh the skill first. `codex mcp add` has no header option and rewrites the
+entry without the table, so put it back after each `codex mcp add`; Codex
+refuses a config that defines it twice.
 
-For headless CI, use an operator-issued raw `omb_` key — write to
-[hi@ohmybug.ai](mailto:hi@ohmybug.ai) or DM [@ohmybug](https://x.com/ohmybug)
-to get one. The same steps as a script, which adds the table only when the
-server was added and the table is not there yet:
-
-```bash
-export OHMYBUG_API_KEY=omb_...
-npx skills add OhMyX-AI/ohmybug-plugin --skill bughunter
-codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp \
-  --bearer-token-env-var OHMYBUG_API_KEY &&
-f="${CODEX_HOME:-$HOME/.codex}/config.toml" &&
-{ grep -qF '[mcp_servers.ohmybug.http_headers]' "$f" ||
-  printf '\n[mcp_servers.ohmybug.http_headers]\n"X-OhMyBug-Follows" = "continued_by"\n' >> "$f"; }
-```
-
-Claude Code users who prefer a key over OAuth can do the same with one command
-(an explicit Authorization header disables the OAuth flow):
+Claude Code users with the plugin installed who prefer a key over OAuth can add
+the server with both headers (an explicit Authorization header disables the
+OAuth flow):
 
 ```bash
 claude mcp add --transport http ohmybug https://mcp.ohmybug.ai/mcp \
@@ -150,8 +146,8 @@ claude mcp add --transport http ohmybug https://mcp.ohmybug.ai/mcp \
   --header "X-OhMyBug-Follows: continued_by"
 ```
 
-The header is only for an agent that runs the bughunter skill or plugin. A
-client that talks to the MCP server with no skill (your own script, another MCP
+The header is only for an agent that runs the bughunter plugin or skill. A
+client that talks to the MCP server without them (your own script, another MCP
 host) must leave `X-OhMyBug-Follows` out: with it, a hunt can answer with a
 first step that points at the review that continues it, and a client that does
 not follow that pointer reports the first step instead of the result. The pi
