@@ -60,7 +60,7 @@ EOF
 # catches up. Measured on this repo: a 5-commit branch stamped 0.50.0 onto a
 # main that would reach 48.
 #
-# The main ref's first-parent count + 1 is what the squash will produce, from any
+# `origin/main` first-parent + 1 is what the squash will produce, from any
 # branch, whatever its length. It is also monotonic, which is the property the
 # marketplace actually needs.
 #
@@ -71,40 +71,38 @@ EOF
 # them. `--check` does catch it on any re-run, and main goes red afterwards, so
 # the exposure is a stale green check. Fetch before computing if branches start
 # overlapping often enough for that to be a real risk.
-
-# The repository releases are published from. A remote that points at an older
-# copy reads a main that stopped at an older release, and stamps a number the
-# marketplace already has; so the remote whose URL names this repository wins,
-# under any remote name, and any doubt about it is an error, never a fallback.
-LIVE_REPO='OhMyX-AI/ohmybug-plugin'
-
-# Prints the main ref. Returns 2, with the remedy on stderr, when a GitHub remote
-# exists but the live one is missing or not fetched: the fallback below would
-# then read some other repository's main without a word.
+#
+# Of several remotes, the main that published the HIGHEST version, origin first
+# on a tie. A remote can point at an older copy of the repository (a clone made
+# before it moved keeps `origin` there) whose main stopped at an older release:
+# read alone, it stamps a number the marketplace already has. An older copy is
+# lower by construction, so the maximum needs no rule about which remote is the
+# real one. A remote not fetched cannot be read from here; CI's --check, whose
+# origin is the live repository, refuses such a stamp before it merges.
 main_ref() {
-  local b r u live='' github='' want
-  want=$(printf '%s' "$LIVE_REPO" | tr '[:upper:]' '[:lower:]')
-  for r in $(git remote); do
-    u=$(git remote get-url "$r" 2>/dev/null | tr '[:upper:]' '[:lower:]')
-    u=${u%/}; u=${u%.git}
-    case "$u" in
-      */"$want"|*:"$want") live=$r; break ;;
-      *github.com*) github=$r ;;
-    esac
+  local b v best='' bestv=-1
+  for b in origin/main origin/master $(git for-each-ref --format='%(refname:short)' 'refs/remotes/*/main' 'refs/remotes/*/master'); do
+    v=$(manifest_n_at "$b") || continue
+    if [ "$v" -gt "$bestv" ]; then best=$b; bestv=$v; fi
   done
-  if [ -n "$live" ]; then
-    git rev-parse --verify -q "$live/main" >/dev/null && { printf '%s' "$live/main"; return 0; }
-    echo "remote '$live' is $LIVE_REPO but has no main here: git fetch $live" >&2
-    return 2
-  fi
-  if [ -n "$github" ]; then
-    echo "no remote points at $LIVE_REPO ('$github' is another repository): git remote add upstream https://github.com/$LIVE_REPO.git && git fetch upstream" >&2
-    return 2
-  fi
+  [ -z "$best" ] || { printf '%s' "$best"; return 0; }
   for b in origin/main origin/master main master; do
     git rev-parse --verify -q "$b" >/dev/null && { printf '%s' "$b"; return 0; }
   done
   return 1
+}
+
+# The N in a ref's own manifest, or nothing if it carries none in our shape.
+manifest_n_at() { # ref
+  local json v
+  json=$(git show "$1:${MANIFESTS[0]}" 2>/dev/null) || return 1
+  v=$(printf '%s' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))' 2>/dev/null) || return 1
+  case "$v" in
+    0.*.0) v=${v#0.}; v=${v%.0} ;;
+    *) return 1 ;;
+  esac
+  [ "$v" -ge 0 ] 2>/dev/null || return 1
+  printf '%s' "$v"
 }
 
 main_count() {
@@ -127,10 +125,7 @@ published() {
 }
 
 compute() {
-  local n p cur want=0 rc=0
-  # A live remote in doubt stops the release; every reading below would hide it.
-  main_ref >/dev/null || rc=$?
-  [ "$rc" != 2 ] || exit 1
+  local n p cur want=0
   if p=$(published) && [ "$p" -ge 0 ] 2>/dev/null; then want=$((p + 1)); fi
   if n=$(main_count) && [ "$((n + 1))" -gt "$want" ]; then want=$((n + 1)); fi
   # Never below what this checkout already carries. Both readings above can
@@ -501,43 +496,40 @@ case "${1:-}" in
       rm -rf "$tmp"; exit 1
     fi
 
-    # Several remotes: main is read from the one whose URL names the live
-    # repository, in any URL form and case, never from an older copy; and a
-    # GitHub remote with no live one, or a live one not fetched, is an error.
-    # Its own fixture: live main publishes 0.7.0 in 3 commits (so 0.8.0 next),
-    # the older copy stopped at 0.5.0 in 1 commit (0.7.0 with the local floor).
+    # An older copy of the repository as `origin` (it stopped at 0.5.0, one
+    # commit) beside the live one under another name (0.7.0, three commits):
+    # the number climbs from the highest published, 0.8.0, under any remote
+    # names and in either sort order, and --check refuses the older copy's 0.6.0.
     fx=$tmp/fx
     mkdir -p "$fx/plugins/bughunter/.claude-plugin" "$fx/plugins/bughunter/.codex-plugin"
-    git -C "$fx" init -q -b main
+    git -C "$fx" init -q -b work
     fxc() { git -C "$fx" -c user.email=t@t -c user.name=t "$@"; }
     for n in 5 6 7; do
       for m in "${MANIFESTS[0]}" "${MANIFESTS[1]}"; do printf '{"version":"0.%s.0"}\n' "$n" > "$fx/$m"; done
       fxc add -A; fxc commit -qm "release $n"
     done
-    # Spelled out: a mutated LIVE_REPO must not move the fixture with it.
-    live=$tmp/live/OhMyX-AI/ohmybug-plugin.git
-    mkdir -p "$(dirname "$live")"
-    git clone -q --bare "$fx" "$live"
+    first=$(git -C "$fx" rev-list --max-parents=0 HEAD)
+    git clone -q --bare "$fx" "$tmp/live.git"
+    git -C "$tmp/live.git" update-ref refs/heads/main "$(git -C "$fx" rev-parse HEAD)"
     git clone -q --bare "$fx" "$tmp/older.git"
-    git -C "$tmp/older.git" update-ref refs/heads/main "$(git -C "$fx" rev-list --max-parents=0 HEAD)"
-    fxc remote add origin "$tmp/older.git"
-    fxc fetch -q origin
-    # A fork sorts first: a matcher that took any remote would pick it.
-    fxc remote add aaa https://github.com/someone/ohmybug-plugin-fork.git
-    fail() { echo "self-test: $*" >&2; rm -rf "$tmp"; exit 1; }
-    rc=0; out=$( (cd "$fx" && bash "$SELF") 2>&1 >/dev/null ) || rc=$?
-    { [ "$rc" != 0 ] && printf '%s' "$out" | grep -q "no remote points at"; } || fail "a GitHub remote and no live one did not stop the version (rc=$rc): $out"
-    fxc remote add upstream "$live"
-    rc=0; out=$( (cd "$fx" && bash "$SELF") 2>&1 >/dev/null ) || rc=$?
-    { [ "$rc" != 0 ] && printf '%s' "$out" | grep -q "has no main here"; } || fail "an unfetched live remote did not stop the version (rc=$rc): $out"
-    rc=0; (cd "$fx" && bash "$SELF" --write) >/dev/null 2>&1 || rc=$?
-    [ "$rc" != 0 ] || fail "--write stamped a version with the live remote unfetched"
-    fxc fetch -q upstream
-    for url in "$live" "https://github.com/ohmyx-ai/ohmybug-plugin" "git@github.com:OhMyX-AI/ohmybug-plugin/" "https://github.com/OhMyX-AI/ohmybug-plugin.git"; do
-      fxc remote set-url upstream "$url"
-      got=$(cd "$fx" && bash "$SELF")
-      [ "$got" = "0.8.0" ] || fail "with the live remote at $url beside an older origin, the version came out $got, not 0.8.0"
+    git -C "$tmp/older.git" update-ref refs/heads/main "$first"
+    # The checkout itself sits on the older copy, so no local floor hides the answer.
+    fxc checkout -q -b branch "$first"
+    for names in "zold aaa" "older zlive" "origin live"; do  # origin last: --check below needs it
+      set -- $names
+      for r in $(git -C "$fx" remote); do fxc remote remove "$r"; done
+      fxc remote add "$1" "$tmp/older.git"; fxc remote add "$2" "$tmp/live.git"
+      fxc fetch -q "$1"; fxc fetch -q "$2"
+      got=$(cd "$fx" && bash "$SELF") || got="exit $?"
+      [ "$got" = "0.8.0" ] || { echo "self-test: an older copy as '$1' beside the live repository as '$2' gave $got, not 0.8.0" >&2; rm -rf "$tmp"; exit 1; }
     done
+    for m in "${MANIFESTS[0]}" "${MANIFESTS[1]}"; do printf '{"version":"0.6.0"}\n' > "$fx/$m"; done
+    echo change >> "$fx/plugins/bughunter/hooks.sh"
+    fxc add -A; fxc commit -qm "stamped from the older copy"
+    rc=0; out=$( (cd "$fx" && bash "$SELF" --check) 2>&1 >/dev/null ) || rc=$?
+    if [ "$rc" != 1 ] || ! printf '%s' "$out" | grep -q "not newer than the 0.7.0"; then
+      echo "self-test: --check must refuse 0.6.0 with 0.7.0 published on another remote (rc=$rc): $out" >&2; rm -rf "$tmp"; exit 1
+    fi
 
     rm -rf "$tmp"
     echo "version self-test: ok ($V)"
