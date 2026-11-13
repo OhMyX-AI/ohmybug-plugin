@@ -213,7 +213,9 @@ This is a required client action, not a reminder to do later:
   body (which flags a request there, not in its status word) or `needs_files`
   from the `get_findings` fallback (which flags it exactly there) call
   `get_findings`, serve the files and KEEP this job;
-  on `done` or `failed` call `get_findings` (this surface reads with curl,
+  a read with a `route_state` other than `final` is not the end: follow §the routed hunt under
+  the watch loop and KEEP this job (on `continued`, replace it with one on the review `continued_by`
+  names); otherwise on `done` or `failed` call `get_findings` (this surface reads with curl,
   and only a tool read tells the local hooks the hunt is over — skip it on
   `failed` and the merge gate keeps saying a hunt is RUNNING); on `done`
   print `findings=N` from that answer, on `failed` the bare `bughunt ·
@@ -982,6 +984,9 @@ others are refused before anything starts.
   not listed there is not running for this key: say so and offer `fast`
   instead of sending it. No `modes` at all (an older server): name the mode
   only.
+  With none named, say the fast hunt and its price; on a pushed commit add that the
+  service may run a first step (`snap` or `lite`) before it, and that each review that runs bills at
+  its own mode's price, only for a medium or worse bug.
 - **The repository.** `lite` and `snap` read the repository, so they
   need rung 1's `meta` (`repo` + `ref` = the pushed head sha + `base_branch`)
   on a commit the server can read; on a diff alone or an upload the server
@@ -995,7 +1000,7 @@ others are refused before anything starts.
 - **Deep is not a mode.** Never send `mode` with `deep`. The deep offer after any mode is the same. When the
   user names both a mode and the deep hunt, ask which one they want.
 - **"Fast" elsewhere in this skill is the stage.** "The fast hunt", "a review
-  starts fast" and "offer the fast hunt" mean stage one (not deep), in the
+  starts with stage one" and "offer the fast hunt" mean stage one (not deep), in the
   mode the user named or none: never `mode: "fast"` on your own.
 - **The monitor.** The submit answer's `hunt_mode` is the mode that runs: the
   watch loop's `mode=` takes it, so the compact line reads
