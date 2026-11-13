@@ -467,10 +467,10 @@ This works in two cases, checked server-side in this order:
    pushed.
 
 - No error and a `review_id` → it worked; skip context packing entirely, go
-  to the monitor step. The mode is `fast` – stage one – unless this submit
-  carried `deep: true` on the user's word (§3b): then it is `deep`, and the
-  watcher is the deep one. A stage-one answer's `hunt_mode` (`lite` or
-  `snap`, see "Hunt modes") names the watcher's mode instead of `fast`. Readable repo access means the reviewers fetch the
+  to the monitor step. The mode is stage one's – the answer's `hunt_mode` (`lite` or `snap`
+  when the user named it or the service routes a first step, see "Hunt modes"; `fast` when absent) –
+  unless this submit carried `deep: true` on the user's word (§3b): then it is `deep`, and the
+  watcher is the deep one. Readable repo access means the reviewers fetch the
   files they need themselves instead of asking you.
 - Error `diff_required` (private repo without the App) → this is rung 2 above:
   offer the one-click App install FIRST and retry, because it removes the payload
@@ -972,7 +972,7 @@ others are refused before anything starts.
   "snap review", `lite` / `snap` / `fast` or `--mode <m>` as the
   argument of `/bughunter:review` – send it as `submit_review`'s top-level
   `mode`. Otherwise send no `mode`: on a pushed commit the service may start with a first step
-  (`snap`, or `lite` on lite accounts) and go on with a fast hunt of the same commit (§the routed
+  (`snap`, or `lite` on accounts set to lite) and go on with a fast hunt of the same commit (§the routed
   hunt under the watch loop: a `route_state` in the answer); uncommitted work, an uploaded diff and
   a change the first step cannot take (such as one over snap's 1 MB) get the `fast` hunt. Never pick
   a mode on your own to save or
@@ -1003,7 +1003,7 @@ others are refused before anything starts.
 
 ### 3b. Two stages: the fast hunt, then maybe the deep one
 
-**A review starts fast** – the diff plus whatever files the reviewers ask
+**A review starts with stage one** (`fast`, a mode the user named, or a routed first step) – the diff plus whatever files the reviewers ask
 for mid-run (how long: the server's `recent_median_minutes`, never a number
 from this page) – **unless the user asked for the deep hunt up front.** You
 never request the deep hunt on your own initiative: it pulls the whole
