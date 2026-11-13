@@ -292,7 +292,7 @@ M=$(ohmybug_marker_path)
 # directory hangs off the HUNT dir, not off the marker path, so the old
 # three-path incantation left live pending records between sections — and a
 # stale one makes the next section read as "a hunt is running here".
-reset_state() { rm -rf "$M" "$M.pending" "$(ohmybug_hunt_dir)" "$(ohmybug_hunt_dir).pending" "$(ohmybug_hunt_dir).promoted" "$HOME/.ohmybug/watch"; }
+reset_state() { rm -rf "$M" "$M.pending" "$(ohmybug_hunt_dir)" "$(ohmybug_hunt_dir).pending" "$(ohmybug_hunt_dir).promoted" "$(ohmybug_hunt_dir).routed" "$HOME/.ohmybug/watch"; }
 # What a PostToolUse hook may say to the agent in BOTH clients: JSON on stdout,
 # exit 0, `hookSpecificOutput.additionalContext`. Exit 2 with stderr is read by
 # Codex as "replace the tool result with this", so a diagnostic there would
@@ -3092,13 +3092,26 @@ reset_state
 post_r submit_review running s9 >/dev/null
 out=$(post_r confirm_findings '' s9 '{"route_state":"continued","continued_by":"c9","final":false,"confirmed":1}' | ctx)
 r "a confirm answer that names the child hands the record on too" "pend c9 && ! pend s9"
+# Root writes into a read-only directory, so this row needs an ordinary user.
+if [ "$(id -u)" != 0 ]; then
+  reset_state
+  post_r submit_review running s10 >/dev/null
+  chmod a-w "$(ohmybug_hunt_dir).pending"
+  out=$(post_r get_findings done s10 '{"route_state":"continued","continued_by":"c10","final":false}' | ctx)
+  chmod u+w "$(ohmybug_hunt_dir).pending"
+  r "a hand-on that cannot write keeps step 1's record" "pend s10 && ! pend c10"
+  r "...and says the move failed" 'case "$out" in *"could not be moved"*) true;; *) false;; esac'
+fi
 reset_state
-post_r submit_review running s10 >/dev/null
-chmod a-w "$(ohmybug_hunt_dir).pending"
-out=$(post_r get_findings done s10 '{"route_state":"continued","continued_by":"c10","final":false}' | ctx)
-chmod u+w "$(ohmybug_hunt_dir).pending"
-r "a hand-on that cannot write keeps step 1's record" "pend s10 && ! pend c10"
-r "...and says the move failed" 'case "$out" in *"could not be moved"*) true;; *) false;; esac'
+post_r submit_review running s12 >/dev/null
+post_r get_findings done s12 '{"route_state":"awaiting_verdicts","final":false}' >/dev/null
+post_r confirm_findings '' s12 '{"confirmed":1}' >/dev/null
+s "a routed step 1 whose confirm answer names no route promotes nothing" ""
+post_r get_findings done s12 >/dev/null
+s "...nor does a read of it that names no route" ""
+r "...and its record stays" "pend s12"
+post_r get_findings done s12 '{"route_state":"final","final":true}' >/dev/null
+s "...until the route says final" "$RID"
 reset_state
 post_r submit_review running s7 >/dev/null
 printf 'own-key\n' > "$(ohmybug_hunt_dir).pending/c7"

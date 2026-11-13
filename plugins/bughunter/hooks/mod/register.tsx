@@ -59,7 +59,8 @@ type BughunterHunt = {
    *  read it must not end the note). */
   pressed?: { parent: string }
   /** The service route: the highest rank any answer about this id named (routeRead). Undefined for an ordinary hunt
-   *  and for a followed child. Never goes down; while it is below ROUTE_OVER the row is watched whatever its state. */
+   *  and for a followed child. The mod never lowers it (its own rule: the service does not promise the order); while
+   *  it is below ROUTE_OVER the row is watched whatever its state. */
   route?: number
 }
 
@@ -168,11 +169,12 @@ async function observeGate($: Engine, command: string, text: string | undefined,
 /** The service route: step 1 went on as `next`, the answer from now on. The row follows it, one hunt to the person:
  *  the child's own status page, polled at once, its own clock, nothing of step 1's result kept. Undefined when it
  *  cannot be followed (the same id, or a status URL with no `/r/<id>/` to rewrite): the row then polls step 1 at its
- *  cadence. A child another row already tracks closes step 1's row instead, so no id is tracked twice. */
-const follow = (h: BughunterHunt, next: string, now: number): BughunterHunt | undefined => {
+ *  cadence. A child another row of the store already tracks (the list put() just read) closes step 1's row instead,
+ *  so no id is tracked twice. */
+const follow = (h: BughunterHunt, next: string, now: number, list: BughunterHunt[]): BughunterHunt | undefined => {
   const statusUrl = h.statusUrl?.replace(`/r/${h.id}/`, `/r/${next}/`)
   if (next === h.id || !statusUrl || statusUrl === h.statusUrl) return undefined
-  if (huntList.some(x => x.id === next)) return { ...h, state: 'done', seen: true, settled: true, route: ROUTE_OVER }
+  if (list.some(x => x.id === next)) return { ...h, state: 'done', seen: true, settled: true, route: ROUTE_OVER }
   return { ...h, id: next, statusUrl, state: 'running', seen: false, findings: undefined, judged: undefined,
     settled: false, pressed: undefined, nextAt: now, startedAt: now, median: undefined, route: undefined }
 }
@@ -208,12 +210,12 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     // the server said before, this chat owes the verdicts; a press note has done its job. A read that is not the end
     // (running, or an error with no state) moves nothing: the owning chat keeps polling it and keeps its note. An
     // answer older than the route the row holds moves nothing at all.
-    const next = await put($, id, cur => {
+    const next = await put($, id, (cur, list) => {
       if (!cur) return undefined
       const r = routeRead(body, cur.route)
       if (!r) return undefined
       // Followed, not adopted: the child is a new hunt the owning chat keeps.
-      const followed = r.next && follow(cur, r.next, now)
+      const followed = r.next && follow(cur, r.next, now, list)
       if (followed) return followed
       const h = terminal ? adopt(cur, cwd) : cur
       return { ...h, route: r.route, state: r.state ?? h.state, seen: terminal || h.seen, settled: terminal ? false : h.settled,
@@ -234,11 +236,11 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     // The verdicts are in. On a routed step 1 the answer names where the route went: the child, or the rank the row
     // takes (polled at once while still open: the service decides on the verdicts). A confirm exists only for a done
     // review, so it reads as one. It never changes `seen`: that is the agent's read.
-    const next = await put($, id, cur => {
+    const next = await put($, id, (cur, list) => {
       if (!cur) return undefined
       const r = routeRead({ ...body, status: 'done' }, cur.route)
       if (!r || r.route === undefined) return { ...cur, judged: true }
-      const followed = r.next && follow(cur, r.next, now)
+      const followed = r.next && follow(cur, r.next, now, list)
       if (followed) return followed
       const h: BughunterHunt = { ...cur, judged: true, route: r.route, state: r.state ?? cur.state }
       return r.route < ROUTE_OVER ? { ...h, nextAt: now } : h
@@ -273,11 +275,11 @@ const adopt = (h: BughunterHunt, cwd: string): BughunterHunt => h.session === se
 let writing: Promise<unknown> = Promise.resolve()
 /** The store taken as this session's view, in the write queue: a read outside it could land after a write and undo it. */
 const reload = ($: Engine) => put($, '', () => undefined)
-function put($: Engine, id: string, change: (cur: BughunterHunt | undefined) => BughunterHunt | undefined) {
+function put($: Engine, id: string, change: (cur: BughunterHunt | undefined, list: BughunterHunt[]) => BughunterHunt | undefined) {
   const run = writing.then(async () => {
     const list = await loadHunts($, await $.clock.now())
     const at = list.findIndex(h => h.id === id)
-    const next = change(at >= 0 ? list[at] : undefined)
+    const next = change(at >= 0 ? list[at] : undefined, list)
     if (next) {
       if (at >= 0) list[at] = next; else list.push(next)
       await $.store.set('hunts', list)
@@ -299,7 +301,7 @@ async function refreshStatus($: Engine) {
   const running = mine.filter(isOpen)
   let text: string | undefined
   if (ctx.blocked && running.length) text = 'bughunt: status unreachable here, the agent polls instead'
-  else if (unread) text = `bughunt ${unread.id} ${unread.state}${unread.findings === undefined ? '' : ` · ${unread.findings} found`}`
+  else if (unread) text = `bughunt ${unread.id} ${routeOpen(unread) ? 'waits for verdicts' : unread.state}${unread.findings === undefined ? '' : ` · ${unread.findings} found`}`
   else if (running.length === 1) {
     const h = running[0]!
     text = `bughunt ${h.mode} ${minutes(now - h.startedAt)}${h.median ? `/~${h.median}` : ''} min${h.state === 'needs_files' ? ' · files asked' : ''}`
@@ -381,10 +383,10 @@ async function pollDue($: Engine) {
     // body older than the route it holds moves nothing (routeRead).
     let moved = false
     let left = false
-    const next = await apply($, h.id, cur => {
+    const next = await apply($, h.id, (cur, list) => {
       const r = body && typeof body === 'object' ? routeRead(body, cur.route) : undefined
       if (!r) return { nextAt: now + wait * 1000 }
-      const followed = r.next && follow(cur, r.next, now)
+      const followed = r.next && follow(cur, r.next, now, list)
       if (followed) { left = true; return followed }
       const state = r.state
       moved = !!state && state !== cur.state
@@ -405,9 +407,9 @@ async function pollDue($: Engine) {
 
 /** Change one open hunt of this chat as it stands NOW: the fetch awaited above may have let the agent read it, or
  *  another chat take it over, and a stale copy would undo either. */
-async function apply($: Engine, id: string, change: (cur: BughunterHunt) => Partial<BughunterHunt>) {
+async function apply($: Engine, id: string, change: (cur: BughunterHunt, list: BughunterHunt[]) => Partial<BughunterHunt>) {
   const cwd = await $.session.cwd()
-  return put($, id, cur => cur && watched(cur) && ours(cur, cwd) ? { ...cur, ...change(cur) } : undefined)
+  return put($, id, (cur, list) => cur && watched(cur) && ours(cur, cwd) ? { ...cur, ...change(cur, list) } : undefined)
 }
 
 const httpsUrl = (v: unknown): string | undefined => { const s = str(v); return s && /^https:\/\//.test(s) ? s : undefined }
@@ -548,9 +550,10 @@ export const register: Register = on => {
         ...huntList.filter(h => ours(h, cwd) && h.pressed && (!h.seen || h.settled) && now - h.startedAt < STALE_MS).map(pressedNote),
         // Shown to the person or not told to the agent: OHMYBUG_STATUS=0 drops the verdicts line (the press note is not
         // a status-line line: the person pressed, and the agent must know the hunt is not its own).
+        // A routed step 1 is not the hunt's end: it waits for the verdicts, and a fast hunt may follow them.
         ...huntList.filter(h => ctx.showStatus && awaitsVerdicts(h, cwd, now)).map(h => h.findings === 0
-          ? `OhMyBug hunt ${h.id} is done with 0 findings and is not confirmed yet. Next: confirm_findings for ${h.id} with verdicts: [].`
-          : `OhMyBug hunt ${h.id} is done and its verdicts are not sent. Next: verify each finding, then confirm_findings for ${h.id}.`),
+          ? `OhMyBug hunt ${h.id} ${routeOpen(h) ? 'waits for your verdicts' : 'is done'} with 0 findings and is not confirmed yet. Next: confirm_findings for ${h.id} with verdicts: [].`
+          : `OhMyBug hunt ${h.id} ${routeOpen(h) ? 'waits for your verdicts' : 'is done and its verdicts are not sent'}. Next: verify each finding, then confirm_findings for ${h.id}.`),
       ]
       if (!lines.length) return composed
       return { sections: [...composed.sections, { id: 'bughunter:next-step', text: lines.join('\n'), scope: 'session' as const }] }

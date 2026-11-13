@@ -84,14 +84,16 @@ export function statusState(body: Body): 'running' | 'needs_files' | 'done' | 'f
   return s ? 'running' : undefined
 }
 
-/** The service route's order: a step 1 only moves up it. 4 is over (final, or closed by the mod itself). */
+/** The service route's order. The service moves a step 1 up it in practice but does not promise to (an operator can
+ *  bring a step back); the mod's own rule is to ignore a lower rank than it holds. 4 is over (final, or closed by the
+ *  mod itself). */
 const RANK: Record<string, number> = { snap_running: 0, awaiting_verdicts: 1, pending: 2, continued: 3, final: 4 }
 export const ROUTE_OVER = 4
 export type RouteRead = { route?: number; state?: ReturnType<typeof statusState>; next?: string }
 
 /** One answer about a hunt (a poll, an agent read, a confirm answer) against the route rank its row holds. No route
  *  ever named: the review's own status. A body that names no route keeps the held rank; a word the mod does not know
- *  is a route at the held rank. A lower rank than the held one is an older answer: undefined, it moves nothing. While
+ *  is a route at the held rank, or at the lowest rank on a row that held none. A lower rank than the held one is an older answer: undefined, it moves nothing. While
  *  the route is open the state comes from the rank: verdicts owed (1) read as done, the rest as running, a file
  *  request wins; once over, the status decides. `next` is the review the hunt goes on as. */
 export function routeRead(body: Body, held: number | undefined): RouteRead | undefined {

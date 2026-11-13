@@ -513,7 +513,15 @@ case "$TOOL" in
     # `continued` the record moves to the hunt that goes on, unpromoted: the
     # merge gate takes the last hunt of the chain, never step 1 alone.
     # Any other state, one this hook does not know included, holds the record
-    # too: the merge gate errs shut.
+    # too: the merge gate errs shut. The hook remembers a review it saw routed
+    # (`.routed/<id>`): an answer about it that names no route (the service
+    # could not read the route just then) holds the record as well, until final.
+    ROUTED="$REPO_HUNTS.routed/${REVIEW:-unknown}"
+    case "${ROUTE_STATE:-}" in
+      '') [ -e "$ROUTED" ] && exit 0 ;;
+      final) rm -f "$ROUTED" ;;
+      *) mkdir -p "$REPO_HUNTS.routed" 2>/dev/null && : > "$ROUTED" 2>/dev/null ;;
+    esac
     case "${ROUTE_STATE:-}" in
       ''|final) ;;
       continued)
