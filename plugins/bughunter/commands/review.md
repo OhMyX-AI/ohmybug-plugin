@@ -30,7 +30,7 @@ server offers it and the user agrees.
 `lite`, `snap` and `fast` (bare or as `--mode <m>`) pick the hunt mode:
 send it as `submit_review`'s `mode`, following the skill's "Hunt modes"
 section; with none, send no `mode`: on a pushed commit the service may start with a first step
-(`snap`, or `lite` on lite accounts) and go on with a fast hunt of the same commit when that step
-finds no medium or worse bug, or after your verdicts on confirm billing (the skill's routed hunt);
+(`snap`, or `lite` on accounts set to lite) and go on with a fast hunt of the same commit (the
+skill's routed hunt: the service decides from the step's findings and, when it asks, your verdicts);
 uncommitted work, an uploaded diff and a change the first step cannot take (such as one over
 snap's 1 MB) get the fast hunt. A mode does not go with `deep`: when the user names both, ask which one they want.
