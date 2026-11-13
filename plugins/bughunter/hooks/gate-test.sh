@@ -2837,6 +2837,20 @@ else
 fi
 rm -rf "$LD"
 
+# The skill's per-call route opt-in. Sent only on a no-mode rung-1 submit, and only when the background-Bash
+# watch loop (which follows route_state to continued_by) watches it; the CronCreate fallback and other runtimes omit it.
+RT=$(awk '/^\*\*The route opt-in: `follows`\.\*\*/{p=1} p&&/^$/{exit} p' plugins/bughunter/skills/bughunter/SKILL.md | tr '\n' ' ')
+for rule in 'add `follows: "continued_by"` when the watch loop below runs in background `Bash`' 'On the `CronCreate` fallback, or in any other runtime, leave `follows` out' 'Never send it beside a named `mode` or `deep`'; do
+  printf '%s' "$RT" | grep -qF -- "$rule" || { echo "FAIL route opt-in: SKILL.md lost [$rule]"; fails=$((fails + 1)); }
+done
+# The loop it relies on still follows the chain: its continued branch and the routed-hunt section.
+grep -qF '*:continued) st=continued' plugins/bughunter/skills/bughunter/SKILL.md \
+  || { echo "FAIL route opt-in: the watch loop no longer prints continued, so follows would route a hunt nobody follows"; fails=$((fails + 1)); }
+grep -qF '**A routed hunt (a `route_state` in the answer) is a chain of at most two' plugins/bughunter/skills/bughunter/SKILL.md \
+  || { echo "FAIL route opt-in: the routed-hunt section the opt-in points to is gone"; fails=$((fails + 1)); }
+[ "$(grep -c 'follows: "continued_by"' plugins/bughunter/skills/bughunter/SKILL.md)" = 1 ] \
+  || { echo "FAIL route opt-in: follows is named outside its one rule in SKILL.md"; fails=$((fails + 1)); }
+
 # The story choices: SKILL.md asks with the server's labels from share.choices, never its own copy of them, since a
 # copy would drift from the server's. Only section 6b is read, so an id named elsewhere does not count.
 SK=$(mktemp)

@@ -456,6 +456,12 @@ If the repo lives on GitHub and the head commit is PUSHED, try the zero-payload
 mode FIRST: call `submit_review` with NO diff, NO files, and full `meta`
 including `repo`, `ref` (head sha), `base_branch` (and `pr` number if known),
 plus `pr_title` and `pr_body` (the table below).
+**The route opt-in: `follows`.** On this submit with no `mode` and no `deep`, add
+`follows: "continued_by"` when the watch loop below runs in background `Bash`
+(Claude Code): it follows a routed hunt to the end (§the routed hunt under the
+watch loop). On the `CronCreate` fallback, or in any other runtime, leave
+`follows` out: the hunt then runs as a plain fast hunt. Never send it beside a
+named `mode` or `deep`, and never with another value.
 The server fetches the merge-base diff from GitHub itself – nothing leaves
 the machine, no size limits, no upload step.
 
