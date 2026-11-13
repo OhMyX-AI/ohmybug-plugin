@@ -1,6 +1,6 @@
 {
   "name": "bughunter",
-  "version": "0.159.0",
+  "version": "0.160.0",
   "description": "OhMyBug cloud bug hunt as your code review, as soon as a change is ready, with Codex-native MCP routing.",
   "author": {
     "name": "OhMyBug",
