@@ -23,7 +23,7 @@
 
 import type { EngineInterface as Engine, Register, RenderChildren } from 'claude-code'
 
-import { bodyOf, catchOf, findingsOf, gateReason, halfBlocks, huntLabel, mascotOf, minutes, num, pollState, routeOf, speciesOf, str, toolKind } from './parse'
+import { bodyOf, catchOf, findingsOf, gateReason, halfBlocks, huntLabel, mascotOf, minutes, num, pollState, routeOf, speciesOf, statusState, str, toolKind } from './parse'
 
 /** The status door journals which waiter polled (`w`): the skill's watch loop sends `loop`, the mod `mod`. */
 export const tagged = (url: string): string => {
@@ -213,17 +213,18 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     if (heldId === id) heldId = undefined
     // The deep offer comes in the answer for this tracked hunt, and only there.
     const offer = body.deep_offer as Record<string, unknown> | undefined
-    if (kind === 'get_findings' && next.state === 'done' && offer && typeof offer === 'object' && str(offer.pitch)) {
+    if (kind === 'get_findings' && next.state === 'done' && !route.open && offer && typeof offer === 'object' && str(offer.pitch)) {
       // A strong offer is the server's recommendation, with its reasons in the pitch; the price is the server's quote.
       // Its own buttons when the server sends their addresses; an older server's offer keeps the chat buttons.
       setBand($, { kind: 'deep', id, text: str(offer.pitch)!.slice(0, 280), strong: offer.strength === 'strong', price: num(offer.price_usd),
         start: buttonUrl(offer.start_url, next.statusUrl), snooze: buttonUrl(offer.snooze_url, next.statusUrl) })
     }
   } else if (kind === 'confirm_findings' && num(body.confirmed) !== undefined) {
-    // Step 1's verdicts are in and the route may name the child already: the row follows it. An open route needs
-    // nothing more: its reads kept the row running (pollState), so it is still polled.
+    // Step 1's verdicts are in and the route decides next: the child when it is named, or polled again while the
+    // route is open, as a hunt already read here (its `final` is no news).
     const route = routeOf(body)
-    const next = await put($, id, cur => !cur ? undefined : (route.next && follow(cur, route.next, now)) || { ...cur, judged: true })
+    const next = await put($, id, cur => !cur ? undefined : (route.next && follow(cur, route.next, now))
+      || (route.open ? { ...cur, judged: true, state: 'running', seen: true, nextAt: now } : { ...cur, judged: true }))
     if (!next) return
     if (bandNow?.id === id && bandNow.kind === 'hunt') setBand($, null)
   } else {
@@ -680,7 +681,8 @@ export const register: Register = on => {
         notes ? <Text dimColor>{notes} field note{notes === 1 ? '' : 's'} from other hunters {notes === 1 ? 'is' : 'are'} in the agent's context</Text> : null,
       ]
     } else {
-      const state = pollState(body)
+      // The card draws what the review says; the route only decides whether the watch goes on.
+      const state = statusState(body)
       const id = str(body.review_id) ?? '?'
       if (state !== 'done') {
         rows = [<Text dimColor>hunt {id} · {state === 'needs_files' ? 'reviewers asked for files' : state ?? 'running'}{body.timed_out ? ' · still running' : ''}</Text>]

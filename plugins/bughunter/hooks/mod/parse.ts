@@ -79,21 +79,26 @@ export function findingsOf(body: Body): Finding[] {
  *  status says; `next` when the hunt goes on as another review. No route, or `final`: an ordinary hunt. */
 export function routeOf(body: Body): { open: boolean; next?: string } {
   const rs = str(body.route_state)
-  if (!rs || rs === 'final' || body.final === true) return { open: false }
+  if (!rs || rs === 'final') return { open: false }
   const next = rs === 'continued' ? str(body.continued_by) : undefined
   return next && /^[A-Za-z0-9_.-]{1,128}$/.test(next) ? { open: true, next } : { open: true }
 }
 
-/** The status a poll of the status URL reports, in the mod's own words. A routed step 1 that is not the answer yet
- *  stays running: its `done` is not the end of the hunt. */
-export function pollState(body: Body): 'running' | 'needs_files' | 'done' | 'failed' | undefined {
+/** What the review itself says, route aside: the findings card draws this. */
+export function statusState(body: Body): 'running' | 'needs_files' | 'done' | 'failed' | undefined {
   const s = str(body.status)
-  // Either flag means reviewers wait on files; the status word stays 'running'. A file request wins over the route.
-  const files = body.files_requested === true || body.awaiting_client_files === true || s === 'needs_files'
-  if (routeOf(body).open) return files ? 'needs_files' : 'running'
   if (s === 'done' || s === 'failed') return s
-  if (files) return 'needs_files'
+  // Either flag means reviewers wait on files; the status word stays 'running'.
+  if (body.files_requested === true || body.awaiting_client_files === true || s === 'needs_files') return 'needs_files'
   return s ? 'running' : undefined
+}
+
+/** Where the hunt stands for the watcher. A routed step 1 that is not the answer yet stays running, except when it
+ *  needs something now: files, or (`awaiting_verdicts`) the verdicts on its findings, which read as its `done`. */
+export function pollState(body: Body): 'running' | 'needs_files' | 'done' | 'failed' | undefined {
+  const s = statusState(body)
+  if (!routeOf(body).open || s === 'needs_files' || str(body.route_state) === 'awaiting_verdicts') return s
+  return 'running'
 }
 
 /** The merge gate's own words, when it refused a Bash call. Shown, never acted on. */

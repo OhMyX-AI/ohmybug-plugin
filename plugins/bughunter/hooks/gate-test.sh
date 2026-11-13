@@ -3065,18 +3065,40 @@ out=$(post_r get_findings done s4 '{"route_state":"continued","continued_by":"c4
 r "a child already promoted here takes nothing; step 1's record goes" "! pend s4 && ! pend c4"
 r "...step 1 gets its tombstone" '[ -e "$(ohmybug_hunt_dir).promoted/s4" ]'
 s "...and nothing is promoted on the way" ""
-r "...and the agent is not told the gate waits" 'case "$out" in *"already holds"*) true;; *) false;; esac'
+r "...and the agent is not told the gate waits" 'case "$out" in *"already read in this checkout"*) true;; *) false;; esac'
 reset_state
 post_r submit_review running s6 >/dev/null
 post_r get_findings done s6 '{"route_state":"deciding","final":false}' >/dev/null
 s "a route state this hook does not know promotes nothing" ""
 r "...and keeps step 1's record (the gate errs shut)" "pend s6"
+post_r get_findings done s6 '{"route_state":"not a word: x","final":false}' >/dev/null
+s "a route state that is not a word promotes nothing either" ""
+post_r get_findings done s6 '{"route_state":{"x":1},"final":false}' >/dev/null
+s "...nor one that is not a string" ""
+BEFORE=$(mktemp)
 for bad in '' '".."' '"s6"'; do
+  ls -a "$(dirname "$(ohmybug_hunt_dir)")" > "$BEFORE" 2>/dev/null
   out=$(post_r get_findings done s6 "{\"route_state\":\"continued\"${bad:+,\"continued_by\":$bad},\"final\":false}" | ctx)
   r "continued with no usable id ($bad) keeps step 1's record" "pend s6"
-  r "...and says so" 'case "$out" in *"names no review"*) true;; *) false;; esac'
+  r "...and says so" 'case "$out" in *"names no other review"*) true;; *) false;; esac'
+  r "...and writes nothing beside the pending directory ($bad)" '[ "$(ls -a "$(dirname "$(ohmybug_hunt_dir)")")" = "$(cat "$BEFORE")" ] && [ -z "$(ls -A "$(ohmybug_hunt_dir).pending" | grep -v "^s6$")" ]'
 done
-r "...and writes nothing outside the pending directory" '[ ! -e "$(ohmybug_hunt_dir).pending/..tmp" ] && [ ! -e "$(dirname "$(ohmybug_hunt_dir)")/s6" ]'
+rm -f "$BEFORE"
+reset_state
+post_r submit_review running s11 >/dev/null
+post_r get_findings done s11 '{"continues":"s11"}' >/dev/null
+s "a review that names itself as the one it continues is promoted as an ordinary hunt, not lost" "$RID"
+reset_state
+post_r submit_review running s9 >/dev/null
+out=$(post_r confirm_findings '' s9 '{"route_state":"continued","continued_by":"c9","final":false,"confirmed":1}' | ctx)
+r "a confirm answer that names the child hands the record on too" "pend c9 && ! pend s9"
+reset_state
+post_r submit_review running s10 >/dev/null
+chmod a-w "$(ohmybug_hunt_dir).pending"
+out=$(post_r get_findings done s10 '{"route_state":"continued","continued_by":"c10","final":false}' | ctx)
+chmod u+w "$(ohmybug_hunt_dir).pending"
+r "a hand-on that cannot write keeps step 1's record" "pend s10 && ! pend c10"
+r "...and says the move failed" 'case "$out" in *"could not be moved"*) true;; *) false;; esac'
 reset_state
 post_r submit_review running s7 >/dev/null
 printf 'own-key\n' > "$(ohmybug_hunt_dir).pending/c7"

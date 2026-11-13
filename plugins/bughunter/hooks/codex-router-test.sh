@@ -170,7 +170,8 @@ done
 # exited on, not the last `running`.
 assert '''  printf '%s %s\\n' "$st" "$every" > "$watch" # the Stop hook reads this: fresh + running = armed
   case "$st" in
-    done|failed|needs-files|verdicts) rm -f "$keep"; printf 'bughunt · %s · %s\\n' "$mode" "$st"; break ;;
+    verdicts) printf 'bughunt · %s · %s\\n' "$mode" "$st"; break ;; # the same command is re-armed after the verdicts: its age clock is kept
+    done|failed|needs-files) rm -f "$keep"; printf 'bughunt · %s · %s\\n' "$mode" "$st"; break ;;
     continued) rm -f "$keep"; printf 'bughunt · %s · continued %s\\n' "$mode" "${next:-(no id: call get_findings)}"; break ;;
   esac
 ''' in monitor_code, "terminal branch lost its shape"
@@ -262,6 +263,7 @@ with tempfile.TemporaryDirectory() as d:
     assert r.stdout.splitlines()[-1] == "bughunt · fast · verdicts", r.stdout
     assert int(open(f"{d}/polls").read()) == 4, "pending is polled through, never an exit"
     assert open(f"{d}/.ohmybug/watch/rev_test").read() == "verdicts 240\n"
+    assert os.path.exists(f"{d}/.ohmybug/watch/rev_test.loop"), "a verdicts exit keeps the age clock for the re-arm"
 with tempfile.TemporaryDirectory() as d:
     r = drive(walk(d, [R("done", "pending"), R("done", "continued", ',"continued_by":"rev_child1"')]))
     assert r.stdout.splitlines()[-1] == "bughunt · fast · continued rev_child1", r.stdout

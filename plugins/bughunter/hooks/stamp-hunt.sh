@@ -189,7 +189,9 @@ def word(k):
 print(tool, done, one_line(d.get("cwd")), sent, one_line(ref), one_line(review),
       pre, failed, upload, one_line(d.get("session_id")), record, readable,
       errored, one_line(body.get("gate_note")), one_line(live), scan,
-      word("route_state"), word("continued_by"), word("continues"), sep="\n")
+      # A route_state that is present but not a word still holds the gate: "invalid".
+      word("route_state") or ("invalid" if body.get("route_state") not in (None, "") else ""),
+      word("continued_by"), word("continues"), sep="\n")
 ' 2>/dev/null) || exit 0
 
 TOOL=$(printf '%s' "$FIELDS" | sed -n 1p)
@@ -516,10 +518,10 @@ case "$TOOL" in
       ''|final) ;;
       continued)
         if [ -z "${CONT_BY:-}" ] || [ "$CONT_BY" = "${REVIEW:-}" ]; then
-          say "ohmybug: review $REVIEW was continued, but the answer names no review to follow; its merge record stays pending. Read it again with get_findings and follow the review its continued_by names."
+          say "ohmybug: review $REVIEW was continued, but the answer names no other review to follow; its merge record stays pending. Read it again with get_findings and follow the review its continued_by names."
         elif hand_on "$REVIEW" "$CONT_BY"; then
           if [ -e "$REPO_HUNTS.promoted/$CONT_BY" ]; then
-            say "ohmybug: review $REVIEW continued as $CONT_BY, which already holds the merge record here. Report $CONT_BY as the answer."
+            say "ohmybug: review $REVIEW continued as $CONT_BY, which was already read in this checkout; step 1's record is dropped. $CONT_BY's own answer is the result and decides the merge gate."
           else
             say "ohmybug: review $REVIEW continued as $CONT_BY; the merge gate now waits for $CONT_BY, the answer from here on. Follow it (its own status page, /r/$CONT_BY/status) and judge its findings."
           fi

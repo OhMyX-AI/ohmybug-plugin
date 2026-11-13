@@ -173,6 +173,50 @@ test('a routed step 1 read by the agent: no deep offer while open, polled after 
   expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
 })
 
+// The service waits for step 1's verdicts: that is news (the agent owes them), the card shows the findings to judge,
+// and after the confirm the row is polled on without a second "done" when the route ends final.
+test('a routed step 1 awaiting verdicts is announced, its card shows the findings, and its final end is no news', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  on('tool.call', { tool: CONFIRM }, async () => ({ result: { content: [] },
+    text: JSON.stringify({ review_id: 'rev_1', confirmed: 2, route_state: 'pending', final: false }) }))
+  const seen = world(on, [JSON.stringify({ status: 'done', findings: 2, route_state: 'awaiting_verdicts', final: false, next_poll_after_s: 60 }),
+    JSON.stringify({ status: 'done', findings: 2, route_state: 'final', final: true, next_poll_after_s: 60 })])
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await clock.advance(75_000)
+  expect(seen.toasts.join('\n')).toContain('rev_1 is done')
+  const card = await drawn($, 'ToolResult', { tool_use_id: 'g1', tool: GET, isErrored: false,
+    output: findingsWith({ route_state: 'awaiting_verdicts', final: false }) }, 'g1')
+  expect(card).toContain('Refund retried twice on timeout')
+  // ...and so does the card of a step 1 the service is still deciding on: the findings are the review's.
+  expect(await drawn($, 'ToolResult', { tool_use_id: 'g2', tool: GET, isErrored: false,
+    output: findingsWith({ route_state: 'pending', final: false }) }, 'g2')).toContain('Refund retried twice on timeout')
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await $.tool.call({ tool: CONFIRM, review_id: 'rev_1' } as never)
+  const toasts = seen.toasts.length
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  expect(seen.urls.length, 'the confirmed step 1 is polled on').toBeGreaterThan(1)
+  expect(seen.toasts.length, 'a final end after the verdicts is no news').toBe(toasts)
+})
+
+// The confirm answer itself can name the child: the row follows it at once.
+test('a confirm answer that names the child moves the row to it', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  on('tool.call', { tool: CONFIRM }, async () => ({ result: { content: [] },
+    text: JSON.stringify({ review_id: 'rev_1', confirmed: 0, route_state: 'continued', continued_by: 'rev_c', final: false }) }))
+  const seen = world(on, JSON.stringify({ status: 'running', next_poll_after_s: 60 }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await $.tool.call({ tool: CONFIRM, review_id: 'rev_1' } as never)
+  await clock.advance(15_000)
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+})
+
 // A child the row cannot reach (no /r/<id>/ in its status URL to rewrite) is not followed: the row keeps polling
 // step 1 at the server's cadence, never on every tick.
 test('a continued step 1 whose status URL cannot be rewritten keeps its cadence', async ($, on) => {

@@ -115,7 +115,7 @@ This is a required client action, not a reminder to do later:
   needs-files` and serves the files first. If the poll itself fails, the wake
   falls back to one `get_findings` before it counts as a wake that read nothing.
   On `needs_files`, send files first; on `done` or
-  `failed`, process the result and delete the heartbeat. Retire it too when
+  `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Retire it too when
   it is older than 180 minutes or after 3 consecutive wakes that could not read
   a status at all — a failed `wait_review`, `get_findings` or `status_url` read,
   whichever that wake uses: print `bughunt · <mode> ·
@@ -242,7 +242,7 @@ This is a required client action, not a reminder to do later:
   "monitoring armed without heartbeat – the cache will cool".
 
 The same rule holds when you wait by hand instead of by heartbeat: a status you
-print is a status a tool just answered.
+print is a status a tool just answered. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names).
 
 If the runtime cannot create its monitor, wait in the current turn, at the
 server's cadence: read once (`get_findings`, or one `wait_review(review_id)` —
@@ -734,7 +734,8 @@ while :; do
   esac
   printf '%s %s\n' "$st" "$every" > "$watch" # the Stop hook reads this: fresh + running = armed
   case "$st" in
-    done|failed|needs-files|verdicts) rm -f "$keep"; printf 'bughunt · %s · %s\n' "$mode" "$st"; break ;;
+    verdicts) printf 'bughunt · %s · %s\n' "$mode" "$st"; break ;; # the same command is re-armed after the verdicts: its age clock is kept
+    done|failed|needs-files) rm -f "$keep"; printf 'bughunt · %s · %s\n' "$mode" "$st"; break ;;
     continued) rm -f "$keep"; printf 'bughunt · %s · continued %s\n' "$mode" "${next:-(no id: call get_findings)}"; break ;;
   esac
   now=$(date +%s)
@@ -877,7 +878,7 @@ No background tasks in your harness? Then wait at the server's cadence IN the
 current turn — read once, sleep `retry_after_s` from a timed-out `wait_review`
 or `next_poll_after_s` from the `status_url` body (a `get_findings` answer
 carries neither) in the foreground, read again – never leave a
-running review unwatched at the end of a turn.
+running review unwatched at the end of a turn. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names).
 
 If the response carries `pending_verdicts` from an earlier review, resolve
 them first: verify and confirm those findings before or alongside the new
