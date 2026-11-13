@@ -647,6 +647,19 @@ assert "3 consecutive wakes that could not read a status at all" in router_text,
 # ...and the age cap beside it: a cap shorter than the deep budget drops a live
 # hunt, and the counter alone lets a heartbeat nothing can satisfy run forever.
 assert "Retire a heartbeat older than 180 minutes" in router_text, "ROUTING must carry the 180-minute age cap"
+# The finished hunt's offer (found live: a Codex wake allowed one status line
+# was the only read of a done hunt, so the pitch was never shown). Both halves
+# are pinned, the pitch and the question, on both surfaces, and the prompt
+# must carry it: the wake holds nothing else.
+for phrase in ("except that a done read carrying deep_offer also shows the user deep_offer.pitch word for word under that line and asks once whether to start it, which is their call",
+               "never softened into a maybe) – and delete itself on done or failed, with or without deep_offer",
+               "Write that exception into the heartbeat prompt in those words"):
+    assert phrase in router_text, phrase
+flat_bullet = " ".join(codex_bullet.split())
+for phrase in ("a `done` read carrying `deep_offer` also shows the user `deep_offer.pitch` word for word under that line and asks once whether to start it, which is their call",
+               "never softened into a maybe), and the heartbeat is still deleted",
+               "Write that into the prompt in those words"):
+    assert phrase in flat_bullet, phrase
 # Said at the start of every session: a session that began without the tools
 # never gets them, and the merge gate is too late to learn it.
 assert "confirm the ohmybug MCP tools are present" in router_text, "ROUTING must ask for the tools-present check at session start"
@@ -821,7 +834,6 @@ assert DEEP_MARK in review_text
 for phrase in ("unless the user asked for the deep hunt in their own words (deep hunt, deep review, full-repo, --deep or a bare deep as the argument of the review command, in any language – the adjective alone, as in deep-dive review or a deep look, asks for a thorough fast review)",
                "one submit_review with deep: true and meta.repo + meta.ref (the pushed head sha) + meta.base_branch, no payload, is the first and only review",
                "On your own initiative start deep only after the server returns deep_offer",
-               "a done read carrying deep_offer also shows the user deep_offer.pitch word for word under that line",
                "A refusal of a deep-first request (repo_required, repo_too_big, commit_required, fast_running, deep_at_capacity) is shown to the user verbatim",
                "never a silent downgrade to fast",
                "its compact line reads bughunt · deep · running"):

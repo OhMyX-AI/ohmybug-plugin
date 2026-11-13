@@ -129,6 +129,13 @@ This is a required client action, not a reminder to do later:
   `bughunt · fast · needs-files`, `bughunt · fast · done · findings=N`,
   `bughunt · fast · failed`, `bughunt · fast · poll-failed`, or
   `bughunt · fast · watch-retired`).
+  The one addition is the offer: a `done` read carrying `deep_offer` also
+  shows the user `deep_offer.pitch` word for word under that line and asks
+  once whether to start it, which is their call (a strong offer is the
+  server's recommendation: say so with its reasons and `price_usd` when
+  present, never softened into a maybe), and the heartbeat is still deleted.
+  Write that into the prompt in those words: that wake is often the only read
+  of the finished hunt, so a pitch it leaves out is never seen.
   A rule in the prompt did not hold: a heartbeat whose prompt carried the
   wake_rule word for word still answered `running` from memory for forty
   minutes after the hunt was done. So the prompt carries FACTS the model can
