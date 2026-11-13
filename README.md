@@ -100,47 +100,62 @@ run the OhMyBug cloud hunt (or use the plugin's starter prompt). A local
 
 ### Existing skill-only installs
 
-If the plugin was installed with `npx skills add`, keep the skill and add the
+If the plugin was installed with `npx skills add`, refresh the skill and add the
 same MCP server explicitly:
 
 ```bash
 npx skills add OhMyX-AI/ohmybug-plugin --skill bughunter
 codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp
-printf '\n[mcp_servers.ohmybug.http_headers]\n"X-OhMyBug-Follows" = "continued_by"\n' \
-  >> "${CODEX_HOME:-$HOME/.codex}/config.toml"
 ```
 
 `codex mcp add` detects OAuth and opens the GitHub sign-in flow automatically.
-The last line adds the `X-OhMyBug-Follows` header, which the plugin install
-sends on its own: it tells the service that this client follows a hunt to the
-review that finishes it, as the skill does, so the service may answer a first
-step and continue the hunt from there. `codex mcp add` has no header option, and
-running it again rewrites the entry without the header, so add the line again
-after it.
+
+Then add the `X-OhMyBug-Follows` header, which the plugin install sends on its
+own. It tells the service that this client follows a hunt to the review that
+finishes it, so the service may answer a first step and continue the hunt from
+there. The skill does that from the version the first line above installs; an
+older copy of the skill does not, so refresh it first. `codex mcp add` has no
+header option: put this table in Codex's `config.toml` (`~/.codex/config.toml`,
+or under `$CODEX_HOME`), after the `[mcp_servers.ohmybug]` entry:
+
+```toml
+[mcp_servers.ohmybug.http_headers]
+"X-OhMyBug-Follows" = "continued_by"
+```
+
+`codex mcp add` rewrites the entry without it, so add the table again after
+each `codex mcp add`, once: Codex refuses a config that has it twice.
 
 For headless CI, use an operator-issued raw `omb_` key — write to
 [hi@ohmybug.ai](mailto:hi@ohmybug.ai) or DM [@ohmybug](https://x.com/ohmybug)
-to get one:
+to get one. The same steps as a script, which adds the table only when the
+server was added and the table is not there yet:
 
 ```bash
 export OHMYBUG_API_KEY=omb_...
+npx skills add OhMyX-AI/ohmybug-plugin --skill bughunter
 codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp \
-  --bearer-token-env-var OHMYBUG_API_KEY
-printf '\n[mcp_servers.ohmybug.http_headers]\n"X-OhMyBug-Follows" = "continued_by"\n' \
-  >> "${CODEX_HOME:-$HOME/.codex}/config.toml"
+  --bearer-token-env-var OHMYBUG_API_KEY &&
+f="${CODEX_HOME:-$HOME/.codex}/config.toml" &&
+{ grep -qF '[mcp_servers.ohmybug.http_headers]' "$f" ||
+  printf '\n[mcp_servers.ohmybug.http_headers]\n"X-OhMyBug-Follows" = "continued_by"\n' >> "$f"; }
 ```
 
-(Claude Code users who prefer a key over OAuth can do the same with
-`claude mcp add --transport http ohmybug https://mcp.ohmybug.ai/mcp
---header "Authorization: Bearer $OHMYBUG_API_KEY"
---header "X-OhMyBug-Follows: continued_by"` — an explicit
-Authorization header disables the OAuth flow.)
+Claude Code users who prefer a key over OAuth can do the same with one command
+(an explicit Authorization header disables the OAuth flow):
 
-These lines are for an agent that runs the bughunter skill or plugin. A client
-that talks to the MCP server with no skill (your own script, another MCP host)
-must leave `X-OhMyBug-Follows` out: with it, a hunt can answer with a first step
-that points at the review that continues it, and a client that does not follow
-that pointer reports the first step instead of the result.
+```bash
+claude mcp add --transport http ohmybug https://mcp.ohmybug.ai/mcp \
+  --header "Authorization: Bearer $OHMYBUG_API_KEY" \
+  --header "X-OhMyBug-Follows: continued_by"
+```
+
+The header is only for an agent that runs the bughunter skill or plugin. A
+client that talks to the MCP server with no skill (your own script, another MCP
+host) must leave `X-OhMyBug-Follows` out: with it, a hunt can answer with a
+first step that points at the review that continues it, and a client that does
+not follow that pointer reports the first step instead of the result. The pi
+setup above sends no header, so pi hunts run as one ordinary hunt.
 
 Questions → [Discord](https://discord.gg/6d7g8J44C7).
 
