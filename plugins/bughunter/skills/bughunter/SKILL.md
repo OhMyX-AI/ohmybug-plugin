@@ -129,6 +129,13 @@ This is a required client action, not a reminder to do later:
   `bughunt · fast · needs-files`, `bughunt · fast · done · findings=N`,
   `bughunt · fast · failed`, `bughunt · fast · poll-failed`, or
   `bughunt · fast · watch-retired`).
+  Write the next sentence into the heartbeat prompt word for word, because a
+  wake is often the only read of a finished hunt: "Besides its one bughunt
+  status line, when this wake's read carries deep_offer (and, if it carries
+  route_state, also final: true), print deep_offer.pitch word for word after
+  that line, ask whether to start the deep hunt, and call no submit_review in
+  this wake: the answer is the user's; copy this sentence into any heartbeat
+  that replaces this one."
   A rule in the prompt did not hold: a heartbeat whose prompt carried the
   wake_rule word for word still answered `running` from memory for forty
   minutes after the hunt was done. So the prompt carries FACTS the model can

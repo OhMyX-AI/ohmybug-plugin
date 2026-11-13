@@ -647,6 +647,18 @@ assert "3 consecutive wakes that could not read a status at all" in router_text,
 # ...and the age cap beside it: a cap shorter than the deep budget drops a live
 # hunt, and the counter alone lets a heartbeat nothing can satisfy run forever.
 assert "Retire a heartbeat older than 180 minutes" in router_text, "ROUTING must carry the 180-minute age cap"
+# The finished hunt's offer (found live: a Codex wake allowed one status line
+# was the only read of a finished hunt, so the pitch was never shown). One
+# quoted sentence, the same on both surfaces right after the one-line rule,
+# written into the heartbeat prompt and carried into any replacement
+# heartbeat. Its only route wording guards on the read's own fields; strength
+# and price are the pitch's own text.
+COPY_RULE = "Write the next sentence into the heartbeat prompt word for word, because a wake is often the only read of a finished hunt: "
+OFFER_WAKE = ("\"Besides its one bughunt status line, when this wake's read carries deep_offer (and, if it carries route_state, also final: true), print deep_offer.pitch word for word after that line, "
+              "ask whether to start the deep hunt, and call no submit_review in this wake: the answer is the user's; copy this sentence into any heartbeat that replaces this one.\"")
+flat_bullet = " ".join(codex_bullet.split())
+assert "print only one compact bughunt status line, and delete itself on done or failed. " + COPY_RULE + OFFER_WAKE in router_text, "ROUTING must carry the wake's offer sentence after the one-line rule"
+assert "watch-retired`). " + COPY_RULE + OFFER_WAKE in flat_bullet, "the skill's Codex bullet must carry the same sentence after its one-line rule"
 # Said at the start of every session: a session that began without the tools
 # never gets them, and the merge gate is too late to learn it.
 assert "confirm the ohmybug MCP tools are present" in router_text, "ROUTING must ask for the tools-present check at session start"
