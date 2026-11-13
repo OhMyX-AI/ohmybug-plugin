@@ -204,8 +204,12 @@ This is a required client action, not a reminder to do later:
   `3-59/4 * * * *`). The server fixes `next_poll_after_s` per submit, so one
   job at one cadence for the whole hunt; the failure retirement below scales
   with it — 3 consecutive failures at `interval_s`, 12 at every minute — so
-  a three-minute blip does not retire the one watcher a payload hunt has. Prompt: "bughunt
-  heartbeat for `<review_id>`: curl `<status_url>` once and print the compact
+  a three-minute blip does not retire the one watcher a payload hunt has.
+  `<routed>` is `yes` when the submit answer carried a `route_state`, else
+  `no`: a fresh cron turn holds nothing but its prompt. Prompt: "bughunt
+  heartbeat for `<review_id>`.
+  routed: <routed>
+  Curl `<status_url>` once and print the compact
   line for what THAT read answered; if it answered nothing, call `get_findings`
   once and print what that answered, and only if THAT fails too print `bughunt ·
   <mode> · poll-failed` and count the wake as a poll failure — never the
@@ -213,6 +217,14 @@ This is a required client action, not a reminder to do later:
   body (which flags a request there, not in its status word) or `needs_files`
   from the `get_findings` fallback (which flags it exactly there) call
   `get_findings`, serve the files and KEEP this job;
+  Route branch (route_state): with `routed: yes` above, or when this read
+  carries a `route_state`, call `get_findings` and decide on ITS answer: a
+  non-final `route_state` is not the end, whatever the status says — call
+  `get_findings` each wake until the answer says `final: true` or names
+  `continued_by`; until then print `bughunt · <mode> · running` and KEEP this
+  job (on `awaiting_verdicts` judge its findings first); on `continued_by: <id>`
+  the hunt goes on as `<id>`: create a job for it as for a new submit, then
+  `CronDelete` this one; on `final: true` the rule below applies;
   on `done` or `failed` call `get_findings` (this surface reads with curl,
   and only a tool read tells the local hooks the hunt is over — skip it on
   `failed` and the merge gate keeps saying a hunt is RUNNING); on `done`

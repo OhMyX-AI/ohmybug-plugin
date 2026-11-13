@@ -64,6 +64,25 @@ assert "set targetThreadId" not in session_text
 # tells the server this client follows continued_by.
 for phrase in ("A routed hunt carries route_state", "done on it is not the end until final: true", "replace the heartbeat with one on <id>", "its own retire_at, from now", "take get_attestation from <id>, never from the first review", "and neither is failed", "except that a file request still comes first", "it stays routed until final: true", "the rules above that stop on, or delete the heartbeat on, done or failed do not apply"):
     assert phrase in session_text, phrase
+# The wake holds nothing but its prompt: the route memory line and the one route
+# rule a peer surface keys on ("Route branch (route_state):").
+for phrase in ("the heartbeat prompt carries a line routed: yes when the submit answer carried a route_state, else routed: no",
+               "under routed: yes a read without route_state is not the end either: call get_findings and decide on its answer",
+               "Route branch (route_state): a non-final route_state is not the end; call get_findings each wake until final or continued_by."):
+    assert phrase in session_text, phrase
+# The README's contract table: the route fields in each row, each hold error explained.
+readme_all = open(str(Path(router).parents[3] / "README.md"), encoding="utf-8").read()
+assert "## MCP contract" in readme_all, "README lost its MCP contract heading"
+readme = readme_all.split("## MCP contract", 1)[1].split("\n## ", 1)[0]
+row = lambda tool: next((l for l in readme.splitlines() if l.startswith("| `%s` |" % tool)), "")
+assert "plus `route_state` and `final` when the service routed the hunt" in row("submit_review")
+for phrase in ("verdict?}], review_of_record}` (`review_of_record` on every `done`", "route_state: snap_running\\|pending\\|awaiting_verdicts\\|continued\\|final, final, continued_by?, continuation_failed?, continuation_refused?}", "(`final`: true when this review is the answer", "names `continues`"):
+    assert phrase in row("get_findings"), phrase
+assert "plus the route fields of `get_findings` on a routed hunt" in row("confirm_findings")
+assert "refused on a routed first review that is not the answer" in row("get_attestation")
+errors = next((l for l in readme.splitlines() if l.startswith("Errors:")), "")
+for phrase in ("`route_pending` (`get_attestation` on a routed first review whose route is not decided", "`route_continued` (`get_attestation` on a first review that was continued: take the proof from `continued_by`)", "`route_unavailable` (any read or `get_attestation`: where the route stands could not be read: read again)"):
+    assert phrase in errors, phrase
 
 skill = open(str(Path(router).parent.parent / "skills/bughunter/SKILL.md"), encoding="utf-8").read()
 monitor_section = skill.split("start this compact, unbounded loop immediately with the", 1)[1]
@@ -526,6 +545,19 @@ assert "`watch_poll_s` is the sleep, `monitor.heartbeat_s` the line\n  clock" in
 assert "rounded up to\n  whole poll cadences" in props and "must stay under the\n  prompt-cache TTL" in props
 assert "~9 min" not in skill and "13 min" not in skill and "9–12 min" not in skill, "the failure window is a time, and the cadence is the server's"
 claude_bullet = skill.split("- **Claude Code:**", 1)[1].split("\n\nIf the runtime cannot create its monitor", 1)[0]
+# The cron prompt carries its route memory as a placeholder line INSIDE the quoted
+# prompt, and the one route rule comes before the done/failed rule it overrides.
+F = lambda t: " ".join(t.split())
+cron_prompt = claude_bullet.split('Prompt: "bughunt', 1)[1].split('the user knows the watch ended on a live hunt".', 1)[0]
+assert any(l.strip() == "routed: <routed>" for l in cron_prompt.splitlines()[:3]), "the cron prompt lost its routed: line"
+assert "`<routed>` is `yes` when the submit answer carried a `route_state`, else `no`" in F(claude_bullet)
+cron_flat = F(cron_prompt)
+rule = ("Route branch (route_state): with `routed: yes` above, or when this read carries a `route_state`, call `get_findings` and decide on ITS answer: "
+        "a non-final `route_state` is not the end, whatever the status says — call `get_findings` each wake until the answer says `final: true` or names `continued_by`; "
+        "until then print `bughunt · <mode> · running` and KEEP this job (on `awaiting_verdicts` judge its findings first); "
+        "on `continued_by: <id>` the hunt goes on as `<id>`: create a job for it as for a new submit, then `CronDelete` this one; on `final: true` the rule below applies;")
+assert rule in cron_flat, "the cron route rule changed"
+assert cron_flat.index("serve the files and KEEP this job;") < cron_flat.index(rule) < cron_flat.index("on `done` or `failed` call `get_findings`"), "the route rule must sit between the file request and the done/failed rule"
 for phrase in ("`Bash` tool, `run_in_background: true`", "re-arm\n  the same command on each heartbeat wake", "`next_poll_after_s`", "on the `monitor.heartbeat_s` clock", "Every number in the loop\n  comes from the server", "up to 150 min", "CronCreate", "`3-59/4 * * * *`", "KEEP this job", "after `<fail_cap>` consecutive poll failures (3 for a job at\n  `interval_s`, 12 for one every minute", "older than 180 minutes", "print `bughunt · <mode> · watch-retired` and only then\n  `CronDelete`", "One job per review", "older review id", "answered with that one line and a re-arm", "the loop has already exited", "`~/.ohmybug/watch/<review_id>`", "do\n  not add a foreground `get_findings` beside an armed monitor"):
     assert phrase in claude_bullet, phrase
 assert "up to 2 h" not in claude_bullet
