@@ -129,11 +129,12 @@ This is a required client action, not a reminder to do later:
   `bughunt · fast · needs-files`, `bughunt · fast · done · findings=N`,
   `bughunt · fast · failed`, `bughunt · fast · poll-failed`, or
   `bughunt · fast · watch-retired`).
-  Beside that line, when a wake's read (wait_review or get_findings) carries
-  deep_offer, the wake prints deep_offer.pitch word for word after its status
-  line, asks whether to start the deep hunt, and starts nothing itself: the
-  answer is the user's. Write this sentence into the heartbeat prompt word for
-  word, because that wake is often the only read of a finished hunt.
+  Write the next sentence into the heartbeat prompt word for word, because a
+  wake is often the only read of a finished hunt: "When this wake's read
+  carries deep_offer (and, if it carries route_state, also final: true), print
+  deep_offer.pitch word for word after the bughunt status line, ask whether to
+  start the deep hunt, and start nothing in this wake: the answer is the
+  user's."
   A rule in the prompt did not hold: a heartbeat whose prompt carried the
   wake_rule word for word still answered `running` from memory for forty
   minutes after the hunt was done. So the prompt carries FACTS the model can
@@ -1070,8 +1071,10 @@ server's `deep_offer` once the user agrees.
   marked `known_from` repeat one the fast hunt already confirmed: judge them
   as usual, they cost nothing. On yes, follow
   its `how`: call `submit_review` again with `deep: "<review_id>"` and the
-  same `meta` – the server re-fetches the diff, so you send no payload. A yes to a pitch a
-  wake printed is the same yes: read `get_findings` for that `how` first. If
+  same `meta` – the server re-fetches the diff, so you send no payload. A yes to a pitch a wake printed is the same yes: read `get_findings` for its
+  `how` first, without asking again; if that read carries no `deep_offer`,
+  tell the user the offer has lapsed (its `deep_offer_withheld` says why) and
+  start nothing. If
   it carries `install_url`, the App install is the missing step first.
 - **Pausing an offer.** When the user asks to stop being offered the deep
   hunt for a while ("not today", "not for a day"), or the mod sends you their

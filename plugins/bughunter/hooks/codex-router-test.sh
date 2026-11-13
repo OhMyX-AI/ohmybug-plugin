@@ -652,12 +652,18 @@ assert "Retire a heartbeat older than 180 minutes" in router_text, "ROUTING must
 # sentence, the same words on both surfaces, because the agent copies it into
 # the heartbeat prompt. No route, strength or price wording: the server sends
 # deep_offer only when it may be shown, and the pitch carries the rest.
-OFFER_WAKE = ("Beside that line, when a wake's read (wait_review or get_findings) carries deep_offer, the wake prints deep_offer.pitch word for word after its status line, "
-              "asks whether to start the deep hunt, and starts nothing itself: the answer is the user's. "
-              "Write this sentence into the heartbeat prompt word for word, because that wake is often the only read of a finished hunt.")
-assert OFFER_WAKE in router_text, "ROUTING must carry the wake's offer sentence"
-assert OFFER_WAKE in " ".join(codex_bullet.split()), "the skill's Codex bullet must carry the same sentence"
-assert "A yes to a pitch a wake printed is the same yes: read `get_findings` for that `how` first." in " ".join(skill.split()), "a yes to a wake's pitch goes through get_findings' how"
+COPY_RULE = "Write the next sentence into the heartbeat prompt word for word, because a wake is often the only read of a finished hunt: "
+OFFER_WAKE = ("\"When this wake's read carries deep_offer (and, if it carries route_state, also final: true), print deep_offer.pitch word for word after the bughunt status line, "
+              "ask whether to start the deep hunt, and start nothing in this wake: the answer is the user's.\"")
+flat_bullet = " ".join(codex_bullet.split())
+# Placement: right after the one-line rule, and the copy instruction stays outside the quoted sentence the wake holds.
+assert "print only one compact bughunt status line, and delete itself on done or failed. " + COPY_RULE + OFFER_WAKE in router_text, "ROUTING must carry the wake's offer sentence after the one-line rule"
+assert "watch-retired`). " + COPY_RULE + OFFER_WAKE in flat_bullet, "the skill's Codex bullet must carry the same sentence after its one-line rule"
+# A yes to a wake's pitch: the how of a fresh read, never a deep-first submit, and a lapsed offer starts nothing.
+offer_bullet = " ".join(skill.split("A finished hunt's `get_findings` may carry `deep_offer`.", 1)[1].split("**Pausing an offer.**", 1)[0].split())
+assert ("A yes to a pitch a wake printed is the same yes: read `get_findings` for its `how` first, without asking again; "
+        "if that read carries no `deep_offer`, tell the user the offer has lapsed (its `deep_offer_withheld` says why) and start nothing.") in offer_bullet
+assert ("and then by the how of a fresh get_findings read (a pitch a wake printed included; with no deep_offer on that read, say the offer lapsed and start nothing);") in router_text
 # Said at the start of every session: a session that began without the tools
 # never gets them, and the merge gate is too late to learn it.
 assert "confirm the ohmybug MCP tools are present" in router_text, "ROUTING must ask for the tools-present check at session start"
