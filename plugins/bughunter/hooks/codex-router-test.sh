@@ -821,6 +821,7 @@ assert DEEP_MARK in review_text
 for phrase in ("unless the user asked for the deep hunt in their own words (deep hunt, deep review, full-repo, --deep or a bare deep as the argument of the review command, in any language – the adjective alone, as in deep-dive review or a deep look, asks for a thorough fast review)",
                "one submit_review with deep: true and meta.repo + meta.ref (the pushed head sha) + meta.base_branch, no payload, is the first and only review",
                "On your own initiative start deep only after the server returns deep_offer",
+               "a done read carrying deep_offer also shows the user deep_offer.pitch word for word under that line",
                "A refusal of a deep-first request (repo_required, repo_too_big, commit_required, fast_running, deep_at_capacity) is shown to the user verbatim",
                "never a silent downgrade to fast",
                "its compact line reads bughunt · deep · running"):
