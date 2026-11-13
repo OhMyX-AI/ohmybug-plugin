@@ -62,7 +62,7 @@ assert "set targetThreadId" not in session_text
 # The service route: a routed hunt's done is not the end. Without this clause a
 # Codex session reports step 1 and takes its attestation, while the header
 # tells the server this client follows continued_by.
-for phrase in ("A routed hunt carries route_state", "done on it is not the end until final: true", "replace the heartbeat with one on <id>", "its own retire_at, from now", "take get_attestation from <id>, never from the first review", "and neither is failed", "except that a file request still comes first", "the rules above that stop on, or delete the heartbeat on, done or failed do not apply"):
+for phrase in ("A routed hunt carries route_state", "done on it is not the end until final: true", "replace the heartbeat with one on <id>", "its own retire_at, from now", "take get_attestation from <id>, never from the first review", "and neither is failed", "except that a file request still comes first", "it stays routed until final: true", "the rules above that stop on, or delete the heartbeat on, done or failed do not apply"):
     assert phrase in session_text, phrase
 
 skill = open(str(Path(router).parent.parent / "skills/bughunter/SKILL.md"), encoding="utf-8").read()
@@ -172,7 +172,7 @@ assert '''  printf '%s %s\\n' "$st" "$every" > "$watch" # the Stop hook reads th
   case "$st" in
     verdicts) printf 'bughunt · %s · %s\\n' "$mode" "$st"; break ;; # the same command is re-armed after the verdicts: its age clock is kept
     done|failed|needs-files) rm -f "$keep"; printf 'bughunt · %s · %s\\n' "$mode" "$st"; break ;;
-    continued) rm -f "$keep"; printf 'bughunt · %s · continued %s\\n' "$mode" "${next:-(no id: call get_findings)}"; break ;;
+    continued) rm -f "$keep" "$watch.routed"; printf 'bughunt · %s · continued %s\\n' "$mode" "${next:-(no id: call get_findings)}"; break ;;
   esac
 ''' in monitor_code, "terminal branch lost its shape"
 assert '&& st=needs-files\n' in monitor_code
@@ -272,6 +272,12 @@ with tempfile.TemporaryDirectory() as d:
 with tempfile.TemporaryDirectory() as d:
     r = drive(walk(d, [R("done", "final", ',"continuation_refused":"waited_out"')]))
     assert r.stdout == "bughunt · fast · done\n", r.stdout
+# A routed review answered once without route_state (the service could not read
+# the route just then) is still routed: polled through, never `done`.
+with tempfile.TemporaryDirectory() as d:
+    r = drive(walk(d, [R("done", "pending"), '{"status":"done"}', R("done", "final")]))
+    assert r.stdout.splitlines()[-1] == "bughunt · fast · done" and int(open(f"{d}/polls").read()) == 3, r.stdout
+    assert not os.path.exists(f"{d}/.ohmybug/watch/rev_test.routed"), "final forgets the route"
 # A file request wins over the route: a routed step 1 whose reviewers ask for
 # files exits needs-files, or nobody serves them and the request expires.
 with tempfile.TemporaryDirectory() as d:

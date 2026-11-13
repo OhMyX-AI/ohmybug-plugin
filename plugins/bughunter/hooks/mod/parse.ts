@@ -84,9 +84,8 @@ export function statusState(body: Body): 'running' | 'needs_files' | 'done' | 'f
   return s ? 'running' : undefined
 }
 
-/** The service route's order. The service moves a step 1 up it in practice but does not promise to (an operator can
- *  bring a step back); the mod's own rule is to ignore a lower rank than it holds. 4 is over (final, or closed by the
- *  mod itself). */
+/** The service route's order. The mod's own rule, not a promise of the service: a lower rank than the row holds is
+ *  an older answer and is ignored. 4 is over (final, or closed by the mod itself). */
 const RANK: Record<string, number> = { snap_running: 0, awaiting_verdicts: 1, pending: 2, continued: 3, final: 4 }
 export const ROUTE_OVER = 4
 export type RouteRead = { route?: number; state?: ReturnType<typeof statusState>; next?: string }
@@ -105,7 +104,8 @@ export function routeRead(body: Body, held: number | undefined): RouteRead | und
   if (held !== undefined && rank < held) return undefined
   const state = rank === ROUTE_OVER || s === 'needs_files' ? s : rank === 1 ? 'done' : 'running'
   const c = rank === 3 ? str(body.continued_by) : undefined
-  return { route: rank, state, next: c && /^[A-Za-z0-9_.-]{1,128}$/.test(c) ? c : undefined }
+  // An id starts with a letter, digit or underscore: `.` or `..` would walk the status URL's path.
+  return { route: rank, state, next: c && /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(c) ? c : undefined }
 }
 
 /** The merge gate's own words, when it refused a Bash call. Shown, never acted on. */

@@ -333,7 +333,7 @@ hand_on() { # step1 child
     # In order, first seen kept: the promote path writes the first line to the legacy marker.
     { cat "$dst" 2>/dev/null; cat "$src"; } | awk '!seen[$0]++' > "$dst.tmp" 2>/dev/null && mv "$dst.tmp" "$dst" || return 1
   fi
-  rm -f "$src"
+  rm -f "$src" "$REPO_HUNTS.routed/$1"
   mkdir -p "$REPO_HUNTS.promoted" 2>/dev/null && : > "$REPO_HUNTS.promoted/$1" 2>/dev/null
   return 0
 }
@@ -518,7 +518,10 @@ case "$TOOL" in
     # could not read the route just then) holds the record as well, until final.
     ROUTED="$REPO_HUNTS.routed/${REVIEW:-unknown}"
     case "${ROUTE_STATE:-}" in
-      '') [ -e "$ROUTED" ] && exit 0 ;;
+      '') if [ -e "$ROUTED" ]; then
+            say "ohmybug: review $REVIEW is a routed hunt, but this answer names no route state, so its merge record stays pending (the gate waits for the route to say final). Read it again with get_findings in a while."
+            exit 0
+          fi ;;
       final) rm -f "$ROUTED" ;;
       *) mkdir -p "$REPO_HUNTS.routed" 2>/dev/null && : > "$ROUTED" 2>/dev/null ;;
     esac

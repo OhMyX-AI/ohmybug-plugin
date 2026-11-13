@@ -405,7 +405,7 @@ async function pollDue($: Engine) {
   await refreshStatus($)
 }
 
-/** Change one open hunt of this chat as it stands NOW: the fetch awaited above may have let the agent read it, or
+/** Change one watched hunt of this chat (open, or a routed step 1 whose route is not over) as it stands NOW: the fetch awaited above may have let the agent read it, or
  *  another chat take it over, and a stale copy would undo either. */
 async function apply($: Engine, id: string, change: (cur: BughunterHunt, list: BughunterHunt[]) => Partial<BughunterHunt>) {
   const cwd = await $.session.cwd()
@@ -752,8 +752,8 @@ export const register: Register = on => {
         {mine.map(hunt => (
           <Box flexDirection="column">
             <Text>
-              <Text color={isOpen(hunt) ? 'yellow' : hunt.state === 'failed' ? 'red' : 'green'}>{isOpen(hunt) ? '●' : hunt.state === 'failed' ? '✗' : '✓'}</Text>
-              {' '}{hunt.id} {hunt.mode} · {hunt.state === 'needs_files' ? 'files asked' : hunt.state}
+              <Text color={watched(hunt) ? 'yellow' : hunt.state === 'failed' ? 'red' : 'green'}>{watched(hunt) ? '●' : hunt.state === 'failed' ? '✗' : '✓'}</Text>
+              {' '}{hunt.id} {hunt.mode} · {hunt.state === 'needs_files' ? 'files asked' : routeOpen(hunt) && hunt.state === 'done' ? 'waits for verdicts' : hunt.state}
             </Text>
             <Text dimColor>
               {'  '}{minutes(now - hunt.startedAt)} min ago{hunt.median && isOpen(hunt) ? ` · runs take ~${hunt.median} min` : ''}

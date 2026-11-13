@@ -3071,10 +3071,17 @@ post_r submit_review running s6 >/dev/null
 post_r get_findings done s6 '{"route_state":"deciding","final":false}' >/dev/null
 s "a route state this hook does not know promotes nothing" ""
 r "...and keeps step 1's record (the gate errs shut)" "pend s6"
-post_r get_findings done s6 '{"route_state":"not a word: x","final":false}' >/dev/null
-s "a route state that is not a word promotes nothing either" ""
-post_r get_findings done s6 '{"route_state":{"x":1},"final":false}' >/dev/null
-s "...nor one that is not a string" ""
+for bad in '"not a word: x"' '{"x":1}'; do
+  # A review with no .routed marker yet: the 'invalid' reading alone must hold it.
+  reset_state
+  post_r submit_review running s13 >/dev/null
+  post_r get_findings done s13 "{\"route_state\":$bad,\"final\":false}" >/dev/null
+  s "a first route state that is not a word ($bad) promotes nothing" ""
+  r "...and keeps the record" "pend s13"
+done
+reset_state
+post_r submit_review running s6 >/dev/null
+post_r get_findings done s6 '{"route_state":"deciding","final":false}' >/dev/null
 BEFORE=$(mktemp)
 for bad in '' '".."' '"s6"'; do
   ls -a "$(dirname "$(ohmybug_hunt_dir)")" > "$BEFORE" 2>/dev/null
@@ -3107,8 +3114,9 @@ post_r submit_review running s12 >/dev/null
 post_r get_findings done s12 '{"route_state":"awaiting_verdicts","final":false}' >/dev/null
 post_r confirm_findings '' s12 '{"confirmed":1}' >/dev/null
 s "a routed step 1 whose confirm answer names no route promotes nothing" ""
-post_r get_findings done s12 >/dev/null
+out=$(post_r get_findings done s12 | ctx)
 s "...nor does a read of it that names no route" ""
+r "...and the agent is told why" 'case "$out" in *"names no route state"*) true;; *) false;; esac'
 r "...and its record stays" "pend s12"
 post_r get_findings done s12 '{"route_state":"final","final":true}' >/dev/null
 s "...until the route says final" "$RID"

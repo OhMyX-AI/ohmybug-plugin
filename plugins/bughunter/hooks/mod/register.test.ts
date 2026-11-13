@@ -483,9 +483,9 @@ test('route: a confirm on a row nobody read polls it at once', async ($, on) => 
   expect(seen.toasts).toHaveLength(0)
 })
 
-// The service does not promise a route only moves up (an operator's un-expire can bring awaiting_verdicts back after
-// pending): the mod's own rule is that a lower rank than it holds is ignored, so the row keeps waiting and the higher
-// rank still arrives. What the service does promise: continued only ever goes on to final (its child row deleted).
+// The service does not promise a route only moves up: the mod's own rule is that a lower rank than it holds is
+// ignored, so the row keeps waiting and the higher rank still arrives. What the service does promise: continued only
+// ever goes on to final.
 test('route: an announced step 1 that the server says was read elsewhere settles, and still follows', async ($, on) => {
   const { clock, seen } = await routedStart($, on, [R('awaiting_verdicts'), R('awaiting_verdicts', { read_after_done: true }),
     R('continued', { continued_by: 'rev_c' })])
@@ -561,7 +561,7 @@ test('route: a lower rank than the row holds is ignored (the mod\'s rule, not a 
   expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
 })
 
-test('route: continued then final (the child row gone) is accepted as the end', async ($, on) => {
+test('route: continued then final is accepted as the end', async ($, on) => {
   const { clock, seen } = await routedStart($, on, [R('continued'), R('final')])
   await clock.advance(75_000)
   await clock.advance(75_000)

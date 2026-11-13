@@ -726,6 +726,9 @@ while :; do
   n=$(num heartbeat_s); [ -n "$n" ] && [ "$n" -gt 0 ] && beat=$n
   printf '%s' "$s" | grep -qE '"awaiting_client_files"[[:space:]]*:[[:space:]]*true|"files_requested"[[:space:]]*:[[:space:]]*true' && st=needs-files
   rs=$(printf '%s' "$s" | sed -n 's/.*"route_state"[[:space:]]*:[[:space:]]*"\([^"\]*\)".*/\1/p' | head -n 1) # a routed hunt: done is not the end until final
+  case "$rs" in ''|final) ;; *) : > "$watch.routed" ;; esac # remembered across runs: this review is routed
+  [ "$rs" = final ] && rm -f "$watch.routed"
+  [ -z "$rs" ] && [ -e "$watch.routed" ] && rs=held # an answer that names no route, about a routed review: not the end
   case "$st:$rs" in
     needs-files:*|*:|*:final) ;; # a file request wins; no route, or final: as the status says
     *:awaiting_verdicts) st=verdicts ;;
@@ -736,7 +739,7 @@ while :; do
   case "$st" in
     verdicts) printf 'bughunt · %s · %s\n' "$mode" "$st"; break ;; # the same command is re-armed after the verdicts: its age clock is kept
     done|failed|needs-files) rm -f "$keep"; printf 'bughunt · %s · %s\n' "$mode" "$st"; break ;;
-    continued) rm -f "$keep"; printf 'bughunt · %s · continued %s\n' "$mode" "${next:-(no id: call get_findings)}"; break ;;
+    continued) rm -f "$keep" "$watch.routed"; printf 'bughunt · %s · continued %s\n' "$mode" "${next:-(no id: call get_findings)}"; break ;;
   esac
   now=$(date +%s)
   if [ "$st" != "$prev" ] || [ $((now - last)) -ge "$beat" ]; then
