@@ -115,7 +115,7 @@ This is a required client action, not a reminder to do later:
   needs-files` and serves the files first. If the poll itself fails, the wake
   falls back to one `get_findings` before it counts as a wake that read nothing.
   On `needs_files`, send files first; on `done` or
-  `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Retire it too when
+  `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Route branch (route_state): the heartbeat prompt carries a line `routed: no` at creation and is updated to `routed: yes` once a read carries a `route_state` other than `final`, because a wake holds nothing but its prompt; under `routed: yes` an answer without `route_state` is not the end (one `get_findings`, then follow its `route_state`); on `continued`, call `get_findings` on the first review once, then replace the heartbeat with one on the `continued_by` review, mode fast, `routed: no`, its `retire_at` = this wake + 180 min. Retire it too when
   it is older than 180 minutes or after 3 consecutive wakes that could not read
   a status at all — a failed `wait_review`, `get_findings` or `status_url` read,
   whichever that wake uses: print `bughunt · <mode> ·
@@ -204,8 +204,13 @@ This is a required client action, not a reminder to do later:
   `3-59/4 * * * *`). The server fixes `next_poll_after_s` per submit, so one
   job at one cadence for the whole hunt; the failure retirement below scales
   with it — 3 consecutive failures at `interval_s`, 12 at every minute — so
-  a three-minute blip does not retire the one watcher a payload hunt has. Prompt: "bughunt
-  heartbeat for `<review_id>`: curl `<status_url>` once and print the compact
+  a three-minute blip does not retire the one watcher a payload hunt has. The
+  prompt's second line is its route memory, because a fresh cron turn holds
+  nothing else: `routed: no` at creation, `routed: yes` once a read of this
+  review carried a `route_state`. Prompt: "bughunt
+  heartbeat for `<review_id>`.
+  routed: no
+  Curl `<status_url>` once and print the compact
   line for what THAT read answered; if it answered nothing, call `get_findings`
   once and print what that answered, and only if THAT fails too print `bughunt ·
   <mode> · poll-failed` and count the wake as a poll failure — never the
@@ -213,7 +218,21 @@ This is a required client action, not a reminder to do later:
   body (which flags a request there, not in its status word) or `needs_files`
   from the `get_findings` fallback (which flags it exactly there) call
   `get_findings`, serve the files and KEEP this job;
-  on `done` or `failed` call `get_findings` (this surface reads with curl,
+  Route branch (route_state): a body with a `route_state` other than `final`
+  is not the end, whatever its status says, and a `failed` step 1 is not the
+  end either; with `routed: no` above, replace this job with the same prompt
+  saying `routed: yes` (same `<retire_at>`); with `routed: yes`, a body with
+  no `route_state` is not the end either: call `get_findings` once and follow
+  its `route_state`; `snap_running`, `pending` or a word not named here →
+  print `bughunt · <mode> · running` and KEEP this job; `awaiting_verdicts` →
+  judge its findings with `confirm_findings`, KEEP this job;
+  `continued` with `continued_by: <id>` → call `get_findings` on
+  `<review_id>` once, then `CronDelete` this job and create one on `<id>`
+  (its status URL is this one with the id replaced, `<mode>` fast,
+  `<retire_at>` = this wake + 180 min, `routed: no`); `final: true` → step 1
+  is the answer: the rules below apply, and a `continuation_refused` gets one
+  line saying no fast hunt followed and why;
+  otherwise, on `done` or `failed` call `get_findings` (this surface reads with curl,
   and only a tool read tells the local hooks the hunt is over — skip it on
   `failed` and the merge gate keeps saying a hunt is RUNNING); on `done`
   print `findings=N` from that answer, on `failed` the bare `bughunt ·

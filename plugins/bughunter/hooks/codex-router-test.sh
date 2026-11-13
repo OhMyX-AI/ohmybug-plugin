@@ -64,6 +64,17 @@ assert "set targetThreadId" not in session_text
 # tells the server this client follows continued_by.
 for phrase in ("A routed hunt carries route_state", "done on it is not the end until final: true", "replace the heartbeat with one on <id>", "its own retire_at, from now", "take get_attestation from <id>, never from the first review", "and neither is failed", "except that a file request still comes first", "it stays routed until final: true", "the rules above that stop on, or delete the heartbeat on, done or failed do not apply"):
     assert phrase in session_text, phrase
+# The Codex wake holds nothing but its prompt either: the route memory line and
+# the continuation's job, as the cron prompt carries them.
+for phrase in ("Route branch (route_state):", "carries a line routed: no at creation", "the same prompt saying routed: yes (same retire_at)",
+               "a wake whose prompt says routed: yes reads an answer without route_state as not the end",
+               "call get_findings on the first review once, then replace the heartbeat with one on <id>, mode fast, routed: no",
+               "its own retire_at, from now: this wake + 180 min"):
+    assert phrase in session_text, phrase
+# The README's contract table names the route fields and the hold errors a client meets.
+readme = open(str(Path(router).parents[3] / "README.md"), encoding="utf-8").read().split("## MCP contract", 1)[1].split("\n## ", 1)[0]
+for phrase in ("route_state: snap_running\\|pending\\|awaiting_verdicts\\|continued\\|final", "continued_by?", "continuation_failed?", "continuation_refused?", "review_of_record", "`continues`", "`route_pending`", "`route_continued`", "`route_unavailable`"):
+    assert phrase in readme, phrase
 
 skill = open(str(Path(router).parent.parent / "skills/bughunter/SKILL.md"), encoding="utf-8").read()
 monitor_section = skill.split("start this compact, unbounded loop immediately with the", 1)[1]
@@ -757,6 +768,20 @@ assert "on `done` or `failed` call `get_findings`" in claude_bullet
 assert "on `done`\n  print `findings=N` from that answer, on `failed` the bare `bughunt ·\n  <mode> · failed`" in claude_bullet
 assert "on done/failed call `get_findings`" not in claude_bullet
 assert "on `failed` print the bare" not in claude_bullet, "a bare print on failed with no read leaves the pending record"
+# The cron fallback's route branch: a fresh cron turn remembers nothing but its
+# prompt, so the prompt carries its route memory as a line of its own, and a
+# done or failed step 1 is not the end until its route is final.
+assert any(l.strip() == "routed: no" for l in claude_bullet.splitlines()), "the cron prompt lost its routed: line"
+cron_flat = " ".join(claude_bullet.split())
+for phrase in ("Route branch (route_state):", "a `failed` step 1 is not the end either",
+               "replace this job with the same prompt saying `routed: yes` (same `<retire_at>`)",
+               "with `routed: yes`, a body with no `route_state` is not the end either",
+               "`awaiting_verdicts` → judge its findings with `confirm_findings`, KEEP this job",
+               "call `get_findings` on `<review_id>` once, then `CronDelete` this job and create one on `<id>`",
+               "`<mode>` fast, `<retire_at>` = this wake + 180 min, `routed: no`",
+               "otherwise, on `done` or `failed` call `get_findings`"):
+    assert phrase in cron_flat, phrase
+assert cron_flat.index("Route branch (route_state):") < cron_flat.index("otherwise, on `done` or `failed`"), "the route branch must come before the terminal rule"
 # The age-cap retirement is honest on this surface too: a bare watch-retired on
 # a live hunt reads as "the hunt is over" (the queued deep hunt past 180 min).
 assert "either\n  way print what that `get_findings` answered — `still running` when it is" in claude_bullet
