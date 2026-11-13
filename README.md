@@ -17,8 +17,8 @@ holds), $12 for a deep hunt you choose ($24 on a wide change), minor findings
 free, first review free.
 
 - **Lite review** and **snap review**: the price `get_balance` lists, where the service runs them
-- **Fast review** · $4 · finds 73% of significant bugs · up to 15 minutes
-- **Deep review** · $12 ($24 on a wide change) · finds 90% of significant bugs · up to 2 hours
+- **Fast review** · $4 · finds 72.4% of known bugs on our benchmark · up to 15 minutes
+- **Deep review** · $12 ($24 on a wide change) · finds 86.1% of known bugs on our benchmark · up to 2 hours
 
 Pick a mode for one hunt with `/bughunter:review lite` (or `snap`, `fast`); without one the hunt is fast. Lite and snap read the repository, so they need a pushed GitHub commit the service can read, and snap a diff under 1 MB. `/bughunter:stats` lists the modes the service runs for your key.
 
