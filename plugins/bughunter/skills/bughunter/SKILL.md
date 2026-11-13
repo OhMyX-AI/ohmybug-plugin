@@ -69,101 +69,21 @@ This is a required client action, not a reminder to do later:
 
 - **Codex:** immediately read the submit response's `monitor` object, then call
   `automation_update` with `destination=thread` (not `targetThreadId`; destination
-  binds the current thread), using that exact `review_id`, `status_url`, `interval_s`,
-  `heartbeat_s`, `wake_on`, `stop_on` and `wake_rule` — every number the wake
-  will measure against goes into the prompt, because a wake fires in a fresh
-  context holding nothing but that prompt; copy `wake_rule` into the prompt word for word,
-  because it is the sentence that makes a wake a reading rather than a
-  recollection: every wake reports the status it just read — from `wait_review`
-  or `get_findings` on a fast hunt, from the `status_url` read on a deep one —
-  and a wake with no answer prints `bughunt · <mode> · poll-failed`, never the
-  previous status. A heartbeat that
-  answers from memory reported `running` on three wakes — twelve minutes — after
-  the hunt was done, and the merge waited on it. Update an existing heartbeat for the same review instead of
-  creating a duplicate, and retire/replace any heartbeat pointing at an older
-  review. **The automation is the cadence; a wake is one read.** The heartbeat
-  fires once per `interval_s`, and inside a wake the prompt makes ONE read and
-  ends: `get_findings(review_id)`, or one `wait_review(review_id)` with its
-  default hold — the server caps the hold whatever `timeout_s` you ask for and
-  answers the ordinary body plus `timed_out: true` and a `next_step` when it
-  expires, so a bigger `timeout_s` buys no extra waiting, and a `timed_out: true`
-  answer IS this wake's reading: `running`, from a healthy server, never a wake to
-  count towards the retirement rule below. Do not loop either call inside the
-  wake to "cover the cadence": the cadence is the automation's, and a wake that
-  loops is still holding the thread when the next one fires — measured as a
-  client polling once a minute against a contract that says once per four. The
-  one exception is the one the hand-wait fallback below has: a PAYLOAD submit
-  (§2, rung 3) while a file request can still arrive. There nothing else is
-  watching for `needs_files` — the server serves files itself only when it can
-  read the repo — and the request is held open for minutes, so inside that wake
-  call `wait_review` back to back (each answer is a reading; it returns the
-  moment `needs_files` shows) and stop when the answer is `done`, `failed` or
-  `needs_files` — or before the next wake is due: start another hold only if
-  it, its round trip, and one more round trip for the handover's own calls
-  would end inside `heartbeat_s` from this wake's start. The line must land by
-  then, and what is left before `interval_s` is the handover — the status line,
-  the delete — so the next wake finds the thread free. A hold costs the
-  server's cap plus the call's round trip, and the handover's calls are round
-  trips too: a bound that subtracts the hold alone lets the last one return
-  exactly as the next wake fires, and one that leaves the handover to the
-  `heartbeat_s`–`interval_s` gap shrinks it on exactly the slow links whose
-  calls need it. A repo or deep submit never needs this. A
-  deep hunt runs up to 2 hours: its wake polls `status_url` once and reports
-  that, which is the read `wake_rule` names for a deep hunt. That body
-  keys a file request off `awaiting_client_files`/`files_requested`, not off its
-  status word, so a wake that sees either flag prints `bughunt · <mode> ·
-  needs-files` and serves the files first. If the poll itself fails, the wake
-  falls back to one `get_findings` before it counts as a wake that read nothing.
-  On `needs_files`, send files first; on `done` or
-  `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Retire it too when
-  it is older than 180 minutes or after 3 consecutive wakes that could not read
-  a status at all — a failed `wait_review`, `get_findings` or `status_url` read,
-  whichever that wake uses: print `bughunt · <mode> ·
-  watch-retired`, then delete it, then call `get_findings` once: if the review is
-  still running or waiting for files, tell the user and — if the retirement came
-  from unreadable wakes, not from the age cap — arm a fresh heartbeat: a live
-  hunt must not lose its watch, and a heartbeat nothing can satisfy must not
-  wake the thread forever, so the age cap is the one that ends it for good.
-  Keep each wake-up to
-  one compact line (`bughunt · fast · running`, `bughunt · files-sent`,
-  `bughunt · fast · needs-files`, `bughunt · fast · done · findings=N`,
-  `bughunt · fast · failed`, `bughunt · fast · poll-failed`, or
-  `bughunt · fast · watch-retired`).
-  A rule in the prompt did not hold: a heartbeat whose prompt carried the
-  wake_rule word for word still answered `running` from memory for forty
-  minutes after the hunt was done. So the prompt carries FACTS the model can
-  check, and the stop is mechanical, not a judgement:
-  - **The age cap is an instant, not a duration.** At the submit compute
-    `retire_at` = submit time + 180 min and write it into the prompt as an ISO
-    timestamp — the SAME instant into every replacement heartbeat, so the cap
-    bounds the review, not each job in turn: "If the current time is past
-    `<retire_at>`: print `bughunt · <mode> · watch-retired`, delete this
-    automation, then call `get_findings` once and report what it answered —
-    `still running` when it is, so the user knows the watch ended on a live
-    hunt." Delete BEFORE the read: a delete that waits on a tool call is lost
-    when that call fails, and the next wake fails the same way forever. That is the age-cap
-    retirement above with a clock in it, not a verdict: 180 min is the hunt's
-    budget plus queue time, so a queued deep hunt can still be live there. A
-    clock the model compares beats an instruction it can skip; any heartbeat
-    older than its `retire_at` is retired at wake regardless of what the wake
-    believes.
-  - **A terminal line quotes the answer it came from.** On `done`, print
-    `findings=N` read from that wake's read — `wait_review`, `get_findings`
-    or the `status_url` body, all of which carry a findings count (`bughunt ·
-    fast · done · findings=3`) — the bare word is what a memory produces.
-    Non-terminal wakes keep the enumerated lines; no answer from this wake's
-    read → the only line allowed is `bughunt · <mode> · poll-failed`.
-  - **Stop in the same turn as the read.** On `done` or `failed`,
-    `automation_update` deletes this heartbeat in the turn that read the
-    status. If the automation still exists at the next wake after a terminal
-    read, delete it first, then report.
-  - **The server names an overrun.** When a `get_findings` answer's
-    `next_step` begins "this is the first read after done", this heartbeat
-    outlived the hunt: delete it in that same turn and say so — that sentence
-    is the server's record of the wake this rule exists to prevent. The server
-    sends it only when the hunt has been done for more than ten minutes and
-    nothing has read its findings since, so a wake that catches `done` within
-    one cadence never sees it.
+  binds the current thread) at `monitor.interval_s`, with the wake prompt below:
+  a wake fires in a fresh context holding nothing but that prompt, so the prompt
+  carries everything the wake needs. Update an existing heartbeat for the same
+  review instead of creating a duplicate, and never leave one pointing at an
+  older review. **The automation is the cadence; a wake is one run of the
+  helper.** The one exception is a PAYLOAD submit (§2, rung 3) while a file
+  request can still arrive: the server cannot read the repo to serve the
+  reviewers' file requests itself and holds each request open for minutes only,
+  so after a `keep` in such a wake call `wait_review` back to back (each answer
+  returns the moment `needs_files` shows: serve the files) and stop on `done`,
+  `failed` or `needs_files` (a `done` or `failed` there is handled as the
+  helper's word of that name), or before the next wake is due: start another hold
+  only if it, its round trip, and one more round trip for the handover would end
+  inside `heartbeat_s` from this wake's start. A repo or deep submit never needs
+  this.
 - **Claude Code:** immediately start the monitor described below with the
   **`Bash` tool, `run_in_background: true`** – not the `Monitor` tool, whose
   calls one client model breaks with an empty `ws` argument and then repeats
@@ -195,51 +115,48 @@ This is a required client action, not a reminder to do later:
   watch: the Stop hook sees the file it writes (`~/.ohmybug/watch/<review_id>`)
   and stays quiet while it is fresh, so a turn may end on a running hunt — do
   not add a foreground `get_findings` beside an armed monitor.
-  No background `Bash` in this harness? Fall back to `CronCreate` at the cadence
-  the submit response names — `next_poll_after_s` (an older server's submit
-  answer carries only `interval_s`: then curl `status_url` ONCE before creating
-  the job, the field is on that body). Under a minute — a payload submit, whose
-  file request is held open for minutes — means every minute, the tightest cron
-  allows (`* * * * *`); otherwise `interval_s`, off the :00/:30 marks (240 s →
-  `3-59/4 * * * *`). The server fixes `next_poll_after_s` per submit, so one
-  job at one cadence for the whole hunt; the failure retirement below scales
-  with it — 3 consecutive failures at `interval_s`, 12 at every minute — so
-  a three-minute blip does not retire the one watcher a payload hunt has. Prompt: "bughunt
-  heartbeat for `<review_id>`: curl `<status_url>` once and print the compact
-  line for what THAT read answered; if it answered nothing, call `get_findings`
-  once and print what that answered, and only if THAT fails too print `bughunt ·
-  <mode> · poll-failed` and count the wake as a poll failure — never the
-  previous status; on `awaiting_client_files`/`files_requested` in the status
-  body (which flags a request there, not in its status word) or `needs_files`
-  from the `get_findings` fallback (which flags it exactly there) call
-  `get_findings`, serve the files and KEEP this job;
-  on `done` or `failed` call `get_findings` (this surface reads with curl,
-  and only a tool read tells the local hooks the hunt is over — skip it on
-  `failed` and the merge gate keeps saying a hunt is RUNNING); on `done`
-  print `findings=N` from that answer, on `failed` the bare `bughunt ·
-  <mode> · failed` — the count belongs to `done` alone, as in the
-  enumerated lines; either way `CronDelete` this
-  job; if that `get_findings` answer's `next_step`
-  begins "this is the first read after done", say so — this job outlived
-  the hunt; after `<fail_cap>` consecutive poll failures (3 for a job at
-  `interval_s`, 12 for one every minute — substitute the number that matches
-  the cadence you created the job at) or once the current time is past `<retire_at>` (an
-  ISO timestamp you substitute at creation: the SUBMIT time + 180 minutes,
-  carried unchanged into every replacement job – the watch is then older than 180 minutes,
-  the longest hunt's 150 min budget (a scan) plus queue time – as an instant,
-  because a fresh cron turn has no creation time to count from, and anchored
-  at submit so a replacement job cannot restart the cap)
-  print `bughunt · <mode> · watch-retired` and only then
-  `CronDelete` it, then call `get_findings` once and create a fresh job if the
-  review is still running or waiting for files AND the retirement came from poll
-  failures, not from the age cap – a job nothing can satisfy is how a control gets
-  disarmed, and a job that vanishes in silence reads as 'still running'; either
-  way print what that `get_findings` answered — `still running` when it is, so
-  the user knows the watch ended on a live hunt".
-  One job per review: `CronDelete` any earlier bughunt job before creating
-  the next – never leave one pointing at an older review id. Only
-  as the last resort keep a `run_in_background` until-loop – and say so:
+  No background `Bash` in this harness? Fall back to `CronCreate` with the
+  wake prompt below, at the cadence the submit response names —
+  `next_poll_after_s` (an older server's submit answer carries only
+  `interval_s`: then curl `status_url` ONCE before creating the job, the field
+  is on that body). Under a minute — a payload submit, whose file request is
+  held open for minutes — means every minute, the tightest cron allows
+  (`* * * * *`); otherwise `interval_s`, off the :00/:30 marks (240 s →
+  `3-59/4 * * * *`). One job per review: `CronDelete` any earlier bughunt job
+  before creating the next – never leave one pointing at an older review id.
+  Only as the last resort keep a `run_in_background` until-loop – and say so:
   "monitoring armed without heartbeat – the cache will cool".
+
+**The wake prompt** (the cron fallback and Codex's heartbeat). Every decision
+a wake makes — the route, the age cap, the failure window, the line to print —
+is made by `watch-once.sh`, the helper next to this SKILL.md, in one read of
+`status_url`. Substitute its absolute path, `<review_id>`, `<status_url>`,
+`<start>` (the submit time as epoch seconds, `date +%s`) and `<mode>` (the
+submit answer's `hunt_mode`, or `deep`), and write the prompt as it stands,
+"the job" being the cron job or the heartbeat:
+"bughunt wake for `<review_id>`: run `sh <path>/watch-once.sh <review_id>
+'<status_url>' <start> <mode>` once. Print its first line as this wake's only
+status line, then do what its last line says and nothing else — `keep`: nothing
+more. `files`: call `get_findings(<review_id>)` and serve the files it asks
+for. `judge`: call `get_findings(<review_id>)`, verify every finding that has
+no verdict yet against the code and send the verdicts with `confirm_findings`;
+this review is not the result, the hunt goes on. `move <id> <url> <s>`: call
+`get_findings(<review_id>)` once, then replace this job with the same job on
+`<id>`, `<url>`, start `<s>` and mode fast; show the user the `live_url` of
+`get_findings(<id>)`; from now on `<id>` is the hunt and its attestation.
+`done` or `failed`: call `get_findings(<review_id>)`, report it as the result
+and delete this job. `resubmit`: delete this job, call
+`get_findings(<review_id>)` and tell the user what its `next_step` says.
+`read`: call `get_findings(<review_id>)` once, print its status as
+`bughunt · <mode> · <status>` (`poll-failed` if it fails too) and keep this
+job. `retire age` or `retire dead`: delete this job first, then call
+`get_findings(<review_id>)` once and tell the user what it answered (`still
+running` when it is); on `retire dead`, if the review is still running or
+waiting for files, create this job again with the same `<start>`. If the helper
+is missing or prints no such word: delete this job, call
+`get_findings(<review_id>)` once and tell the user the watch stopped and why."
+The `files`, `judge`, `done` and `failed` steps are §3a and §4 as usual. A
+`move` keeps the cadence: the service continues on its own clock.
 
 The same rule holds when you wait by hand instead of by heartbeat: a status you
 print is a status a tool just answered. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names).
