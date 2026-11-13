@@ -180,9 +180,16 @@ live = live if isinstance(live, str) and len(live) <= 512 and re.fullmatch(r"htt
 # A repository scan answers with a `scan` object: it hunted no commit, so a poll
 # or a confirm of it has nothing to promote and nothing to say about the gate.
 scan = "1" if isinstance(body.get("scan"), dict) else "0"
+# The service route: a step 1 names where the hunt goes on (`continued_by`) and
+# whether it is the answer (`route_state`); a child the route launched names the
+# step 1 it continues (`continues`). Ids only; anything else reads as absent.
+def word(k):
+    v = body.get(k)
+    return v if isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", v) else ""
 print(tool, done, one_line(d.get("cwd")), sent, one_line(ref), one_line(review),
       pre, failed, upload, one_line(d.get("session_id")), record, readable,
-      errored, one_line(body.get("gate_note")), one_line(live), scan, sep="\n")
+      errored, one_line(body.get("gate_note")), one_line(live), scan,
+      word("route_state"), word("continued_by"), word("continues"), sep="\n")
 ' 2>/dev/null) || exit 0
 
 TOOL=$(printf '%s' "$FIELDS" | sed -n 1p)
@@ -208,6 +215,9 @@ ERRORED=$(printf '%s' "$FIELDS" | sed -n 13p)
 GATE_NOTE=$(printf '%s' "$FIELDS" | sed -n 14p)
 LIVE_URL=$(printf '%s' "$FIELDS" | sed -n 15p)
 SCAN=$(printf '%s' "$FIELDS" | sed -n 16p)
+ROUTE_STATE=$(printf '%s' "$FIELDS" | sed -n 17p)
+CONT_BY=$(printf '%s' "$FIELDS" | sed -n 18p)
+CONTINUES=$(printf '%s' "$FIELDS" | sed -n 19p)
 
 [ -n "${TOOL:-}" ] || exit 0
 [ -n "${CWD:-}" ] && [ -d "$CWD" ] && cd "$CWD" 2>/dev/null
@@ -276,9 +286,13 @@ REVIEW=$(printf '%s' "$REVIEW" | tr -c 'A-Za-z0-9_.-' '_' | sed 's/^[.-]*//')
 # repeated for the whole TTL over hunts that had been read (owner report,
 # 2026-10-22). The server mints the id and the record holds what was sent, so
 # the record names its repository by where it lives; the cwd is not needed.
+# A route child has no record of its own until it inherits step 1's: look for
+# the step 1 it names too (`continues`), so the hand-on below finds its repository.
 if [ "${PRE:-0}" != 1 ] && [ "$TOOL" != submit_review ] && [ -n "$REVIEW" ] &&
-   [ ! -e "$REPO_HUNTS.pending/$REVIEW" ] && [ ! -e "$REPO_HUNTS.promoted/$REVIEW" ]; then
-  for p in "$HOME"/.ohmybug/hunts/*.pending/"$REVIEW" "$HOME"/.ohmybug/hunts/*.promoted/"$REVIEW"; do
+   [ ! -e "$REPO_HUNTS.pending/$REVIEW" ] && [ ! -e "$REPO_HUNTS.promoted/$REVIEW" ] &&
+   { [ -z "${CONTINUES:-}" ] || [ ! -e "$REPO_HUNTS.pending/$CONTINUES" ]; }; then
+  for p in "$HOME"/.ohmybug/hunts/*.pending/"$REVIEW" "$HOME"/.ohmybug/hunts/*.promoted/"$REVIEW" \
+           ${CONTINUES:+"$HOME"/.ohmybug/hunts/*.pending/"$CONTINUES"}; do
     [ -e "$p" ] || continue
     REPO_HUNTS=${p%/*}; REPO_HUNTS=${REPO_HUNTS%.*}
     # The single-slot marker is keyed on the cwd's git dir: not this repository's.
@@ -300,6 +314,26 @@ if [ -z "$REPO_HUNTS" ]; then
 fi
 PENDING_DIR="$REPO_HUNTS.pending"
 PENDING="$PENDING_DIR/${REVIEW:-unknown}"
+CONT_BY=$(printf '%s' "${CONT_BY:-}" | tr -c 'A-Za-z0-9_.-' '_' | sed 's/^[.-]*//')
+CONTINUES=$(printf '%s' "${CONTINUES:-}" | tr -c 'A-Za-z0-9_.-' '_' | sed 's/^[.-]*//')
+# step 1's record goes on to the hunt that continues it, never promoted
+# on the way. The keys are the commit's, so they are the child's too. A child
+# with its own record (a hunt of the commit the client started) gets them
+# merged in; one already promoted here has them on disk, and step 1's are
+# dropped. Step 1 gets the tombstone either way: it is over in this checkout.
+# Returns 1 when step 1 had no record here (nothing was handed on).
+hand_on() { # step1 child
+  local src="$PENDING_DIR/$1" dst="$PENDING_DIR/$2"
+  [ -s "$src" ] || return 1
+  if [ ! -e "$REPO_HUNTS.promoted/$2" ]; then
+    mkdir -p "$PENDING_DIR" 2>/dev/null || return 1
+    # In order, first seen kept: the promote path writes the first line to the legacy marker.
+    { cat "$dst" 2>/dev/null; cat "$src"; } | awk '!seen[$0]++' > "$dst.tmp" 2>/dev/null && mv "$dst.tmp" "$dst" || return 1
+  fi
+  rm -f "$src"
+  mkdir -p "$REPO_HUNTS.promoted" 2>/dev/null && : > "$REPO_HUNTS.promoted/$1" 2>/dev/null
+  return 0
+}
 # The tombstone a promotion leaves lives in its OWN directory, not beside the
 # record it replaced. Sessions keep the hooks they started with (the plugin
 # cache is one directory per version), and a Stop nudge from before the
@@ -469,6 +503,27 @@ case "$TOOL" in
     # submit (scan_repo is not submit_review), so nothing is promoted, and the
     # "no rev-id record" paragraph below would be noise on every poll of it.
     [ "${SCAN:-0}" = '1' ] && exit 0
+    # The service route. A routed step 1 is a hunt of record that may not
+    # be the answer: `review_of_record` describes it alone, so it decides nothing
+    # here. Only `final` lets the rules below run on it. Until then its record
+    # stays, whatever its status says (a failed step 1 continues too). On
+    # `continued` the record moves to the hunt that goes on, unpromoted: the
+    # merge gate takes the last hunt of the chain, never step 1 alone.
+    case "${ROUTE_STATE:-}" in
+      snap_running|pending|awaiting_verdicts) exit 0 ;;
+      continued)
+        if [ -n "${CONT_BY:-}" ] && [ "$CONT_BY" != "${REVIEW:-}" ]; then
+          if hand_on "$REVIEW" "$CONT_BY"; then
+            say "ohmybug: review $REVIEW continued as $CONT_BY; the merge gate now waits for $CONT_BY, the answer from here on. Follow it (its own status page, /r/$CONT_BY/status) and judge its findings."
+          fi
+        fi
+        exit 0 ;;
+    esac
+    # A route child (`continues`) inherits step 1's record the first time it is
+    # read, whichever review the agent read first.
+    if [ -n "${CONTINUES:-}" ] && [ "$CONTINUES" != "${REVIEW:-}" ] && [ ! -s "$PENDING" ] && [ ! -e "$TOMB" ]; then
+      hand_on "$CONTINUES" "$REVIEW" || true
+    fi
     # get_findings and wait_review are polled while the review is still running
     # and answer with the same terminal body; confirm_findings only exists after
     # a done review, so it has no status to wait for — but it does have an

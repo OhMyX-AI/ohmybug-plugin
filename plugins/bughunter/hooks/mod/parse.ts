@@ -75,8 +75,19 @@ export function findingsOf(body: Body): Finding[] {
   })
 }
 
-/** The status a poll of the status URL reports, in the mod's own words. */
+/** A routed step 1's place in its chain (the service route): `open` while it is not the answer yet, whatever its
+ *  status says; `next` when the hunt goes on as another review. No route, or `final`: an ordinary hunt. */
+export function routeOf(body: Body): { open: boolean; next?: string } {
+  const rs = str(body.route_state)
+  if (!rs || rs === 'final' || body.final === true) return { open: false }
+  const next = rs === 'continued' ? str(body.continued_by) : undefined
+  return next && /^[A-Za-z0-9_.-]{1,128}$/.test(next) ? { open: true, next } : { open: true }
+}
+
+/** The status a poll of the status URL reports, in the mod's own words. A routed step 1 that is not the answer yet
+ *  stays running: its `done` is not the end of the hunt. */
 export function pollState(body: Body): 'running' | 'needs_files' | 'done' | 'failed' | undefined {
+  if (routeOf(body).open) return 'running'
   const s = str(body.status)
   if (s === 'done' || s === 'failed') return s
   // Either flag means reviewers wait on files; the status word stays 'running'.

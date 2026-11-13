@@ -142,7 +142,8 @@ while IFS= read -r rec; do
   wst='' wiv=''
   { read -r wst wiv < "$WATCH/$rec"; } 2>/dev/null
   case $wiv in ''|*[!0-9]*) wiv=240 ;; esac
-  case $wst in ''|done|failed|needs-files|rearm) alive=0 ;; *) alive=1 ;; esac
+  # verdicts / continued: a routed hunt's loop exited for the agent to act.
+  case $wst in ''|done|failed|needs-files|verdicts|continued|rearm) alive=0 ;; *) alive=1 ;; esac
   if [ "$alive" = 1 ] &&
      [ -n "$(find "$WATCH/$rec" -maxdepth 0 -mmin "-$(( (wiv + 119) / 60 ))" 2>/dev/null)" ]; then
     ARMED=$((ARMED + 1))
@@ -198,7 +199,8 @@ echo "ohmybug: $WHOSE: $IDS — do not end the turn waiting" \
      "On Claude Code the skill's loop writes ~/.ohmybug/watch/<review_id> on every poll and" \
      "this hook is silent while that file is fresh — so a nag beside a loop" \
      "you armed there means it is dead OR it exited on a state to read now (done, failed," \
-     "needs-files) OR on a heartbeat line nobody re-armed (rearm): read first; re-arm" \
+     "needs-files, verdicts, or continued: a routed hunt that waits for your verdicts or goes on" \
+     "as another review) OR on a heartbeat line nobody re-armed (rearm): read first; re-arm" \
      "only if the review is still running or waiting" \
      "for files. On Codex the" \
      "heartbeat leaves no file here, so" \

@@ -3014,6 +3014,62 @@ known_pin '^### 6b\\.' '^### 7\\.' 'step 6b' <<'KNOWN'
 never offer a story about a `known` one.
 KNOWN
 
+
+# --- the service route -------------------------------------------------
+# A routed step 1 is a hunt of record that may not be the answer: the gate takes
+# the last hunt of the chain. These rows walk each route_state through the stamp.
+post_r() { # tool, status, review id, extra body fields as JSON
+  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) python3 -c 'import json,os,sys
+tool, status, rid, extra, cwd = sys.argv[1:6]
+body = {"review_id": rid, "review_of_record": True}
+if status: body["status"] = status
+body.update(json.loads(extra))
+inp = {"diff": os.environ.get("OMB_DIFF", "")} if tool == "submit_review" else {"review_id": rid}
+print(json.dumps({"tool_name": "mcp__plugin_bughunter_ohmybug__" + tool, "tool_input": inp,
+  "tool_response": {"content": [{"type": "text", "text": json.dumps(body)}]}, "cwd": cwd}))' "$1" "$2" "$3" "${4:-"{}"}" "$PWD" \
+  | bash "$G/stamp-hunt.sh"
+}
+pend() { [ -s "$(ohmybug_hunt_dir).pending/$1" ]; }
+r() { # label, condition (eval'd)
+  if ! eval "$2"; then printf 'FAIL route %s\n' "$1"; fails=$((fails + 1)); fi
+}
+RID=$(ohmybug_diff_id)
+reset_state
+post_r submit_review running s1 >/dev/null
+post_r get_findings done s1 '{"route_state":"pending","final":false}' >/dev/null
+s "a done step 1 with its route pending promotes nothing" ""
+r "...and keeps its record (the gate says running)" "pend s1"
+post_r confirm_findings '' s1 '{"route_state":"awaiting_verdicts","final":false,"confirmed":0}' >/dev/null
+s "a confirm while verdicts are awaited promotes nothing" ""
+post_r get_findings failed s1 '{"route_state":"pending","final":false}' >/dev/null
+r "a failed step 1 keeps its record: the route continues a failed snap" "pend s1"
+out=$(post_r get_findings done s1 '{"route_state":"continued","continued_by":"c1","final":false}' | ctx)
+s "continued promotes nothing for step 1" ""
+r "...hands the record to the child" "pend c1 && ! pend s1"
+r "...and names the child to the agent" 'case "$out" in *"continued as c1"*) true;; *) false;; esac'
+post_r get_findings done c1 >/dev/null
+s "the child, done and of record, promotes the commit" "$RID"
+reset_state
+post_r submit_review running s2 >/dev/null
+post_r get_findings done c2 '{"continues":"s2"}' >/dev/null
+s "a child read first inherits step 1 by its back-pointer" "$RID"
+r "...and step 1 holds no record any more" "! pend s2"
+reset_state
+post_r submit_review running s3 >/dev/null
+post_r get_findings done s3 '{"route_state":"final","final":true,"continuation_refused":"waited_out"}' >/dev/null
+s "a final step 1 is the answer and promotes" "$RID"
+reset_state
+mkdir -p "$(ohmybug_hunt_dir).promoted" && : > "$(ohmybug_hunt_dir).promoted/c4"
+post_r submit_review running s4 >/dev/null
+post_r get_findings done s4 '{"route_state":"continued","continued_by":"c4","final":false}' >/dev/null
+r "a child already promoted here takes nothing; step 1's record goes" "! pend s4 && ! pend c4"
+reset_state
+post_r submit_review running s5 >/dev/null
+out=$(post_r get_findings done s5 '{"route_state":"pending","final":false,"review_of_record":false}' | ctx)
+r "a not-of-record step 1 with its route pending keeps its record" "pend s5"
+r "...and never tells the agent to submit again" 'case "$out" in *"Submit it again"*) false;; *) true;; esac'
+reset_state
+
 cleanup_scratch
 if [ "$(git status --porcelain | grep -v "$SCRATCH" || true)" != "$TREE_BEFORE" ]; then
   printf 'FAIL the suite changed the working tree it was run in:\n%s\n' "$(git status --porcelain)"

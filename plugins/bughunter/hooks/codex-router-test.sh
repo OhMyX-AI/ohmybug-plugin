@@ -165,7 +165,8 @@ done
 # exited on, not the last `running`.
 assert '''  printf '%s %s\\n' "$st" "$every" > "$watch" # the Stop hook reads this: fresh + running = armed
   case "$st" in
-    done|failed|needs-files) rm -f "$keep"; printf 'bughunt · %s · %s\\n' "$mode" "$st"; break ;;
+    done|failed|needs-files|verdicts) rm -f "$keep"; printf 'bughunt · %s · %s\\n' "$mode" "$st"; break ;;
+    continued) rm -f "$keep"; printf 'bughunt · %s · continued %s\\n' "$mode" "$next"; break ;;
   esac
 ''' in monitor_code, "terminal branch lost its shape"
 assert '&& st=needs-files\n' in monitor_code
@@ -239,6 +240,31 @@ for body, want in (('{"status":"done"}', "done"), ('{"status":"failed"}', "faile
         assert open(f"{d}/seen").read() == "yes\n", "the watch file must exist before the first poll runs"
         assert not os.path.exists(f"{d}/.ohmybug/watch/rev_test.loop"), "a terminal run leaves no state for the next arm"
     assert r.returncode == 0 and r.stdout == f"bughunt · fast · {want}\n", (want, r.returncode, r.stdout, r.stderr)
+# The service route: a routed step 1 says `done` long before the hunt is
+# over. A fake server walks snap_running -> pending (status done) -> the verdicts
+# wait; the loop must poll through `pending` and exit on `verdicts`. Then
+# `continued` exits naming the child on its own line (not in the watch file's
+# cadence field), and `final` is an ordinary `done`.
+def walk(d, bodies):
+    env = shims(d, '')
+    for k, b in enumerate(bodies, 1): open(f"{d}/b{k}", "w").write(b)
+    open(f"{d}/curl", "w").write(f'#!/bin/sh\nn=$(cat "{d}/polls" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "{d}/polls"\n'
+        f'[ "$n" -gt {len(bodies)} ] && n={len(bodies)}\ncat "{d}/b$n"\n' + CODE200); os.chmod(f"{d}/curl", 0o755)
+    return env
+R = lambda st, rs, extra="": '{"status":"%s","route_state":"%s","final":%s%s}' % (st, rs, "true" if rs == "final" else "false", extra)
+with tempfile.TemporaryDirectory() as d:
+    r = drive(walk(d, [R("running", "snap_running"), R("done", "pending"), R("done", "pending"), R("done", "awaiting_verdicts")]))
+    assert r.stdout.splitlines()[-1] == "bughunt · fast · verdicts", r.stdout
+    assert int(open(f"{d}/polls").read()) == 4, "pending is polled through, never an exit"
+    assert open(f"{d}/.ohmybug/watch/rev_test").read() == "verdicts 240\n"
+with tempfile.TemporaryDirectory() as d:
+    r = drive(walk(d, [R("done", "pending"), R("done", "continued", ',"continued_by":"rev_child1"')]))
+    assert r.stdout.splitlines()[-1] == "bughunt · fast · continued rev_child1", r.stdout
+    assert open(f"{d}/.ohmybug/watch/rev_test").read() == "continued 240\n"
+    assert not os.path.exists(f"{d}/.ohmybug/watch/rev_test.loop")
+with tempfile.TemporaryDirectory() as d:
+    r = drive(walk(d, [R("done", "final", ',"continuation_refused":"waited_out"')]))
+    assert r.stdout == "bughunt · fast · done\n", r.stdout
 # One heartbeat run, alone: it exits on its line, leaves `rearm` in the watch
 # file (the Stop hook reads it as a watch that ended, so an agent that does not
 # re-arm is nagged instead of silently unwatched) and hands the next run its

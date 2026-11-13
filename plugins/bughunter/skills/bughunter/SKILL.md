@@ -725,9 +725,16 @@ while :; do
   [ -n "$n" ] && [ "$n" -gt 0 ] && every=$n; back=$every
   n=$(num heartbeat_s); [ -n "$n" ] && [ "$n" -gt 0 ] && beat=$n
   printf '%s' "$s" | grep -qE '"awaiting_client_files"[[:space:]]*:[[:space:]]*true|"files_requested"[[:space:]]*:[[:space:]]*true' && st=needs-files
+  rs=$(printf '%s' "$s" | sed -n 's/.*"route_state"[[:space:]]*:[[:space:]]*"\([a-z_]*\)".*/\1/p' | head -n 1) # a routed hunt: done is not the end until final
+  case "$rs" in
+    snap_running|pending) st=running ;;
+    awaiting_verdicts) st=verdicts ;;
+    continued) st=continued; next=$(printf '%s' "$s" | sed -n 's/.*"continued_by"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_.-]*\)".*/\1/p' | head -n 1) ;;
+  esac
   printf '%s %s\n' "$st" "$every" > "$watch" # the Stop hook reads this: fresh + running = armed
   case "$st" in
-    done|failed|needs-files) rm -f "$keep"; printf 'bughunt · %s · %s\n' "$mode" "$st"; break ;;
+    done|failed|needs-files|verdicts) rm -f "$keep"; printf 'bughunt · %s · %s\n' "$mode" "$st"; break ;;
+    continued) rm -f "$keep"; printf 'bughunt · %s · continued %s\n' "$mode" "$next"; break ;;
   esac
   now=$(date +%s)
   if [ "$st" != "$prev" ] || [ $((now - last)) -ge "$beat" ]; then
@@ -756,7 +763,31 @@ line is a heartbeat: answer it with that one line, re-arm the same command, and
 do nothing else – no `get_findings`, no reading files. A heartbeat you do not
 re-arm is a hunt nobody watches: the loop leaves `rearm` in the watch file, and
 the Stop hook reads that word as a watch that ended.
-`needs-files` → serve `provide_files` first and re-arm the loop. `done` /
+`needs-files` → serve `provide_files` first and re-arm the loop.
+
+**A routed hunt (a `route_state` in the answer) is a chain of at most two
+reviews, and `done` on the first one is not the end.** The service may run a
+cheaper step 1 first and then go on with a fast hunt of the same commit. The
+loop keeps polling while step 1 is running or `pending`. It prints:
+- `verdicts` → step 1 is done and waits for your verdicts: call
+  `get_findings(review_id)`, judge every finding with `confirm_findings`
+  exactly as in §4, then re-arm the SAME command – the service decides after
+  the verdicts. Do not report step 1 as the result, offer a deep hunt or tell
+  the user the change is clean: the hunt is not over.
+- `continued <id>` → the hunt goes on as review `<id>`, and that review is the
+  answer from now on, with its own findings, verdicts, billing and merge
+  record. First call `get_findings(review_id)` on step 1 once (the plugin's
+  hook moves the merge record to `<id>` on that answer), then arm a NEW loop on
+  `<id>`: its status page is step 1's `status_url` with step 1's id replaced by
+  `<id>` (`…/r/<id>/status`), and its `watch_poll_s` and `heartbeat_s` come
+  from `get_findings(<id>)`. Show the user `<id>`'s `live_url` from that answer.
+  Report step 1 in one line at most; the result is `<id>`'s.
+- `done` with `route_state: final` → step 1 is the answer: report it as any
+  hunt. When `get_findings` carries `continuation_refused`, add one plain line
+  saying no fast hunt followed and why (the code, in words).
+A review with no `route_state` is an ordinary hunt, as below.
+
+`done` /
 `failed` → call `get_findings(review_id)`; the loop has exited, so there is
 nothing to stop. `watch-retired` → no poll got the review back for 15 minutes, or the
 watch is 3 h old: call `get_findings` once; if the review is still running or

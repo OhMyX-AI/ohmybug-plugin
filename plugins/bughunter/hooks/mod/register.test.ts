@@ -123,6 +123,29 @@ for (const [mode, hunt_mode, label] of [['fast', 'lite', 'lite'], ['fast', 'snap
   })
 }
 
+// The service route: a routed step 1 says `done` before the hunt is over. The row stays running through `pending`
+// (no done toast), then follows `continued_by` to the child's own status page, one hunt to the person, and the
+// child's `done` is the one announced.
+test('a routed step 1 stays running until it continues, then the row follows the child to its end', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  const seen = world(on, [
+    JSON.stringify({ status: 'done', route_state: 'pending', final: false, next_poll_after_s: 60 }),
+    JSON.stringify({ status: 'done', route_state: 'continued', continued_by: 'rev_c', final: false, next_poll_after_s: 60 }),
+    JSON.stringify({ status: 'done', findings: 1, next_poll_after_s: 60 }),
+  ])
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT, meta: { repo: 'o/r', ref: 'abc', base_branch: 'main' } } as never)
+  await clock.advance(75_000)
+  expect(seen.toasts.join('\n')).not.toContain('is done')
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+  expect(seen.toasts.join('\n')).not.toContain('rev_1 is done')
+  expect(seen.toasts.join('\n')).toContain('rev_c is done')
+})
+
 test('every status poll the mod makes names its waiter: w=mod, appended after any query the URL already has', async ($, on) => {
   const clock = mock.clock(on)
   mock.store(on)
