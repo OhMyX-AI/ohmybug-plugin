@@ -1,6 +1,7 @@
 {
   "ohmybug": {
     "type": "http",
-    "url": "https://mcp.ohmybug.ai/mcp"
+    "url": "https://mcp.ohmybug.ai/mcp",
+    "http_headers": { "X-OhMyBug-Follows": "continued_by" }
   }
 }

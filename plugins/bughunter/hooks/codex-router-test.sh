@@ -912,7 +912,10 @@ assert plugin["mcpServers"] == "./.codex-mcp.json"
 # no hunt recorder and no stop nudge. Order matters to nobody; presence does.
 assert sorted(plugin["hooks"]) == sorted(["./hooks/hooks.json", "./hooks/claude-codex-hooks.json"]), plugin["hooks"]
 codex_mcp = json.load(open(mcp, encoding="utf-8"))
-assert codex_mcp == {"ohmybug": {"type": "http", "url": "https://mcp.ohmybug.ai/mcp"}}
+# The Codex router and skill text follow a routed hunt's continued_by, so Codex opts into the route the way
+# mcp-headers.sh does for Claude Code. A static header: Codex keys the saved sign-in on name and url, not headers.
+assert codex_mcp == {"ohmybug": {"type": "http", "url": "https://mcp.ohmybug.ai/mcp",
+                                 "http_headers": {"X-OhMyBug-Follows": "continued_by"}}}, codex_mcp
 market = json.load(open(marketplace, encoding="utf-8"))
 entry = market["plugins"][0]
 assert entry["source"]["path"] == "./plugins/bughunter"
