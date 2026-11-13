@@ -49,13 +49,11 @@ session_text = session["hookSpecificOutput"]["additionalContext"]
 # timed_out:true — and that answer is the wake's reading, not a reason to loop:
 # a wake that loops holds the thread when the next one fires, measured as a
 # client polling once a minute against a four-minute contract.
-for phrase in ("submit_review", "automation_update", "destination=thread", "heartbeat at the response's monitor.interval_s", "never leaving one on an older review id", "the bughunter skill's wake prompt", "each wake runs the watch helper once", "prints its first line and does what its last word says", "review_report", "get_attestation", "never run fast and deep in parallel"):
+for phrase in ("submit_review", "automation_update", "destination=thread", "heartbeat at the response's monitor.interval_s", "never leaving one on an older review id", "the bughunter skill's wake prompt", "never curl (the default sandbox gives shell commands no network)", "ONE get_findings read", "review_report", "get_attestation", "never run fast and deep in parallel"):
     assert phrase in session_text, phrase
-# The helper is named by its installed path, resolved when the hook runs: a
-# wake in a fresh context has no skill directory to look it up from.
-import re as _re
-helper = _re.search(r"sh '([^']+/watch-once\.sh)' <review_id> '<status_url>' <start> <mode>", session_text)
-assert helper and os.path.isfile(helper.group(1)), session_text
+# Codex's default sandbox refused both the network and every write to a shell
+# command (measured under codex exec): a wake reads through MCP, never a shell curl.
+assert "watch-once" not in session_text
 assert "local code-review" in session_text
 # The proof and its hand-off are two steps, and a Codex session has no hook
 # that writes the local record: a clean hunt met a gate that said "not
@@ -66,7 +64,7 @@ for phrase in ("get_attestation is the proof", "./scripts/ticket.sh attest <revi
 assert "set targetThreadId" not in session_text
 # The service route: a routed hunt's done is not the end. The helper's words
 # carry it; the router says only that they do, and where the attestation moves.
-for phrase in ("the helper, not the prompt, decides the route, the age cap, the failure window and the line", "its first review's done is not the result", "after move the review it names is the hunt and its attestation"):
+for phrase in ("the service, not the prompt, decides the route", "first done is not the result unless watch says done", "after move the review it names is the hunt and its attestation", "judge, move, resubmit, done; anything else keeps the heartbeat"):
     assert phrase in session_text, phrase
 
 skill = open(str(Path(router).parent.parent / "skills/bughunter/SKILL.md"), encoding="utf-8").read()
@@ -548,45 +546,55 @@ assert "fourteen minutes" not in skill
 # The cron fallback follows the body's cadence (found in review): a payload
 # submit's next_poll_after_s is under a minute and its file request is held open
 # for minutes, so the job runs every minute there and at interval_s otherwise.
-for phrase in ("the submit response names —\n  `next_poll_after_s`", "an older server's submit answer carries only\n  `interval_s`: then curl `status_url` ONCE before creating the job", "Under a minute", "every minute, the tightest cron allows\n  (`* * * * *`)", "otherwise `interval_s`"):
+for phrase in ("the submit response names —\n  `next_poll_after_s`", "an older server's submit answer carries only\n  `interval_s`: use that", "Under a minute", "every minute, the tightest cron allows\n  (`* * * * *`)", "otherwise `interval_s`"):
     assert phrase in claude_bullet, phrase
-# The wake prompt: ONE text for the cron fallback and Codex's heartbeat, and in it
-# no state machine. The helper reads, decides and names the line; the prompt maps
-# each word the helper prints to one action. Every word the helper can print has
-# an action here, and nothing else is a decision of the wake.
-wake = skill.split("**The wake prompt** (the cron fallback and Codex's heartbeat).", 1)[1].split("\n\nThe same rule holds when you wait by hand", 1)[0]
-helper_src = open(str(Path(router).parent.parent / "skills/bughunter/watch-once.sh"), encoding="utf-8").read()
-said = set(re.findall(r"\bsay (?:\"[^\"]*\"|[^\s\"]+) [\"']?([a-z]+)", helper_src))
-assert said == {"keep", "files", "judge", "move", "done", "failed", "resubmit", "read", "retire"}, said
-for word in ("`keep`:", "`files`:", "`judge`:", "`move <id> <url> <s>`:", "`done` or `failed`:", "`resubmit`:", "`read`:", "`retire age` or `retire dead`:"):
-    assert word in wake, word
-assert "run `sh <path>/watch-once.sh <review_id>\n'<status_url>' <start> <mode>` once" in wake
-assert "Print its first line as this wake's only\nstatus line" in wake
-assert "delete this job first, then call\n`get_findings(<review_id>)` once" in wake
-assert "create this job again with the same `<start>`" in wake
-assert "If the helper\nis missing or prints no such word: delete this job" in wake
-for gone in ("retire_at", "fail_cap", "route_state", "first read after done", "consecutive"):
+# The wake prompt: ONE text for Codex's heartbeat and the cron fallback. It
+# reads with get_findings (Codex's default sandbox gave a shell curl no network
+# and no writes, measured under codex exec) and maps the service's watch.do to
+# one action each; the route is decided on the server, not in this text.
+wake = skill.split("**The wake prompt** (Codex's heartbeat and the cron fallback).", 1)[1].split("\n\nThe same rule holds when you wait by hand", 1)[0]
+assert "never `curl`" in wake and "watch-once" not in skill
+for phrase in (
+    # The age cap is a clock read the sandbox allows, against an instant fixed at submit.
+    "1. Run `date -u\n+%Y-%m-%dT%H:%M:%SZ`; if it sorts after `<retire_at>`",
+    "delete this job, call `get_findings(<review_id>)` once, tell\nthe user what it answered (`still running` when it is; when it carries a\n`watch.do` other than `done`, that this review is not the result) and stop",
+    # A routed step 1 reads `done` while the route is undecided: its line says running.
+    "`running` while\nit carries a `watch.do` other than `done`",
+    # One read; a failed one is printed as such and never retires the job.
+    "2. Call\n`get_findings(<review_id>)` once; on no answer or an error print `bughunt ·\n<mode> · poll-failed`, keep this job and stop",
+    # A file request comes before the route: it is held open for minutes only.
+    "act on the\nfirst rule that applies: a file request (`needs_files`) – serve the files, keep\nthis job",
+    "`watch.do` `judge` – verify the findings `watch.finding_ids` lists",
+    "because this review is not the result",
+    "`watch.do` `move` – replace this job,\nat a cadence of `watch.interval_s` seconds, with this same prompt for `watch.review_id`, mode `fast`, `<retire_at>` =\n`watch.retire_at` cut to whole seconds",
+    "that review is the hunt and holds its attestation",
+    "`watch.do` `resubmit` – delete this job",
+    # A non-routed hunt has no watch: its status word ends it.
+    "`watch.do` `done`, or no `watch` and status `done` or `failed` – report it\nas the result and delete this job; anything else – keep this job",
+    # The payload carve-out lives inside the prompt, with the number it is bounded by.
+    # ...never on a finished answer: a hold on a done row returns at once and spins.
+    "4. Payload:\n`<payload>`. If `yes`, step 3 kept this job and that answer's status is not\n`done` or `failed`, call `wait_review(<review_id>)` back to back",
+    "stop at the first answer whose status is `done`,\n`failed` or `needs_files`",
+    "later than `<heartbeat_s>` seconds after this\nwake's start",
+):
+    assert phrase in wake, phrase
+for sub in ("`<review_id>`", "`<mode>`", "`<retire_at>`", "`<heartbeat_s>`", "`<payload>`"):
+    assert "Substitute" in wake and sub in wake.split("Write:", 1)[0], sub
+for gone in ("fail_cap", "route_state", "first read after done", "consecutive", "curl `<status_url>`"):
     assert gone not in wake, gone
 codex_bullet = skill.split("- **Codex:**", 1)[1].split("- **Claude Code:**", 1)[0]
-assert "with the wake prompt below" in codex_bullet and "**The automation is the cadence; a wake is one run of the\n  helper.**" in codex_bullet
-for gone in ("wake_rule", "retire_at", "route_state", "180 minutes"):
+assert "with the wake prompt below" in codex_bullet and "destination=thread" in codex_bullet
+for gone in ("wake_rule", "route_state", "first read after done", "retire_at"):
     assert gone not in codex_bullet, gone
 # ...and the hand-wait path prints on the same terms: it is the path with no
 # heartbeat, i.e. the one where nothing else would catch a remembered status.
 assert "a status you\nprint is a status a tool just answered" in skill
-# The one carve-out the helper does not cover (found in review): a payload
-# submit is the one path where the server cannot serve the reviewers' file
-# requests itself, the request is held open for minutes, and one read per
-# interval_s misses it — there the wake's back-to-back wait_review IS the
-# watcher, bounded so it ends before the next wake fires.
-for phrase in ("a PAYLOAD submit (§2, rung 3) while a file\n  request can still arrive", "call `wait_review` back to back", "start another hold\n  only if it, its round trip, and one more round trip for the handover would end\n  inside `heartbeat_s` from this wake's start", "A repo or deep submit never needs\n  this"):
-    assert phrase in codex_bullet, phrase
-# The Monitor surface reads on a failed poll like the helper's `read` (found in
+# The Monitor surface reads on a failed poll like the wake prompt (found in
 # review): a fresh poll-failed file keeps the Stop hook quiet while the loop fails,
 # so without this read a review sat done and unread behind that silence.
 assert "on `poll-failed` → one\n  `get_findings`, print what it answered" in claude_bullet
 after_loop = skill.split("Every printed line wakes you.", 1)[1].split("The loop above keeps", 1)[0]
-assert "**A `poll-failed`\nwake is a wake with no answer, and the wake rule applies: call `get_findings`\nonce" in after_loop
+assert "**A `poll-failed`\nwake is a wake with no answer, and a status you print is one a tool just answered: call `get_findings`\nonce" in after_loop
 assert "this surface must not be the one that only prints" in after_loop
 for text in (skill, session_text):
     assert "timeout_s=45" not in text and "up to 3 times" not in text and "3 x 60" not in text, "the wake loop is back"
@@ -619,7 +627,7 @@ assert "**the link stops working 6 hours after the result**" in skill, "the skil
 # "first read after done" overrun) are the helper's now: a prompt rule did not
 # hold — a heartbeat carrying wake_rule word for word answered `running` from
 # memory for forty minutes after done — so no surface restates them as prose.
-for text in (codex_bullet, router_text, wake):
+for text in (router_text,):
     for gone in ("retire_at", "first read after done", "consecutive wakes"):
         assert gone not in text, gone
 for text in (skill, router_text):
@@ -735,7 +743,7 @@ for phrase in ("goes as submit_review's top-level mode; with none named send no 
                "(mode_unavailable, mode_needs_repo, mode_too_large, mode_with_deep)", "never a silent switch", "Never send mode with deep",
                "The heartbeat's <mode> is the submit answer's hunt_mode", "with none named send no mode: on a pushed commit the service may start with a first step"):
     assert phrase in router_text, phrase
-assert "and the hunt is fast" not in router_text and "follow the routed hunt rules" in router_text and "get the fast hunt" in router_text
+assert "and the hunt is fast" not in router_text and "the wake follows its watch, as above" in router_text and "get the fast hunt" in router_text
 assert "Before the submit of a named mode say the mode and its price from get_balance modes in one line." in router_text and "none named say the fast hunt and its price" not in router_text
 assert "uncommitted work, an uploaded diff and a change the first step cannot take" in router_text and "on a pushed commit the service may start with a first step (snap, or lite on accounts set to lite) and go on with a hunt in mode fast" in router_text
 assert "**A review starts with stage one** (`fast`, a mode the user named, or a routed first step)" in skill

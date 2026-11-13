@@ -69,21 +69,9 @@ This is a required client action, not a reminder to do later:
 
 - **Codex:** immediately read the submit response's `monitor` object, then call
   `automation_update` with `destination=thread` (not `targetThreadId`; destination
-  binds the current thread) at `monitor.interval_s`, with the wake prompt below:
-  a wake fires in a fresh context holding nothing but that prompt, so the prompt
-  carries everything the wake needs. Update an existing heartbeat for the same
-  review instead of creating a duplicate, and never leave one pointing at an
-  older review. **The automation is the cadence; a wake is one run of the
-  helper.** The one exception is a PAYLOAD submit (§2, rung 3) while a file
-  request can still arrive: the server cannot read the repo to serve the
-  reviewers' file requests itself and holds each request open for minutes only,
-  so after a `keep` in such a wake call `wait_review` back to back (each answer
-  returns the moment `needs_files` shows: serve the files) and stop on `done`,
-  `failed` or `needs_files` (a `done` or `failed` there is handled as the
-  helper's word of that name), or before the next wake is due: start another hold
-  only if it, its round trip, and one more round trip for the handover would end
-  inside `heartbeat_s` from this wake's start. A repo or deep submit never needs
-  this.
+  binds the current thread) at `monitor.interval_s`, with the wake prompt below.
+  Update an existing heartbeat for the same review instead of creating a
+  duplicate, and never leave one pointing at an older review.
 - **Claude Code:** immediately start the monitor described below with the
   **`Bash` tool, `run_in_background: true`** – not the `Monitor` tool, whose
   calls one client model breaks with an empty `ws` argument and then repeats
@@ -118,45 +106,50 @@ This is a required client action, not a reminder to do later:
   No background `Bash` in this harness? Fall back to `CronCreate` with the
   wake prompt below, at the cadence the submit response names —
   `next_poll_after_s` (an older server's submit answer carries only
-  `interval_s`: then curl `status_url` ONCE before creating the job, the field
-  is on that body). Under a minute — a payload submit, whose file request is
-  held open for minutes — means every minute, the tightest cron allows
+  `interval_s`: use that). Under a minute — a payload submit, whose file request
+  is held open for minutes — means every minute, the tightest cron allows
   (`* * * * *`); otherwise `interval_s`, off the :00/:30 marks (240 s →
   `3-59/4 * * * *`). One job per review: `CronDelete` any earlier bughunt job
   before creating the next – never leave one pointing at an older review id.
   Only as the last resort keep a `run_in_background` until-loop – and say so:
   "monitoring armed without heartbeat – the cache will cool".
 
-**The wake prompt** (the cron fallback and Codex's heartbeat). Every decision
-a wake makes — the route, the age cap, the failure window, the line to print —
-is made by `watch-once.sh`, the helper next to this SKILL.md, in one read of
-`status_url`. Substitute its absolute path, `<review_id>`, `<status_url>`,
-`<start>` (the submit time as epoch seconds, `date +%s`) and `<mode>` (the
-submit answer's `hunt_mode`, or `deep`), and write the prompt as it stands,
-"the job" being the cron job or the heartbeat:
-"bughunt wake for `<review_id>`: run `sh <path>/watch-once.sh <review_id>
-'<status_url>' <start> <mode>` once. Print its first line as this wake's only
-status line, then do what its last line says and nothing else — `keep`: nothing
-more. `files`: call `get_findings(<review_id>)` and serve the files it asks
-for. `judge`: call `get_findings(<review_id>)`, verify every finding that has
-no verdict yet against the code and send the verdicts with `confirm_findings`;
-this review is not the result, the hunt goes on. `move <id> <url> <s>`: call
-`get_findings(<review_id>)` once, then replace this job with the same job on
-`<id>`, `<url>`, start `<s>` and mode fast; show the user the `live_url` of
-`get_findings(<id>)`; from now on `<id>` is the hunt and its attestation.
-`done` or `failed`: call `get_findings(<review_id>)`, report it as the result
-and delete this job. `resubmit`: delete this job, call
-`get_findings(<review_id>)` and tell the user what its `next_step` says.
-`read`: call `get_findings(<review_id>)` once, print its status as
-`bughunt · <mode> · <status>` (`poll-failed` if it fails too) and keep this
-job. `retire age` or `retire dead`: delete this job first, then call
-`get_findings(<review_id>)` once and tell the user what it answered (`still
-running` when it is); on `retire dead`, if the review is still running or
-waiting for files, create this job again with the same `<start>`. If the helper
-is missing or prints no such word: delete this job, call
-`get_findings(<review_id>)` once and tell the user the watch stopped and why."
-The `files`, `judge`, `done` and `failed` steps are §3a and §4 as usual. A
-`move` keeps the cadence: the service continues on its own clock.
+**The wake prompt** (Codex's heartbeat and the cron fallback). A wake fires in
+a fresh context holding nothing but its prompt, so the prompt carries every
+fact the wake needs; it reads through the MCP tools, never `curl` (Codex's
+default sandbox gives shell commands no network), and the service decides the
+route: a routed review's `get_findings` answer carries `watch`. Substitute
+`<review_id>`; `<mode>` (the submit answer's `hunt_mode`, `deep` for a deep
+submit, `fast` when neither); `<retire_at>` (the submit time + 180 minutes as
+`YYYY-MM-DDTHH:MM:SSZ`, UTC); `<heartbeat_s>` (from `monitor`); `<payload>`
+(`yes` for a diff sent as bytes, else `no`); and "the job" is the heartbeat or
+the cron job. Write:
+"bughunt wake for `<review_id>`, mode `<mode>`. 1. Run `date -u
++%Y-%m-%dT%H:%M:%SZ`; if it sorts after `<retire_at>`, print `bughunt · <mode>
+· watch-retired`, delete this job, call `get_findings(<review_id>)` once, tell
+the user what it answered (`still running` when it is; when it carries a
+`watch.do` other than `done`, that this review is not the result) and stop. 2. Call
+`get_findings(<review_id>)` once; on no answer or an error print `bughunt ·
+<mode> · poll-failed`, keep this job and stop. 3. Print `bughunt · <mode> ·
+<status>` from that answer (`needs-files` for a file request, `running` while
+it carries a `watch.do` other than `done`) and act on the
+first rule that applies: a file request (`needs_files`) – serve the files, keep
+this job; `watch.do` `judge` – verify the findings `watch.finding_ids` lists
+against the code, send the verdicts with `confirm_findings` and keep this job,
+because this review is not the result; `watch.do` `move` – replace this job,
+at a cadence of `watch.interval_s` seconds, with this same prompt for `watch.review_id`, mode `fast`, `<retire_at>` =
+`watch.retire_at` cut to whole seconds, show the user that review's `live_url`,
+and from now on that review is the hunt and holds its attestation;
+`watch.do` `resubmit` – delete this job and tell the user what `next_step`
+says; `watch.do` `done`, or no `watch` and status `done` or `failed` – report it
+as the result and delete this job; anything else – keep this job. 4. Payload:
+`<payload>`. If `yes`, step 3 kept this job and that answer's status is not
+`done` or `failed`, call `wait_review(<review_id>)` back to back, act on each
+answer as in step 3, and stop at the first answer whose status is `done`,
+`failed` or `needs_files`, or before a hold that, with its round trip and one
+more round trip, would end later than `<heartbeat_s>` seconds after this
+wake's start."
+Reporting the result, serving files and judging are §3a and §4 as usual.
 
 The same rule holds when you wait by hand instead of by heartbeat: a status you
 print is a status a tool just answered. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names).
@@ -720,14 +713,14 @@ retired on age — that cap ends the watching, and the user takes it from there.
 dead endpoint shows up as `poll-failed` within one heartbeat instead of once per
 poll, and a flood stops the watch. The first good poll after it prints
 `running` once (recovery), then the clock takes over again. **A `poll-failed`
-wake is a wake with no answer, and the wake rule applies: call `get_findings`
+wake is a wake with no answer, and a status you print is one a tool just answered: call `get_findings`
 once — the MCP transport is a different path from the status URL — and print
 what THAT answered.** `done` there is `done`: read the findings and do not
 re-arm; otherwise re-arm the same command. The loop keeps writing the watch file through an outage because the
 watcher is alive, so the Stop hook stays quiet for as long as the loop tolerates
 failures (15 minutes with no answer); this read is what keeps a review from sitting `done` and
-unread behind that silence — the Codex wake and the cron job already read on a
-failed poll, and this surface must not be the one that only prints.
+unread behind that silence — the wake prompt reads through `get_findings` on
+every wake, and this surface must not be the one that only prints.
 
 The loop above keeps the five properties below, and each line of it is
 there for one of them – read it before you shorten it. What has failed in
