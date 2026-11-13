@@ -889,7 +889,13 @@ for phrase in ("goes as submit_review's top-level mode; with none named send no 
                "The heartbeat's <mode> is the submit answer's hunt_mode", "with none named send no mode: on a pushed commit the service may start with a first step"):
     assert phrase in router_text, phrase
 assert "and the hunt is fast" not in router_text and "follow the routed hunt rules" in router_text and "get the fast hunt" in router_text
-assert "Before the submit of a named mode say the mode and its price" in router_text and "name no single price" in router_text
+assert "Before the submit of a named mode say the mode and its price" in router_text and "with none named say the fast hunt and its price" in router_text
+assert "each review that runs billing at its own mode's price, only for a medium or worse bug" in router_text and "routed hunt rules say" not in router_text
+assert "uncommitted work, an uploaded diff and a change the first step cannot take" in router_text and "(snap, or lite on accounts set to lite)" in router_text
+assert "With none named, say the fast hunt and its price" in skill and "bills at\n  its own mode's price, only for a medium or worse bug" in skill
+assert "**A review starts with stage one** (`fast`, a mode the user named, or a routed first step)" in skill
+assert "the answer's `hunt_mode`" in skill and "`fast` when absent" in skill and "The mode is `fast` unless" not in skill
+assert "a read with a `route_state` other than `final` is not the end: follow §the routed hunt under\n  the watch loop and KEEP this job" in skill
 # Slice 1 has no default mode and no typical minutes: nothing may promise them.
 for text in (skill, router_text, stats):
     assert "default_mode" not in text and "minutes_typical" not in text and "my default" not in text
