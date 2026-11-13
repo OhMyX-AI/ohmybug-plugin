@@ -87,11 +87,12 @@ export function routeOf(body: Body): { open: boolean; next?: string } {
 /** The status a poll of the status URL reports, in the mod's own words. A routed step 1 that is not the answer yet
  *  stays running: its `done` is not the end of the hunt. */
 export function pollState(body: Body): 'running' | 'needs_files' | 'done' | 'failed' | undefined {
-  if (routeOf(body).open) return 'running'
   const s = str(body.status)
+  // Either flag means reviewers wait on files; the status word stays 'running'. A file request wins over the route.
+  const files = body.files_requested === true || body.awaiting_client_files === true || s === 'needs_files'
+  if (routeOf(body).open) return files ? 'needs_files' : 'running'
   if (s === 'done' || s === 'failed') return s
-  // Either flag means reviewers wait on files; the status word stays 'running'.
-  if (body.files_requested === true || body.awaiting_client_files === true || s === 'needs_files') return 'needs_files'
+  if (files) return 'needs_files'
   return s ? 'running' : undefined
 }
 

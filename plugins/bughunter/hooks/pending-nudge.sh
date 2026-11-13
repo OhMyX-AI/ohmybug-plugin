@@ -120,8 +120,8 @@ EOF
 # writes `<status> <poll_s>` into ~/.ohmybug/watch/<rev> on every poll (keyed by
 # review id: the loop runs in the agent's shell, which knows the id and not the
 # repo key). A file younger than poll_s + 60 s is a live watcher unless its word
-# is one the loop writes as it EXITS (`done`, `failed`, `needs-files`, and
-# `rearm` – the loop runs under Bash run_in_background and exits at every line
+# is one the loop writes as it EXITS (`done`, `failed`, `needs-files`, a routed
+# hunt's `verdicts` and `continued`, and `rearm` – the loop runs under Bash run_in_background and exits at every line
 # it prints, so a heartbeat it was not re-armed after is a watch that ended): the
 # watcher is what wakes the session, and nagging beside it is how a fleet ended
 # up with a foreground get_findings every 2–5 min on top of the armed watch
@@ -202,7 +202,8 @@ echo "ohmybug: $WHOSE: $IDS — do not end the turn waiting" \
      "needs-files, verdicts, or continued: a routed hunt that waits for your verdicts or goes on" \
      "as another review) OR on a heartbeat line nobody re-armed (rearm): read first; re-arm" \
      "only if the review is still running or waiting" \
-     "for files. On Codex the" \
+     "for files; after verdicts, judge and re-arm the same loop; after continued, arm a" \
+     "new loop on the review it names. On Codex the" \
      "heartbeat leaves no file here, so" \
      "this line does not know whether yours is alive: do not arm a second one over it." \
      "$ALSO" \

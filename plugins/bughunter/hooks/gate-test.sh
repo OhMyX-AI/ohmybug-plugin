@@ -3061,8 +3061,43 @@ s "a final step 1 is the answer and promotes" "$RID"
 reset_state
 mkdir -p "$(ohmybug_hunt_dir).promoted" && : > "$(ohmybug_hunt_dir).promoted/c4"
 post_r submit_review running s4 >/dev/null
-post_r get_findings done s4 '{"route_state":"continued","continued_by":"c4","final":false}' >/dev/null
+out=$(post_r get_findings done s4 '{"route_state":"continued","continued_by":"c4","final":false}' | ctx)
 r "a child already promoted here takes nothing; step 1's record goes" "! pend s4 && ! pend c4"
+r "...step 1 gets its tombstone" '[ -e "$(ohmybug_hunt_dir).promoted/s4" ]'
+s "...and nothing is promoted on the way" ""
+r "...and the agent is not told the gate waits" 'case "$out" in *"already holds"*) true;; *) false;; esac'
+reset_state
+post_r submit_review running s6 >/dev/null
+post_r get_findings done s6 '{"route_state":"deciding","final":false}' >/dev/null
+s "a route state this hook does not know promotes nothing" ""
+r "...and keeps step 1's record (the gate errs shut)" "pend s6"
+for bad in '' '".."' '"s6"'; do
+  out=$(post_r get_findings done s6 "{\"route_state\":\"continued\"${bad:+,\"continued_by\":$bad},\"final\":false}" | ctx)
+  r "continued with no usable id ($bad) keeps step 1's record" "pend s6"
+  r "...and says so" 'case "$out" in *"names no review"*) true;; *) false;; esac'
+done
+r "...and writes nothing outside the pending directory" '[ ! -e "$(ohmybug_hunt_dir).pending/..tmp" ] && [ ! -e "$(dirname "$(ohmybug_hunt_dir)")/s6" ]'
+reset_state
+post_r submit_review running s7 >/dev/null
+printf 'own-key\n' > "$(ohmybug_hunt_dir).pending/c7"
+post_r get_findings done s7 '{"route_state":"continued","continued_by":"c7","final":false}' >/dev/null
+r "a child with its own record keeps it first and gets step 1's keys merged in" \
+  '[ "$(head -n 1 "$(ohmybug_hunt_dir).pending/c7")" = own-key ] && grep -qxF "$RID" "$(ohmybug_hunt_dir).pending/c7" && ! pend s7'
+reset_state
+post_r submit_review running s8 >/dev/null
+(cd /tmp && post_r get_findings done c8 '{"continues":"s8"}' >/dev/null)
+r "a child read first from another directory still finds step 1's repository" 'ohmybug_hunted "$RID"'
+r "...and step 1 holds no record any more" "! pend s8"
+reset_state
+# The loop's exit words for a routed hunt are a watch that ended: the nudge speaks.
+W="$HOME/.ohmybug/watch"
+for word in verdicts continued; do
+  reset_state
+  sess submit_review 0 rev_routed A1
+  mkdir -p "$W"; printf '%s 240\n' "$word" > "$W/rev_routed"
+  rc=$(nsrc 0 A1)
+  [ "$rc" = 2 ] || { printf 'FAIL nudge: a fresh %s watch file kept the nudge silent (rc=%s)\n' "$word" "$rc"; fails=$((fails + 1)); }
+done
 reset_state
 post_r submit_review running s5 >/dev/null
 out=$(post_r get_findings done s5 '{"route_state":"pending","final":false,"review_of_record":false}' | ctx)

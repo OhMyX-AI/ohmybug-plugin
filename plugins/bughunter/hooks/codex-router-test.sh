@@ -59,6 +59,11 @@ assert "local code-review" in session_text
 for phrase in ("get_attestation is the proof", "./scripts/ticket.sh attest <review_id> hands it to the gate", "Codex has no hook that records a hunt locally"):
     assert phrase in session_text, phrase
 assert "set targetThreadId" not in session_text
+# The service route: a routed hunt's done is not the end. Without this clause a
+# Codex session reports step 1 and takes its attestation, while the header
+# tells the server this client follows continued_by.
+for phrase in ("A routed hunt carries route_state", "done on it is not the end until final: true", "replace the heartbeat with one on <id>", "its own retire_at, from now", "take get_attestation from <id>, never from the first review"):
+    assert phrase in session_text, phrase
 
 skill = open(str(Path(router).parent.parent / "skills/bughunter/SKILL.md"), encoding="utf-8").read()
 monitor_section = skill.split("start this compact, unbounded loop immediately with the", 1)[1]
@@ -166,7 +171,7 @@ done
 assert '''  printf '%s %s\\n' "$st" "$every" > "$watch" # the Stop hook reads this: fresh + running = armed
   case "$st" in
     done|failed|needs-files|verdicts) rm -f "$keep"; printf 'bughunt · %s · %s\\n' "$mode" "$st"; break ;;
-    continued) rm -f "$keep"; printf 'bughunt · %s · continued %s\\n' "$mode" "$next"; break ;;
+    continued) rm -f "$keep"; printf 'bughunt · %s · continued %s\\n' "$mode" "${next:-(no id: call get_findings)}"; break ;;
   esac
 ''' in monitor_code, "terminal branch lost its shape"
 assert '&& st=needs-files\n' in monitor_code
@@ -265,6 +270,19 @@ with tempfile.TemporaryDirectory() as d:
 with tempfile.TemporaryDirectory() as d:
     r = drive(walk(d, [R("done", "final", ',"continuation_refused":"waited_out"')]))
     assert r.stdout == "bughunt · fast · done\n", r.stdout
+# A file request wins over the route: a routed step 1 whose reviewers ask for
+# files exits needs-files, or nobody serves them and the request expires.
+with tempfile.TemporaryDirectory() as d:
+    r = drive(walk(d, [R("running", "snap_running", ',"files_requested":true')]))
+    assert r.stdout == "bughunt · fast · needs-files\n", r.stdout
+# A state the loop does not know is not the end: polled through, never `done`.
+with tempfile.TemporaryDirectory() as d:
+    r = drive(walk(d, [R("done", "deciding"), R("done", "final")]))
+    assert r.stdout.splitlines()[-1] == "bughunt · fast · done" and int(open(f"{d}/polls").read()) == 2, r.stdout
+# `continued` with no usable id still tells the agent what to do.
+with tempfile.TemporaryDirectory() as d:
+    r = drive(walk(d, [R("done", "continued")]))
+    assert r.stdout == "bughunt · fast · continued (no id: call get_findings)\n", r.stdout
 # One heartbeat run, alone: it exits on its line, leaves `rearm` in the watch
 # file (the Stop hook reads it as a watch that ended, so an agent that does not
 # re-arm is nagged instead of silently unwatched) and hands the next run its

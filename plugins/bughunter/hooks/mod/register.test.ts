@@ -146,6 +146,50 @@ test('a routed step 1 stays running until it continues, then the row follows the
   expect(seen.toasts.join('\n')).toContain('rev_c is done')
 })
 
+// The agent's own reads of a routed step 1: while the route is open the deep offer waits, a confirm keeps the row
+// polled (the service decides after the verdicts), and a `continued` read moves the row to the child's page.
+test('a routed step 1 read by the agent: no deep offer while open, polled after the confirm, followed when continued', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  const reads = [findingsWith({ route_state: 'awaiting_verdicts', final: false, deep_offer: { pitch: 'Go deep.' } }),
+    findingsWith({ route_state: 'continued', continued_by: 'rev_c', final: false })]
+  on('tool.call', { tool: GET }, async () => ({ result: { content: [] }, text: reads.shift()! }))
+  on('tool.call', { tool: CONFIRM }, async () => ({ result: { content: [] },
+    text: JSON.stringify({ review_id: 'rev_1', confirmed: 2, route_state: 'pending', final: false }) }))
+  const seen = world(on, JSON.stringify({ status: 'done', route_state: 'pending', final: false, next_poll_after_s: 60 }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  expect(await buttons($)).not.toContain('deep-yes')
+  await $.tool.call({ tool: CONFIRM, review_id: 'rev_1' } as never)
+  const polls = seen.urls.length
+  await clock.advance(75_000)
+  expect(seen.urls.length, 'the confirmed step 1 is polled again').toBeGreaterThan(polls)
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_1/status?w=mod')
+  expect(seen.toasts.join('\n')).not.toContain('is done')
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await clock.advance(75_000)
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+})
+
+// A child the row cannot reach (no /r/<id>/ in its status URL to rewrite) is not followed: the row keeps polling
+// step 1 at the server's cadence, never on every tick.
+test('a continued step 1 whose status URL cannot be rewritten keeps its cadence', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  on('tool.call', { tool: SUBMIT }, async () => ({ result: { content: [] },
+    text: JSON.stringify({ review_id: 'rev_1', status: 'running', mode: 'fast', status_url: 'https://status.test/status?id=rev_1' }) }))
+  const seen = world(on, JSON.stringify({ status: 'done', route_state: 'continued', continued_by: 'rev_c', final: false, next_poll_after_s: 120 }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  // One poll at 60 s, the next one 120 s later: the 15-second ticks in between fetch nothing.
+  await clock.advance(135_000)
+  expect(seen.urls.length, 'no poll before next_poll_after_s').toBe(1)
+  expect(seen.urls.every(u => u.startsWith('https://status.test/status?id=rev_1'))).toBe(true)
+})
+
 test('every status poll the mod makes names its waiter: w=mod, appended after any query the URL already has', async ($, on) => {
   const clock = mock.clock(on)
   mock.store(on)
@@ -248,6 +292,36 @@ for (const [state, says] of [['done', 'Hunt rev_1 is done'], ['failed', 'Hunt re
     expect(seen.prompts).toHaveLength(0)
   })
 }
+
+// A file request wins over the service route: a routed step 1 whose reviewers ask for files is not "running".
+test('a routed step 1 that asks for files raises the files band', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  world(on, JSON.stringify({ status: 'running', route_state: 'snap_running', final: false, files_requested: true }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await clock.advance(75_000)
+  expect(await band($)).toContain('Reviewers of hunt rev_1 asked for files')
+})
+
+// The child is tracked already (its own submit): following would track one id twice. Step 1's row closes instead.
+test('a continued step 1 whose child is tracked already closes instead of duplicating the child', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  const submits = [JSON.stringify({ review_id: 'rev_c', status: 'running', mode: 'fast', status_url: 'https://status.test/r/rev_c/status' }), submitted]
+  on('tool.call', { tool: SUBMIT }, async () => ({ result: { content: [] }, text: submits.shift()! }))
+  const seen = world(on, async () => JSON.stringify({ status: 'done', route_state: 'continued', continued_by: 'rev_c', final: false, next_poll_after_s: 60 }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  const rows = (await pane($)).split('\n').filter(l => l.includes('rev_c'))
+  expect(rows, (await pane($))).toHaveLength(1)
+  expect(seen.urls.filter(u => u.includes('/r/rev_1/')).length, 'step 1 is polled no more once closed').toBe(1)
+})
 
 test('with OHMYBUG_AUTO_RESUME=1, a hunt parked behind a draft resumes when the person sends it: their turn does not take the band away', async ($, on) => {
   const clock = mock.clock(on)

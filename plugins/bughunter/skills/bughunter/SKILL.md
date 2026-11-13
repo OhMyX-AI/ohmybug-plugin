@@ -725,16 +725,17 @@ while :; do
   [ -n "$n" ] && [ "$n" -gt 0 ] && every=$n; back=$every
   n=$(num heartbeat_s); [ -n "$n" ] && [ "$n" -gt 0 ] && beat=$n
   printf '%s' "$s" | grep -qE '"awaiting_client_files"[[:space:]]*:[[:space:]]*true|"files_requested"[[:space:]]*:[[:space:]]*true' && st=needs-files
-  rs=$(printf '%s' "$s" | sed -n 's/.*"route_state"[[:space:]]*:[[:space:]]*"\([a-z_]*\)".*/\1/p' | head -n 1) # a routed hunt: done is not the end until final
-  case "$rs" in
-    snap_running|pending) st=running ;;
-    awaiting_verdicts) st=verdicts ;;
-    continued) st=continued; next=$(printf '%s' "$s" | sed -n 's/.*"continued_by"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_.-]*\)".*/\1/p' | head -n 1) ;;
+  rs=$(printf '%s' "$s" | sed -n 's/.*"route_state"[[:space:]]*:[[:space:]]*"\([^"\]*\)".*/\1/p' | head -n 1) # a routed hunt: done is not the end until final
+  case "$st:$rs" in
+    needs-files:*|*:|*:final) ;; # a file request wins; no route, or final: as the status says
+    *:awaiting_verdicts) st=verdicts ;;
+    *:continued) st=continued; next=$(printf '%s' "$s" | sed -n 's/.*"continued_by"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_.-]*\)".*/\1/p' | head -n 1) ;;
+    *) st=running ;; # snap_running, pending, or a state this loop does not know: not the end yet
   esac
   printf '%s %s\n' "$st" "$every" > "$watch" # the Stop hook reads this: fresh + running = armed
   case "$st" in
     done|failed|needs-files|verdicts) rm -f "$keep"; printf 'bughunt · %s · %s\n' "$mode" "$st"; break ;;
-    continued) rm -f "$keep"; printf 'bughunt · %s · continued %s\n' "$mode" "$next"; break ;;
+    continued) rm -f "$keep"; printf 'bughunt · %s · continued %s\n' "$mode" "${next:-(no id: call get_findings)}"; break ;;
   esac
   now=$(date +%s)
   if [ "$st" != "$prev" ] || [ $((now - last)) -ge "$beat" ]; then
@@ -782,6 +783,8 @@ loop keeps polling while step 1 is running or `pending`. It prints:
   `<id>` (`…/r/<id>/status`), and its `watch_poll_s` and `heartbeat_s` come
   from `get_findings(<id>)`. Show the user `<id>`'s `live_url` from that answer.
   Report step 1 in one line at most; the result is `<id>`'s.
+  `continued (no id: call get_findings)` → the answer named no review: call
+  `get_findings(review_id)` on step 1 and follow its `continued_by` as above.
 - `done` with `route_state: final` → step 1 is the answer: report it as any
   hunt. When `get_findings` carries `continuation_refused`, add one plain line
   saying no fast hunt followed and why (the code, in words).

@@ -157,10 +157,16 @@ async function observeGate($: Engine, command: string, text: string | undefined,
 }
 
 /** The service route: step 1 went on as `next`, the answer from now on. The row follows it, one hunt to the person:
- *  the child's own status page, polled at once, nothing of step 1's result kept. */
-const follow = (h: BughunterHunt, next: string, now: number): BughunterHunt => ({
-  ...h, id: next, statusUrl: h.statusUrl?.replace(`/r/${h.id}/`, `/r/${next}/`), state: 'running', seen: false,
-  findings: undefined, judged: undefined, settled: false, pressed: undefined, nextAt: now })
+ *  the child's own status page, polled at once, its own clock, nothing of step 1's result kept. Undefined when it
+ *  cannot be followed (the same id, or a status URL with no `/r/<id>/` to rewrite): the row then polls step 1 at its
+ *  cadence. A child another row already tracks closes step 1's row instead, so no id is tracked twice. */
+const follow = (h: BughunterHunt, next: string, now: number): BughunterHunt | undefined => {
+  const statusUrl = h.statusUrl?.replace(`/r/${h.id}/`, `/r/${next}/`)
+  if (next === h.id || !statusUrl || statusUrl === h.statusUrl) return undefined
+  if (huntList.some(x => x.id === next)) return { ...h, state: 'done', seen: true, settled: true }
+  return { ...h, id: next, statusUrl, state: 'running', seen: false, findings: undefined, judged: undefined,
+    settled: false, pressed: undefined, nextAt: now, startedAt: now, median: undefined }
+}
 
 async function observe($: Engine, kind: string, input: Record<string, unknown>, text: string | undefined, failed: boolean) {
   const body = failed ? undefined : bodyOf(text)
@@ -195,7 +201,9 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     const route = routeOf(body)
     const next = await put($, id, cur => {
       if (!cur) return undefined
-      if (route.next) return follow(adopt(cur, cwd), route.next, now)
+      // Followed, not adopted: a read that is not the end moves nothing, so the owning chat keeps the row.
+      const followed = route.next && follow(cur, route.next, now)
+      if (followed) return followed
       const h = terminal ? adopt(cur, cwd) : cur
       return { ...h, state: state ?? h.state, seen: terminal || h.seen, settled: terminal ? false : h.settled,
         findings: state === 'done' ? findingsOf(body).length : h.findings, pressed: terminal ? undefined : h.pressed }
@@ -205,17 +213,17 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     if (heldId === id) heldId = undefined
     // The deep offer comes in the answer for this tracked hunt, and only there.
     const offer = body.deep_offer as Record<string, unknown> | undefined
-    if (kind === 'get_findings' && next.state === 'done' && !route.open && offer && typeof offer === 'object' && str(offer.pitch)) {
+    if (kind === 'get_findings' && next.state === 'done' && offer && typeof offer === 'object' && str(offer.pitch)) {
       // A strong offer is the server's recommendation, with its reasons in the pitch; the price is the server's quote.
       // Its own buttons when the server sends their addresses; an older server's offer keeps the chat buttons.
       setBand($, { kind: 'deep', id, text: str(offer.pitch)!.slice(0, 280), strong: offer.strength === 'strong', price: num(offer.price_usd),
         start: buttonUrl(offer.start_url, next.statusUrl), snooze: buttonUrl(offer.snooze_url, next.statusUrl) })
     }
   } else if (kind === 'confirm_findings' && num(body.confirmed) !== undefined) {
-    // Step 1's verdicts are in and the route decides next: still open, the row polls again (or follows the child).
+    // Step 1's verdicts are in and the route may name the child already: the row follows it. An open route needs
+    // nothing more: its reads kept the row running (pollState), so it is still polled.
     const route = routeOf(body)
-    const next = await put($, id, cur => !cur ? undefined : route.next ? follow(cur, route.next, now)
-      : route.open ? { ...cur, judged: true, state: 'running', seen: false, nextAt: now } : { ...cur, judged: true })
+    const next = await put($, id, cur => !cur ? undefined : (route.next && follow(cur, route.next, now)) || { ...cur, judged: true })
     if (!next) return
     if (bandNow?.id === id && bandNow.kind === 'hunt') setBand($, null)
   } else {
@@ -354,7 +362,11 @@ async function pollDue($: Engine) {
     // fetch: a tool result read meanwhile may already have moved it there.
     let moved = false
     const route = body && typeof body === 'object' ? routeOf(body) : { open: false }
-    if (route.next) { await apply($, h.id, cur => follow(cur, route.next!, now)); continue }
+    if (route.next) {
+      let followed = false
+      await apply($, h.id, cur => { const f = follow(cur, route.next!, now); followed = !!f; return f ?? {} })
+      if (followed) continue
+    }
     const next = await apply($, h.id, cur => {
       moved = !!state && state !== cur.state
       const settled = moved && state === 'done' && dealtWith(body)

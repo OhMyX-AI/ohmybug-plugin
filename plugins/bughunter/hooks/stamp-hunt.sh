@@ -281,6 +281,9 @@ REPO_HUNTS=$(ohmybug_hunt_dir) || REPO_HUNTS=
 # `..` in it would walk out of ~/.ohmybug/ and overwrite a file elsewhere. Real
 # ids are alphanumeric; anything else is not an id we need to preserve.
 REVIEW=$(printf '%s' "$REVIEW" | tr -c 'A-Za-z0-9_.-' '_' | sed 's/^[.-]*//')
+# The route's ids become paths too (the lookup below, hand_on): the same rule.
+CONT_BY=$(printf '%s' "${CONT_BY:-}" | tr -c 'A-Za-z0-9_.-' '_' | sed 's/^[.-]*//')
+CONTINUES=$(printf '%s' "${CONTINUES:-}" | tr -c 'A-Za-z0-9_.-' '_' | sed 's/^[.-]*//')
 # A poll from outside the submitting checkout (cwd /tmp, another repository)
 # found no record here and promoted nothing, so the Stop nudge in that checkout
 # repeated for the whole TTL over hunts that had been read (owner report,
@@ -314,8 +317,6 @@ if [ -z "$REPO_HUNTS" ]; then
 fi
 PENDING_DIR="$REPO_HUNTS.pending"
 PENDING="$PENDING_DIR/${REVIEW:-unknown}"
-CONT_BY=$(printf '%s' "${CONT_BY:-}" | tr -c 'A-Za-z0-9_.-' '_' | sed 's/^[.-]*//')
-CONTINUES=$(printf '%s' "${CONTINUES:-}" | tr -c 'A-Za-z0-9_.-' '_' | sed 's/^[.-]*//')
 # step 1's record goes on to the hunt that continues it, never promoted
 # on the way. The keys are the commit's, so they are the child's too. A child
 # with its own record (a hunt of the commit the client started) gets them
@@ -509,15 +510,24 @@ case "$TOOL" in
     # stays, whatever its status says (a failed step 1 continues too). On
     # `continued` the record moves to the hunt that goes on, unpromoted: the
     # merge gate takes the last hunt of the chain, never step 1 alone.
+    # Any other state, one this hook does not know included, holds the record
+    # too: the merge gate errs shut.
     case "${ROUTE_STATE:-}" in
-      snap_running|pending|awaiting_verdicts) exit 0 ;;
+      ''|final) ;;
       continued)
-        if [ -n "${CONT_BY:-}" ] && [ "$CONT_BY" != "${REVIEW:-}" ]; then
-          if hand_on "$REVIEW" "$CONT_BY"; then
+        if [ -z "${CONT_BY:-}" ] || [ "$CONT_BY" = "${REVIEW:-}" ]; then
+          say "ohmybug: review $REVIEW was continued, but the answer names no review to follow; its merge record stays pending. Read it again with get_findings and follow the review its continued_by names."
+        elif hand_on "$REVIEW" "$CONT_BY"; then
+          if [ -e "$REPO_HUNTS.promoted/$CONT_BY" ]; then
+            say "ohmybug: review $REVIEW continued as $CONT_BY, which already holds the merge record here. Report $CONT_BY as the answer."
+          else
             say "ohmybug: review $REVIEW continued as $CONT_BY; the merge gate now waits for $CONT_BY, the answer from here on. Follow it (its own status page, /r/$CONT_BY/status) and judge its findings."
           fi
+        elif [ -s "$PENDING_DIR/$REVIEW" ]; then
+          say "ohmybug: review $REVIEW continued as $CONT_BY, but its merge record could not be moved to $CONT_BY (a write to $PENDING_DIR failed); the gate still waits for $REVIEW. Follow $CONT_BY and judge its findings."
         fi
         exit 0 ;;
+      *) exit 0 ;;
     esac
     # A route child (`continues`) inherits step 1's record the first time it is
     # read, whichever review the agent read first.
