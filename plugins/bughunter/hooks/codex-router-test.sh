@@ -651,13 +651,15 @@ assert "Retire a heartbeat older than 180 minutes" in router_text, "ROUTING must
 # was the only read of a done hunt, so the pitch was never shown). Both halves
 # are pinned, the pitch and the question, on both surfaces, and the prompt
 # must carry it: the wake holds nothing else.
-for phrase in ("except that a done read carrying deep_offer also shows the user deep_offer.pitch word for word under that line and asks once whether to start it, which is their call",
-               "never softened into a maybe) – and delete itself on done or failed, with or without deep_offer",
-               "Write that exception into the heartbeat prompt in those words"):
+for phrase in ("except that a done read that ends the hunt (no route_state, or final: true) and carries deep_offer also shows the user the server's summary and then deep_offer.pitch word for word, and asks once whether to start it, which is their call",
+               "a strong offer is the server's recommendation: say so with its reasons, and name price_usd when present on the pitch's own terms, nothing charged unless a real bug is confirmed; never soften it into a maybe, and add no recommendation to a regular one",
+               "delete itself once the hunt has ended, done or failed (a routed one ends at final: true), with or without deep_offer",
+               "Write that exception and that ending into the heartbeat prompt in those words"):
     assert phrase in router_text, phrase
 flat_bullet = " ".join(codex_bullet.split())
-for phrase in ("a `done` read carrying `deep_offer` also shows the user `deep_offer.pitch` word for word under that line and asks once whether to start it, which is their call",
-               "never softened into a maybe), and the heartbeat is still deleted",
+for phrase in ("a `done` read that ends the hunt (no `route_state`, or `final: true`) and carries `deep_offer` also shows the user the server's `summary` and then `deep_offer.pitch` word for word, and asks once whether to start it, which is their call",
+               "a strong offer is the server's recommendation: say so with its reasons, and name `price_usd` when present on the pitch's own terms, nothing charged unless a real bug is confirmed; never soften it into a maybe, and add no recommendation to a regular one",
+               "The heartbeat is still deleted once the hunt has ended (a routed one ends at `final: true`), with or without `deep_offer`",
                "Write that into the prompt in those words"):
     assert phrase in flat_bullet, phrase
 # Said at the start of every session: a session that began without the tools
