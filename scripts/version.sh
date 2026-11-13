@@ -60,7 +60,7 @@ EOF
 # catches up. Measured on this repo: a 5-commit branch stamped 0.50.0 onto a
 # main that would reach 48.
 #
-# `origin/main` first-parent + 1 is what the squash will produce, from any
+# The main ref's first-parent count + 1 is what the squash will produce, from any
 # branch, whatever its length. It is also monotonic, which is the property the
 # marketplace actually needs.
 #
@@ -71,19 +71,36 @@ EOF
 # them. `--check` does catch it on any re-run, and main goes red afterwards, so
 # the exposure is a stale green check. Fetch before computing if branches start
 # overlapping often enough for that to be a real risk.
-# The live repository. A clone made before the move keeps `origin` on the retired
-# one, whose main stopped at an older release: reading it stamped a number the
-# marketplace already had (0.157.0 again, for 0.158.0). Its remote wins, under any name.
+
+# The repository releases are published from. A remote that points at an older
+# copy reads a main that stopped at an older release, and stamps a number the
+# marketplace already has; so the remote whose URL names this repository wins,
+# under any remote name, and any doubt about it is an error, never a fallback.
 LIVE_REPO='OhMyX-AI/ohmybug-plugin'
 
+# Prints the main ref. Returns 2, with the remedy on stderr, when a GitHub remote
+# exists but the live one is missing or not fetched: the fallback below would
+# then read some other repository's main without a word.
 main_ref() {
-  local b r
+  local b r u live='' github='' want
+  want=$(printf '%s' "$LIVE_REPO" | tr '[:upper:]' '[:lower:]')
   for r in $(git remote); do
-    case "$(git remote get-url "$r" 2>/dev/null)" in
-      *"$LIVE_REPO"|*"$LIVE_REPO".git|*"$LIVE_REPO"/)
-        git rev-parse --verify -q "$r/main" >/dev/null && { printf '%s' "$r/main"; return 0; } ;;
+    u=$(git remote get-url "$r" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    u=${u%/}; u=${u%.git}
+    case "$u" in
+      */"$want"|*:"$want") live=$r; break ;;
+      *github.com*) github=$r ;;
     esac
   done
+  if [ -n "$live" ]; then
+    git rev-parse --verify -q "$live/main" >/dev/null && { printf '%s' "$live/main"; return 0; }
+    echo "remote '$live' is $LIVE_REPO but has no main here: git fetch $live" >&2
+    return 2
+  fi
+  if [ -n "$github" ]; then
+    echo "no remote points at $LIVE_REPO ('$github' is another repository): git remote add upstream https://github.com/$LIVE_REPO.git && git fetch upstream" >&2
+    return 2
+  fi
   for b in origin/main origin/master main master; do
     git rev-parse --verify -q "$b" >/dev/null && { printf '%s' "$b"; return 0; }
   done
@@ -110,7 +127,10 @@ published() {
 }
 
 compute() {
-  local n p cur want=0
+  local n p cur want=0 rc=0
+  # A live remote in doubt stops the release; every reading below would hide it.
+  main_ref >/dev/null || rc=$?
+  [ "$rc" != 2 ] || exit 1
   if p=$(published) && [ "$p" -ge 0 ] 2>/dev/null; then want=$((p + 1)); fi
   if n=$(main_count) && [ "$((n + 1))" -gt "$want" ]; then want=$((n + 1)); fi
   # Never below what this checkout already carries. Both readings above can
@@ -481,25 +501,43 @@ case "${1:-}" in
       rm -rf "$tmp"; exit 1
     fi
 
-    # A clone whose `origin` is the retired repository, with the live one beside
-    # it under another name: main is read from the live one, whatever origin says.
-    live=$tmp/live/OhMyX-AI/ohmybug-plugin.git  # spelled out: a mutated LIVE_REPO must not move the fixture too
+    # Several remotes: main is read from the one whose URL names the live
+    # repository, in any URL form and case, never from an older copy; and a
+    # GitHub remote with no live one, or a live one not fetched, is an error.
+    # Its own fixture: live main publishes 0.7.0 in 3 commits (so 0.8.0 next),
+    # the older copy stopped at 0.5.0 in 1 commit (0.7.0 with the local floor).
+    fx=$tmp/fx
+    mkdir -p "$fx/plugins/bughunter/.claude-plugin" "$fx/plugins/bughunter/.codex-plugin"
+    git -C "$fx" init -q -b main
+    fxc() { git -C "$fx" -c user.email=t@t -c user.name=t "$@"; }
+    for n in 5 6 7; do
+      for m in "${MANIFESTS[0]}" "${MANIFESTS[1]}"; do printf '{"version":"0.%s.0"}\n' "$n" > "$fx/$m"; done
+      fxc add -A; fxc commit -qm "release $n"
+    done
+    # Spelled out: a mutated LIVE_REPO must not move the fixture with it.
+    live=$tmp/live/OhMyX-AI/ohmybug-plugin.git
     mkdir -p "$(dirname "$live")"
-    git clone -q --bare "$origin" "$live"
-    gitc checkout -q main
-    gitc reset -q --hard origin/main
-    gitc remote add live "$live"
-    gitc remote set-url origin "$tmp/retired.git"
-    git clone -q --bare "$origin" "$tmp/retired.git"
-    git -C "$tmp/retired.git" update-ref refs/heads/main "$(git -C "$tmp/retired.git" rev-list --first-parent main | sed -n 3p)"
-    gitc fetch -q origin
-    gitc fetch -q live
-    want="0.$(( $(git -C "$repo" rev-list --count --first-parent live/main) + 1 )).0"
-    got=$(cd "$repo" && bash "$SELF")
-    [ "$got" = "$want" ] || {
-      echo "self-test: with a stale origin beside the live remote, the version came out $got, not $want" >&2
-      rm -rf "$tmp"; exit 1
-    }
+    git clone -q --bare "$fx" "$live"
+    git clone -q --bare "$fx" "$tmp/older.git"
+    git -C "$tmp/older.git" update-ref refs/heads/main "$(git -C "$fx" rev-list --max-parents=0 HEAD)"
+    fxc remote add origin "$tmp/older.git"
+    fxc fetch -q origin
+    # A fork sorts first: a matcher that took any remote would pick it.
+    fxc remote add aaa https://github.com/someone/ohmybug-plugin-fork.git
+    fail() { echo "self-test: $*" >&2; rm -rf "$tmp"; exit 1; }
+    rc=0; out=$( (cd "$fx" && bash "$SELF") 2>&1 >/dev/null ) || rc=$?
+    { [ "$rc" != 0 ] && printf '%s' "$out" | grep -q "no remote points at"; } || fail "a GitHub remote and no live one did not stop the version (rc=$rc): $out"
+    fxc remote add upstream "$live"
+    rc=0; out=$( (cd "$fx" && bash "$SELF") 2>&1 >/dev/null ) || rc=$?
+    { [ "$rc" != 0 ] && printf '%s' "$out" | grep -q "has no main here"; } || fail "an unfetched live remote did not stop the version (rc=$rc): $out"
+    rc=0; (cd "$fx" && bash "$SELF" --write) >/dev/null 2>&1 || rc=$?
+    [ "$rc" != 0 ] || fail "--write stamped a version with the live remote unfetched"
+    fxc fetch -q upstream
+    for url in "$live" "https://github.com/ohmyx-ai/ohmybug-plugin" "git@github.com:OhMyX-AI/ohmybug-plugin/" "https://github.com/OhMyX-AI/ohmybug-plugin.git"; do
+      fxc remote set-url upstream "$url"
+      got=$(cd "$fx" && bash "$SELF")
+      [ "$got" = "0.8.0" ] || fail "with the live remote at $url beside an older origin, the version came out $got, not 0.8.0"
+    done
 
     rm -rf "$tmp"
     echo "version self-test: ok ($V)"
