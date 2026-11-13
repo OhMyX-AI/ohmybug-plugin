@@ -115,7 +115,7 @@ This is a required client action, not a reminder to do later:
   needs-files` and serves the files first. If the poll itself fails, the wake
   falls back to one `get_findings` before it counts as a wake that read nothing.
   On `needs_files`, send files first; on `done` or
-  `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Retire it too when
+  `failed`, process the result and delete the heartbeat. Route branch (route_state): a routed review's answers carry `watch`, the service's next step, so every wake on it calls `get_findings` and does exactly what its `watch.do` says, as the routing rule spells out (`keep`; `judge` its `finding_ids`; `move` the heartbeat to its `review_id` with its `status_url`, `interval_s` and `retire_at`; `done`; `resubmit`; `unavailable` = a wake with no answer). Retire it too when
   it is older than 180 minutes or after 3 consecutive wakes that could not read
   a status at all — a failed `wait_review`, `get_findings` or `status_url` read,
   whichever that wake uses: print `bughunt · <mode> ·
@@ -124,6 +124,11 @@ This is a required client action, not a reminder to do later:
   from unreadable wakes, not from the age cap — arm a fresh heartbeat: a live
   hunt must not lose its watch, and a heartbeat nothing can satisfy must not
   wake the thread forever, so the age cap is the one that ends it for good.
+  If that answer carries `watch`, its `watch.do` decides, not its status
+  word: `keep` or `judge` count as still running (print `running`, never
+  `done`); `move` → after an unreadable-wake retirement arm the heartbeat the
+  routing rule names, after the age cap report `continued <review_id>`;
+  `done` and `resubmit` as the routing rule says.
   Keep each wake-up to
   one compact line (`bughunt · fast · running`, `bughunt · files-sent`,
   `bughunt · fast · needs-files`, `bughunt · fast · done · findings=N`,
@@ -135,7 +140,8 @@ This is a required client action, not a reminder to do later:
   check, and the stop is mechanical, not a judgement:
   - **The age cap is an instant, not a duration.** At the submit compute
     `retire_at` = submit time + 180 min and write it into the prompt as an ISO
-    timestamp — the SAME instant into every replacement heartbeat, so the cap
+    timestamp — the SAME instant into every replacement heartbeat (except
+    the heartbeat a `move` creates: it takes `watch.retire_at`), so the cap
     bounds the review, not each job in turn: "If the current time is past
     `<retire_at>`: print `bughunt · <mode> · watch-retired`, delete this
     automation, then call `get_findings` once and report what it answered —
@@ -206,13 +212,36 @@ This is a required client action, not a reminder to do later:
   with it — 3 consecutive failures at `interval_s`, 12 at every minute — so
   a three-minute blip does not retire the one watcher a payload hunt has. Prompt: "bughunt
   heartbeat for `<review_id>`: curl `<status_url>` once and print the compact
-  line for what THAT read answered; if it answered nothing, call `get_findings`
+  line for what THAT read answered (a body with `watch` prints the line the
+  Route branch below names); if it answered nothing, call `get_findings`
   once and print what that answered, and only if THAT fails too print `bughunt ·
   <mode> · poll-failed` and count the wake as a poll failure — never the
   previous status; on `awaiting_client_files`/`files_requested` in the status
   body (which flags a request there, not in its status word) or `needs_files`
   from the `get_findings` fallback (which flags it exactly there) call
   `get_findings`, serve the files and KEEP this job;
+  Route branch (route_state): a routed review's answers carry `watch`, the
+  service's next step for this job, and it replaces the `done`/`failed` rule
+  below: when the status body, or the `get_findings` fallback answer above,
+  carries `watch`, do exactly what the `get_findings` answer's `watch.do`
+  says (call `get_findings` if this wake has not yet) — `keep` → print
+  `bughunt · <mode> · running`, KEEP this job; `judge` → `confirm_findings`
+  on exactly its `finding_ids`, print `bughunt · <mode> · running`, KEEP this
+  job; `move` → unless a bughunt job on its `review_id` already exists,
+  create one job on its `review_id`, at its `interval_s`, whose prompt is this
+  prompt word for word with five values swapped: the review id → its
+  `review_id`; the status URL → its `status_url`; the consecutive-poll-failure
+  count → its `fail_window_s` / `interval_s`; the retire instant → its
+  `retire_at`; the mode word in every `bughunt ·` line → fast; only then
+  `CronDelete` this one and print `bughunt · fast · continued <review_id>`;
+  `resubmit` → print `bughunt · <mode> · failed`, tell the user the
+  follow-up fast hunt failed and a resubmit is free, `CronDelete` this job;
+  `unavailable`, or that `get_findings` failing → this wake has no answer:
+  print `bughunt · <mode> · poll-failed` and count it as a poll failure;
+  `done` → the review is the answer: the rule below applies by that same
+  answer's `status` (`done` or `failed`), without a second `get_findings`,
+  and a `continuation_refused` gets one line saying no fast hunt followed and
+  why. An answer without `watch` is an ordinary hunt;
   on `done` or `failed` call `get_findings` (this surface reads with curl,
   and only a tool read tells the local hooks the hunt is over — skip it on
   `failed` and the merge gate keeps saying a hunt is RUNNING); on `done`
@@ -225,7 +254,8 @@ This is a required client action, not a reminder to do later:
   `interval_s`, 12 for one every minute — substitute the number that matches
   the cadence you created the job at) or once the current time is past `<retire_at>` (an
   ISO timestamp you substitute at creation: the SUBMIT time + 180 minutes,
-  carried unchanged into every replacement job – the watch is then older than 180 minutes,
+  carried unchanged into every replacement job (except the job a `move`
+  creates: it takes `watch.retire_at`) – the watch is then older than 180 minutes,
   the longest hunt's 150 min budget (a scan) plus queue time – as an instant,
   because a fresh cron turn has no creation time to count from, and anchored
   at submit so a replacement job cannot restart the cap)
@@ -235,9 +265,15 @@ This is a required client action, not a reminder to do later:
   failures, not from the age cap – a job nothing can satisfy is how a control gets
   disarmed, and a job that vanishes in silence reads as 'still running'; either
   way print what that `get_findings` answered — `still running` when it is, so
-  the user knows the watch ended on a live hunt".
+  the user knows the watch ended on a live hunt. If that answer carries
+  `watch`, its `watch.do` decides, not its status word: `keep` or `judge`
+  count as still running (print `running`, never `done`); `move` → after a
+  failure retirement create the job the Route branch names, after the age cap
+  print `continued <review_id>`; `done` and `resubmit` as in the Route branch".
   One job per review: `CronDelete` any earlier bughunt job before creating
-  the next – never leave one pointing at an older review id. Only
+  the next – never leave one pointing at an older review id (the one
+  exception is the Route branch's `move`: it creates the new job first, then
+  deletes the old). Only
   as the last resort keep a `run_in_background` until-loop – and say so:
   "monitoring armed without heartbeat – the cache will cool".
 

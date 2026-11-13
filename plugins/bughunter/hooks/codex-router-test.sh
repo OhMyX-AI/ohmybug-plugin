@@ -62,8 +62,31 @@ assert "set targetThreadId" not in session_text
 # The service route: a routed hunt's done is not the end. Without this clause a
 # Codex session reports step 1 and takes its attestation, while the header
 # tells the server this client follows continued_by.
-for phrase in ("A routed hunt carries route_state", "done on it is not the end until final: true", "replace the heartbeat with one on <id>", "its own retire_at, from now", "take get_attestation from <id>, never from the first review", "and neither is failed", "except that a file request still comes first", "it stays routed until final: true", "the rules above that stop on, or delete the heartbeat on, done or failed do not apply"):
+# The service route: the server computes the watcher's next step (`watch`), so the
+# routing text carries one rule that does what it says, before the stop rules,
+# with every arm named, and the retirement and age-cap rules defer to it.
+F = lambda t: " ".join(t.split())
+route = "Route branch (route_state): a routed review's get_findings answer carries watch, the service's next step for the heartbeat, so every wake on it calls get_findings and does exactly what its watch.do says, before the rules that stop on, or delete the heartbeat on, done or failed (a file request still comes first, as always): "
+assert route in session_text, "the route rule changed"
+arms = ("keep → print bughunt · <mode> · running and keep the heartbeat; ",
+        "judge → confirm_findings on exactly its finding_ids, print bughunt · <mode> · running, keep the heartbeat; ",
+        "move → that review is the answer from now on",
+        "unless a heartbeat on its review_id already exists, create the heartbeat on its review_id with its status_url, interval_s and retire_at, every other line of this prompt unchanged and <mode> fast",
+        "before deleting this one, print bughunt · <mode> · continued <review_id>",
+        "take get_attestation from that review, never from the first; ",
+        "resubmit → print bughunt · <mode> · failed, tell the user the follow-up fast hunt failed and a resubmit is free, delete the heartbeat; ",
+        "unavailable → a wake with no answer: print bughunt · <mode> · poll-failed and count it as a wake that could not read a status; ",
+        "done → the review is the answer and the stop rules apply by its status (done or failed); ",
+        "An answer with no watch is an ordinary hunt.")
+at = session_text.index(route)
+for phrase in arms:
+    assert phrase in session_text[at:], phrase
+    assert session_text.index(phrase, at) >= at, phrase
+    at = session_text.index(phrase, at)
+for phrase in ("if that answer carries watch, its watch.do decides, not its status word: keep or judge count as still running (print running, never done), move → after an unreadable-wake retirement arm the heartbeat the route rule names, after the age cap report continued <review_id>",
+               "(except the heartbeat a move creates: it takes watch.retire_at)"):
     assert phrase in session_text, phrase
+assert "A routed hunt carries route_state" not in session_text, "the old route prose is back"
 
 skill = open(str(Path(router).parent.parent / "skills/bughunter/SKILL.md"), encoding="utf-8").read()
 monitor_section = skill.split("start this compact, unbounded loop immediately with the", 1)[1]
@@ -561,6 +584,45 @@ assert "review is still running or waiting for files AND the retirement came fro
 # request off the flags too: keyed to the status word it sits through the window.
 assert "on `awaiting_client_files`/`files_requested` in the status\n  body (which flags a request there, not in its status word)" in claude_bullet
 codex_bullet = skill.split("- **Codex:**", 1)[1].split("- **Claude Code:**", 1)[0]
+# The cron fallback and the Codex bullet carry the same one rule (#3599 `watch`):
+# the route rule sits between the file request and the done/failed rule, reads the
+# fallback answer too, and the retirement and the one-job rule defer to it.
+cron = F(claude_bullet.split('Prompt: "bughunt', 1)[1].split('One job per review', 1)[0])
+order = ("serve the files and KEEP this job;",
+         "Route branch (route_state): a routed review's answers carry `watch`, the service's next step for this job, and it replaces the `done`/`failed` rule below: when the status body, or the `get_findings` fallback answer above, carries `watch`, do exactly what the `get_findings` answer's `watch.do` says (call `get_findings` if this wake has not yet)",
+         "`keep` → print `bughunt · <mode> · running`, KEEP this job;",
+         "`judge` → `confirm_findings` on exactly its `finding_ids`, print `bughunt · <mode> · running`, KEEP this job;",
+         "`move` → unless a bughunt job on its `review_id` already exists, create one job on its `review_id`, at its `interval_s`, whose prompt is this prompt word for word with five values swapped: the review id → its `review_id`; the status URL → its `status_url`; the consecutive-poll-failure count → its `fail_window_s` / `interval_s`; the retire instant → its `retire_at`; the mode word in every `bughunt ·` line → fast; only then `CronDelete` this one and print `bughunt · fast · continued <review_id>`;",
+         "`resubmit` → print `bughunt · <mode> · failed`, tell the user the follow-up fast hunt failed and a resubmit is free, `CronDelete` this job;",
+         "`unavailable`, or that `get_findings` failing → this wake has no answer: print `bughunt · <mode> · poll-failed` and count it as a poll failure;",
+         "`done` → the review is the answer: the rule below applies by that same answer's `status` (`done` or `failed`), without a second `get_findings`",
+         "An answer without `watch` is an ordinary hunt;",
+         "on `done` or `failed` call `get_findings`",
+         "(except the job a `move` creates: it takes `watch.retire_at`)",
+         "If that answer carries `watch`, its `watch.do` decides, not its status word: `keep` or `judge` count as still running (print `running`, never `done`); `move` → after a failure retirement create the job the Route branch names, after the age cap print `continued <review_id>`")
+at = -1
+for phrase in order:
+    assert phrase in cron, "cron: " + phrase
+    assert cron.index(phrase) > at, "cron out of order: " + phrase
+    at = cron.index(phrase)
+assert "(a body with `watch` prints the line the Route branch below names)" in cron
+assert "(the one exception is the Route branch's `move`: it creates the new job first, then deletes the old)" in F(claude_bullet)
+cb = F(codex_bullet)
+for phrase in ("Route branch (route_state): a routed review's answers carry `watch`, the service's next step, so every wake on it calls `get_findings` and does exactly what its `watch.do` says",
+               "If that answer carries `watch`, its `watch.do` decides, not its status word",
+               "(except the heartbeat a `move` creates: it takes `watch.retire_at`)"):
+    assert phrase in cb, "codex bullet: " + phrase
+assert "follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge" not in cb
+# The README's contract: the watch field and the hold errors.
+readme_all = open(str(Path(router).parents[3] / "README.md"), encoding="utf-8").read()
+assert "## MCP contract" in readme_all, "README lost its MCP contract heading"
+readme = readme_all.split("## MCP contract", 1)[1].split("\n## ", 1)[0]
+row = lambda tool: next((l for l in readme.splitlines() if l.startswith("| `%s` |" % tool)), "")
+for phrase in ("`{do: keep}`, `{do: judge, finding_ids}`, `{do: move, review_id, status_url, interval_s, fail_window_s, retire_at}`, `{do: done}`, `{do: resubmit}` or `{do: unavailable}`", "carries no `watch`", "review_of_record}`"):
+    assert phrase in row("get_findings"), phrase
+errors = next((l for l in readme.splitlines() if l.startswith("Errors:")), "")
+for phrase in ("`route_pending` (", "`route_continued` (", "a read answers it with `watch: {do: unavailable}`"):
+    assert phrase in errors, phrase
 # #1003: a heartbeat printed `running` on three wakes after the hunt was done,
 # with no tool call in the thread — the cadence fields say when to wake, and
 # nothing said what a wake IS. The server ships that sentence as `wake_rule`;
