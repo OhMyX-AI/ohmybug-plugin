@@ -75,15 +75,6 @@ export function findingsOf(body: Body): Finding[] {
   })
 }
 
-/** A routed step 1's place in its chain (the service route): `open` while it is not the answer yet, whatever its
- *  status says; `next` when the hunt goes on as another review. No route, or `final`: an ordinary hunt. */
-export function routeOf(body: Body): { open: boolean; next?: string } {
-  const rs = str(body.route_state)
-  if (!rs || rs === 'final') return { open: false }
-  const next = rs === 'continued' ? str(body.continued_by) : undefined
-  return next && /^[A-Za-z0-9_.-]{1,128}$/.test(next) ? { open: true, next } : { open: true }
-}
-
 /** What the review itself says, route aside: the findings card draws this. */
 export function statusState(body: Body): 'running' | 'needs_files' | 'done' | 'failed' | undefined {
   const s = str(body.status)
@@ -93,12 +84,26 @@ export function statusState(body: Body): 'running' | 'needs_files' | 'done' | 'f
   return s ? 'running' : undefined
 }
 
-/** Where the hunt stands for the watcher. A routed step 1 that is not the answer yet stays running, except when it
- *  needs something now: files, or (`awaiting_verdicts`) the verdicts on its findings, which read as its `done`. */
-export function pollState(body: Body): 'running' | 'needs_files' | 'done' | 'failed' | undefined {
+/** The service route's order: a step 1 only moves up it. 4 is over (final, or closed by the mod itself). */
+const RANK: Record<string, number> = { snap_running: 0, awaiting_verdicts: 1, pending: 2, continued: 3, final: 4 }
+export const ROUTE_OVER = 4
+export type RouteRead = { route?: number; state?: ReturnType<typeof statusState>; next?: string }
+
+/** One answer about a hunt (a poll, an agent read, a confirm answer) against the route rank its row holds. No route
+ *  ever named: the review's own status. A body that names no route keeps the held rank; a word the mod does not know
+ *  is a route at the held rank. A lower rank than the held one is an older answer: undefined, it moves nothing. While
+ *  the route is open the state comes from the rank: verdicts owed (1) read as done, the rest as running, a file
+ *  request wins; once over, the status decides. `next` is the review the hunt goes on as. */
+export function routeRead(body: Body, held: number | undefined): RouteRead | undefined {
+  const w = body.route_state
+  const rank = w === undefined || w === null || w === '' ? held
+    : typeof w === 'string' && Object.prototype.hasOwnProperty.call(RANK, w) ? RANK[w] : held ?? 0
   const s = statusState(body)
-  if (!routeOf(body).open || s === 'needs_files' || str(body.route_state) === 'awaiting_verdicts') return s
-  return 'running'
+  if (rank === undefined) return { state: s }
+  if (held !== undefined && rank < held) return undefined
+  const state = rank === ROUTE_OVER || s === 'needs_files' ? s : rank === 1 ? 'done' : 'running'
+  const c = rank === 3 ? str(body.continued_by) : undefined
+  return { route: rank, state, next: c && /^[A-Za-z0-9_.-]{1,128}$/.test(c) ? c : undefined }
 }
 
 /** The merge gate's own words, when it refused a Bash call. Shown, never acted on. */

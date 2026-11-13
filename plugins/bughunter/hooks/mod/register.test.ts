@@ -57,6 +57,7 @@ function engine(on: On) {
 }
 
 /** What a POST answers in `world` (the deep offer's buttons): a status and a body, or null for no answer at all. */
+const GONE = '<404>'
 let postReply: (url: string) => { status: number; text: string } | null | 'hang' = () => ({ status: 404, text: '{}' })
 function world(on: On, status: string | null | string[] | (() => Promise<string>)) {
   postReply = () => ({ status: 404, text: '{}' })
@@ -64,9 +65,13 @@ function world(on: On, status: string | null | string[] | (() => Promise<string>
   const seen = { toasts: [] as string[], status: [] as (string | undefined)[], prompts: [] as string[], urls: [] as string[],
     posts: [] as { url: string; press?: string }[] }
   engine(on)
-  const statusReply = async (url: string) => (seen.urls.push(url), status === null ? { deny: 'refused by policy' }
-    : { value: { status: 200, ok: true, headers: {}, text: typeof status === 'function' ? await status()
-      : replies ? (replies.length > 1 ? replies.shift()! : replies[0]!) : status } }) as never
+  const statusReply = async (url: string) => {
+    seen.urls.push(url)
+    if (status === null) return { deny: 'refused by policy' } as never
+    const text = typeof status === 'function' ? await status() : replies ? (replies.length > 1 ? replies.shift()! : replies[0]!) : status
+    // GONE: the status door answers 404 (the review is gone).
+    return { value: text === GONE ? { status: 404, ok: false, headers: {}, text: '{}' } : { status: 200, ok: true, headers: {}, text } } as never
+  }
   on('http.fetch', async ($, e) => {
     const { url, init } = e as { url?: unknown; init?: { method?: string; headers?: Record<string, string> } }
     if (init?.method !== 'POST') return statusReply(String(url))
@@ -186,7 +191,8 @@ test('a routed step 1 awaiting verdicts is announced, its card shows the finding
   await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
   await $.tool.call({ tool: SUBMIT } as never)
   await clock.advance(75_000)
-  expect(seen.toasts.join('\n')).toContain('rev_1 is done')
+  expect(seen.toasts.join('\n')).toContain('rev_1 waits for your verdicts · 2 findings')
+  expect(seen.toasts.join('\n')).not.toContain('rev_1 is done')
   const card = await drawn($, 'ToolResult', { tool_use_id: 'g1', tool: GET, isErrored: false,
     output: findingsWith({ route_state: 'awaiting_verdicts', final: false }) }, 'g1')
   expect(card).toContain('Refund retried twice on timeout')
@@ -232,6 +238,290 @@ test('a continued step 1 whose status URL cannot be rewritten keeps its cadence'
   await clock.advance(135_000)
   expect(seen.urls.length, 'no poll before next_poll_after_s').toBe(1)
   expect(seen.urls.every(u => u.startsWith('https://status.test/status?id=rev_1'))).toBe(true)
+})
+
+// --- the routed row, cell by cell (the table: row state x answer x staleness) --------------------------------------
+/** A routed step 1's status body (or read answer) at a route state. */
+const R = (rs: string, extra: Record<string, unknown> = {}) =>
+  JSON.stringify({ review_id: 'rev_1', status: 'done', findings: 2, route_state: rs, final: rs === 'final', next_poll_after_s: 60, ...extra })
+/** The agent's get_findings answers, in order; the last one repeats. */
+function reads(on: On, answers: string[]) {
+  on('tool.call', { tool: GET }, async () => ({ result: { content: [] }, text: answers.length > 1 ? answers.shift()! : answers[0]! }))
+}
+function confirms(on: On, answer: Record<string, unknown>) {
+  on('tool.call', { tool: CONFIRM }, async () => ({ result: { content: [] }, text: JSON.stringify({ review_id: 'rev_1', confirmed: 2, ...answer }) }))
+}
+const verdictsLine = async ($: Dollar) => {
+  const { sections } = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] })
+  return sections.filter(x => x.id === 'bughunter:next-step').map(x => x.text).join('\n')
+}
+async function routedStart($: Dollar, on: On, polls: string[] | (() => Promise<string>)) {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  on('prompt.compose', async () => ({ sections: [] }))
+  const seen = world(on, polls)
+  await $.session.start({ cwd: '/repo', surface: 'terminal' } as never)
+  await $.tool.call({ tool: SUBMIT } as never)
+  return { clock, seen }
+}
+const toastsOf = (seen: { toasts: string[] }) => seen.toasts.join('\n')
+
+test('route: a step 1 the agent read at awaiting_verdicts is still polled and follows the child (K2 x continued)', async ($, on) => {
+  reads(on, [findingsWith({ route_state: 'awaiting_verdicts', final: false })])
+  const { clock, seen } = await routedStart($, on, [R('awaiting_verdicts'), R('continued', { continued_by: 'rev_c' })])
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+  expect(toastsOf(seen)).not.toContain('rev_1')
+})
+
+test('route: a read step 1 that ends final is silent, polled no more, and still asks for its verdicts (K2 x final)', async ($, on) => {
+  reads(on, [findingsWith({ route_state: 'awaiting_verdicts', final: false })])
+  const { clock, seen } = await routedStart($, on, [R('final')])
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await clock.advance(75_000)
+  const polls = seen.urls.length
+  await clock.advance(150_000)
+  expect(seen.urls.length).toBe(polls)
+  expect(seen.toasts).toHaveLength(0)
+  expect(await verdictsLine($)).toContain('confirm_findings for rev_1')
+})
+
+test('route: an announced, unread step 1 follows the child; its band goes (K1 x continued)', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('awaiting_verdicts'), R('continued', { continued_by: 'rev_c' })])
+  await clock.advance(75_000)
+  expect(toastsOf(seen)).toContain('rev_1 waits for your verdicts')
+  await clock.advance(75_000)
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+  expect(await band($)).not.toContain('rev_1')
+})
+
+test('route: awaiting_verdicts then pending is announced once and polled on (K1 x pending)', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('awaiting_verdicts'), R('pending')])
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  const polls = seen.urls.length
+  await clock.advance(75_000)
+  expect(seen.toasts).toHaveLength(1)
+  expect(await band($)).not.toContain('rev_1')
+  expect(seen.urls.length).toBeGreaterThan(polls)
+})
+
+test('route: awaiting_verdicts then final is one toast, then the slow clock (K1 x final)', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('awaiting_verdicts'), R('final')])
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  expect(seen.toasts).toHaveLength(1)
+  expect(await pane($)).toContain('not read yet')
+  const polls = seen.urls.length
+  await clock.advance(225_000)
+  expect(seen.urls.length, 'unread and over: only the slow 240 s re-read').toBeLessThanOrEqual(polls + 1)
+})
+
+// The race of round 3 (c): a body fetched before the confirm lands after it. It is older than the rank the confirm
+// wrote, so it moves nothing, and the row goes on to the child.
+test('route: an awaiting_verdicts body that lands after the confirm is stale and moves nothing (K3 x stale)', async ($, on) => {
+  reads(on, [findingsWith({ route_state: 'awaiting_verdicts', final: false })])
+  confirms(on, { route_state: 'pending', final: false })
+  let n = 0
+  const { clock, seen } = await routedStart($, on, async () => {
+    n += 1
+    if (n === 1) return R('awaiting_verdicts')
+    if (n === 2) { await $.tool.call({ tool: CONFIRM, review_id: 'rev_1' } as never); return R('awaiting_verdicts') }
+    return n === 3 ? R('pending') : R('continued', { continued_by: 'rev_c' })
+  })
+  await clock.advance(75_000)
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await clock.advance(75_000)
+  expect(await verdictsLine($), 'judged: no verdict line').not.toContain('confirm_findings for rev_1')
+  const after = seen.urls.length
+  await clock.advance(15_000)
+  expect(seen.urls.length, 'the stale body set the server cadence, not every tick').toBe(after)
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+})
+
+test('route: pending then final with nothing to judge is announced once as done (K0p x final)', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('pending', { findings: 0 }), R('final', { findings: 0 })])
+  await clock.advance(75_000)
+  expect(seen.toasts).toHaveLength(0)
+  await clock.advance(75_000)
+  expect(seen.toasts).toEqual(['OhMyBug: Hunt rev_1 is done · 0 findings.'])
+})
+
+test('route: a failed step 1 with an open route is not a failure; it follows the child (failed x pending)', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('pending', { status: 'failed' }), R('continued', { status: 'failed', continued_by: 'rev_c' })])
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  expect(toastsOf(seen)).not.toContain('failed')
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+})
+
+test('route: a failed step 1 that ends final is announced failed once (failed x final)', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('pending', { status: 'failed' }), R('final', { status: 'failed' })])
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  const polls = seen.urls.length
+  await clock.advance(150_000)
+  expect(seen.toasts).toEqual(['OhMyBug: Hunt rev_1 failed.'])
+  expect(seen.urls.length).toBe(polls)
+})
+
+// Round 3 (d): the child is a new review: its own done is news and its own verdicts are owed.
+test('route: the followed child resets seen and judged', async ($, on) => {
+  reads(on, [findingsWith({ route_state: 'awaiting_verdicts', final: false }), findingsWith({ review_id: 'rev_c' })])
+  confirms(on, { route_state: 'pending', final: false })
+  const { clock, seen } = await routedStart($, on, [R('continued', { continued_by: 'rev_c' }),
+    JSON.stringify({ review_id: 'rev_c', status: 'done', findings: 1, next_poll_after_s: 60 })])
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await $.tool.call({ tool: CONFIRM, review_id: 'rev_1' } as never)
+  await clock.advance(15_000)
+  await clock.advance(75_000)
+  expect(toastsOf(seen)).toContain('rev_c is done · 1 finding')
+  await $.tool.call({ tool: GET, review_id: 'rev_c' } as never)
+  expect(await verdictsLine($)).toContain('confirm_findings for rev_c')
+})
+
+test('route: a route word the mod does not know is not the end (unknown x any)', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('deciding'), R('constructor'), R('final')])
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  expect(seen.toasts).toHaveLength(0)
+  await clock.advance(75_000)
+  expect(toastsOf(seen)).toContain('rev_1 is done')
+})
+
+test('route: a body with no route_state on a routed row keeps its rank (not said x held)', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('snap_running', { status: 'running' }),
+    JSON.stringify({ status: 'done', findings: 2, next_poll_after_s: 60 }), R('pending'), R('final')])
+  for (let i = 0; i < 3; i++) await clock.advance(75_000)
+  expect(seen.toasts).toHaveLength(0)
+  await clock.advance(75_000)
+  expect(seen.toasts).toHaveLength(1)
+})
+
+test('route: continued with no usable id keeps polling step 1; a read naming the child moves it (K2 x continued, no id)', async ($, on) => {
+  reads(on, [findingsWith({ route_state: 'awaiting_verdicts', final: false }), findingsWith({ route_state: 'continued', continued_by: 'rev_c', final: false })])
+  const { clock, seen } = await routedStart($, on, [R('continued')])
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  expect(seen.urls.every(u => u.includes('/r/rev_1/'))).toBe(true)
+  expect(seen.toasts).toHaveLength(0)
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await clock.advance(75_000)
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+})
+
+test('route: a 404 closes a routed row for good (K2 x 404)', async ($, on) => {
+  reads(on, [findingsWith({ route_state: 'awaiting_verdicts', final: false })])
+  const { clock, seen } = await routedStart($, on, [GONE])
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await clock.advance(75_000)
+  await clock.advance(600_000)
+  expect(seen.urls).toHaveLength(1)
+  expect(seen.toasts).toHaveLength(0)
+})
+
+test('route: a confirm answer that says final closes the row (K2 x confirm final)', async ($, on) => {
+  reads(on, [findingsWith({ route_state: 'awaiting_verdicts', final: false })])
+  confirms(on, { route_state: 'final', final: true })
+  const { clock, seen } = await routedStart($, on, [R('final')])
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await $.tool.call({ tool: CONFIRM, review_id: 'rev_1' } as never)
+  await clock.advance(150_000)
+  expect(seen.urls).toHaveLength(0)
+  expect(await verdictsLine($)).not.toContain('rev_1')
+  expect(seen.toasts).toHaveLength(0)
+})
+
+for (const [label, answer] of [['awaiting_verdicts', { route_state: 'awaiting_verdicts', final: false }], ['no route_state', {}]] as const) {
+  test(`route: after a confirm that answers ${label} the row is still polled and follows the child`, async ($, on) => {
+    reads(on, [findingsWith({ route_state: 'awaiting_verdicts', final: false })])
+    confirms(on, answer)
+    const { clock, seen } = await routedStart($, on, [R('awaiting_verdicts'), R('continued', { continued_by: 'rev_c' })])
+    await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+    await $.tool.call({ tool: CONFIRM, review_id: 'rev_1' } as never)
+    await clock.advance(75_000)
+    await clock.advance(75_000)
+    expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+  })
+}
+
+test('route: a read at pending counts as read; the final after it is silent and asks for verdicts (K0p x read, Q1)', async ($, on) => {
+  reads(on, [findingsWith({ route_state: 'pending', final: false })])
+  const { clock, seen } = await routedStart($, on, [R('pending'), R('final')])
+  await clock.advance(75_000)
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await clock.advance(75_000)
+  expect(seen.toasts).toHaveLength(0)
+  expect(await verdictsLine($)).toContain('confirm_findings for rev_1')
+})
+
+test('route: a file request older than the confirmed rank is stale (K3 x files)', async ($, on) => {
+  reads(on, [findingsWith({ route_state: 'awaiting_verdicts', final: false })])
+  confirms(on, { route_state: 'pending', final: false })
+  const { clock, seen } = await routedStart($, on, [R('snap_running', { status: 'running', files_requested: true })])
+  await $.tool.call({ tool: GET, review_id: 'rev_1' } as never)
+  await $.tool.call({ tool: CONFIRM, review_id: 'rev_1' } as never)
+  await clock.advance(75_000)
+  const polls = seen.urls.length
+  await clock.advance(75_000)
+  expect(toastsOf(seen)).not.toContain('asked for files')
+  expect(seen.urls.length).toBeGreaterThan(polls)
+})
+
+test('route: a confirm on a row nobody read polls it at once (K0 x confirm pending)', async ($, on) => {
+  confirms(on, { route_state: 'pending', final: false })
+  const { clock, seen } = await routedStart($, on, [R('pending')])
+  await $.tool.call({ tool: CONFIRM, review_id: 'rev_1' } as never)
+  await clock.advance(15_000)
+  expect(seen.urls).toHaveLength(1)
+  expect(seen.toasts).toHaveLength(0)
+})
+
+// The service does not promise a route only moves up (an operator's un-expire can bring awaiting_verdicts back after
+// pending): the mod's own rule is that a lower rank than it holds is ignored, so the row keeps waiting and the higher
+// rank still arrives. What the service does promise: continued only ever goes on to final (its child row deleted).
+test('route: an announced step 1 that the server says was read elsewhere settles, and still follows (K1 x dealt)', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('awaiting_verdicts'), R('awaiting_verdicts', { read_after_done: true }),
+    R('continued', { continued_by: 'rev_c' })])
+  await clock.advance(75_000)
+  expect(await pane($)).toContain('not read yet')
+  await clock.advance(75_000)
+  expect(await pane($)).not.toContain('not read yet')
+  expect(await band($)).not.toContain('rev_1')
+  await clock.advance(75_000)
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+})
+
+test('route: a step 1 closed because its child is tracked already is polled no more (tombstone x held rank)', async ($, on) => {
+  const submits = [JSON.stringify({ review_id: 'rev_c', status: 'running', mode: 'fast', status_url: 'https://status.test/r/rev_c/status' }), submitted]
+  on('tool.call', { tool: SUBMIT }, async () => ({ result: { content: [] }, text: submits.shift()! }))
+  const { clock, seen } = await routedStart($, on, async () => {
+    const step1 = seen.urls.filter(u => u.includes('/r/rev_1/')).length
+    return step1 <= 1 ? R('pending') : R('continued', { continued_by: 'rev_c' })
+  })
+  await $.tool.call({ tool: SUBMIT } as never)
+  for (let i = 0; i < 6; i++) await clock.advance(75_000)
+  expect(seen.urls.filter(u => u.includes('/r/rev_1/')).length).toBe(2)
+})
+
+test('route: a lower rank than the row holds is ignored (the mod\'s rule, not a server promise)', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('pending'), R('awaiting_verdicts'), R('continued', { continued_by: 'rev_c' })])
+  for (let i = 0; i < 3; i++) await clock.advance(75_000)
+  expect(seen.toasts).toHaveLength(0)
+  expect(seen.urls.at(-1)).toBe('https://status.test/r/rev_c/status?w=mod')
+})
+
+test('route: continued then final (the child row gone) is accepted as the end', async ($, on) => {
+  const { clock, seen } = await routedStart($, on, [R('continued'), R('final')])
+  await clock.advance(75_000)
+  await clock.advance(75_000)
+  expect(toastsOf(seen)).toContain('rev_1 is done')
 })
 
 test('every status poll the mod makes names its waiter: w=mod, appended after any query the URL already has', async ($, on) => {

@@ -23,7 +23,7 @@
 
 import type { EngineInterface as Engine, Register, RenderChildren } from 'claude-code'
 
-import { bodyOf, catchOf, findingsOf, gateReason, halfBlocks, huntLabel, mascotOf, minutes, num, pollState, routeOf, speciesOf, statusState, str, toolKind } from './parse'
+import { bodyOf, catchOf, findingsOf, gateReason, halfBlocks, huntLabel, mascotOf, minutes, num, ROUTE_OVER, routeRead, speciesOf, statusState, str, toolKind } from './parse'
 
 /** The status door journals which waiter polled (`w`): the skill's watch loop sends `loop`, the mod `mod`. */
 export const tagged = (url: string): string => {
@@ -58,6 +58,9 @@ type BughunterHunt = {
    *  told about it in the prompt until this chat's agent reads the result (not `seen`: the server saying another chat
    *  read it must not end the note). */
   pressed?: { parent: string }
+  /** The service route: the highest rank any answer about this id named (routeRead). Undefined for an ordinary hunt
+   *  and for a followed child. Never goes down; while it is below ROUTE_OVER the row is watched whatever its state. */
+  route?: number
 }
 
 /** The one band above the prompt. `id` is always a tracked hunt; `state` is the
@@ -96,6 +99,9 @@ const SEVERITY = ['critical', 'high', 'medium', 'low']
 const COLOR: Record<string, string> = { critical: 'red', high: 'red', medium: 'yellow' }
 
 const isOpen = (h: BughunterHunt) => h.state === 'running' || h.state === 'needs_files'
+const routeOpen = (h: BughunterHunt) => h.route !== undefined && h.route < ROUTE_OVER
+/** Polled at the server's cadence: an open hunt, or a step 1 whose route is not over (its done is not the end). */
+const watched = (h: BughunterHunt) => isOpen(h) || routeOpen(h)
 /** Done, read by the agent, and no verdicts seen for it: the one next step left. */
 const awaitsVerdicts = (h: BughunterHunt, cwd: string, now: number) =>
   ours(h, cwd) && h.state === 'done' && h.seen && !h.judged && !h.settled && now - h.startedAt < STALE_MS
@@ -117,13 +123,16 @@ function news(h: BughunterHunt): string {
   if (h.state === 'needs_files') return `Reviewers of hunt ${h.id} asked for files.`
   if (h.state === 'failed') return `Hunt ${h.id} failed.`
   const n = h.findings
-  return `Hunt ${h.id} is done${n === undefined ? '' : ` · ${n} finding${n === 1 ? '' : 's'}`}.`
+  const count = n === undefined ? '' : ` · ${n} finding${n === 1 ? '' : 's'}`
+  // A routed step 1 done is not the hunt's end: a fast hunt may follow once its findings are judged.
+  return routeOpen(h) ? `Hunt ${h.id} waits for your verdicts${count}.` : `Hunt ${h.id} is done${count}.`
 }
 
 /** What auto-resume sends (OHMYBUG_AUTO_RESUME=1): the hunt's id, and the step its seen state calls for. */
 function resumeText(h: BughunterHunt): string {
   if (h.state === 'needs_files') return `Reviewers of the OhMyBug hunt ${h.id} asked for files. Call get_findings with review_id ${h.id} and serve them.`
   if (h.state === 'failed') return `The OhMyBug hunt ${h.id} failed. Call get_findings with review_id ${h.id} to see why.`
+  if (routeOpen(h)) return `The OhMyBug hunt ${h.id} waits for your verdicts. Read it with get_findings (review_id ${h.id}), judge its findings with confirm_findings and continue the bughunter flow.`
   return `The OhMyBug hunt ${h.id} is done. Read it with get_findings (review_id ${h.id}) and continue the bughunter flow.`
 }
 
@@ -163,9 +172,9 @@ async function observeGate($: Engine, command: string, text: string | undefined,
 const follow = (h: BughunterHunt, next: string, now: number): BughunterHunt | undefined => {
   const statusUrl = h.statusUrl?.replace(`/r/${h.id}/`, `/r/${next}/`)
   if (next === h.id || !statusUrl || statusUrl === h.statusUrl) return undefined
-  if (huntList.some(x => x.id === next)) return { ...h, state: 'done', seen: true, settled: true }
+  if (huntList.some(x => x.id === next)) return { ...h, state: 'done', seen: true, settled: true, route: ROUTE_OVER }
   return { ...h, id: next, statusUrl, state: 'running', seen: false, findings: undefined, judged: undefined,
-    settled: false, pressed: undefined, nextAt: now, startedAt: now, median: undefined }
+    settled: false, pressed: undefined, nextAt: now, startedAt: now, median: undefined, route: undefined }
 }
 
 async function observe($: Engine, kind: string, input: Record<string, unknown>, text: string | undefined, failed: boolean) {
@@ -193,38 +202,47 @@ async function observe($: Engine, kind: string, input: Record<string, unknown>, 
     await put($, id, cur => !cur ? h : !again ? h
       : ours(cur, cwd) || (cur.session !== sessionId && cur.seen) ? undefined : adopt(cur, cwd))
   } else if (kind === 'get_findings' || kind === 'wait_review') {
-    const state = pollState(body)
-    const terminal = state === 'done' || state === 'failed'
-    // Read to its end here: the hunt is this chat's now, and whatever the server said before, this chat owes the
-    // verdicts; a press note has done its job. A read that is not the end (running, or an error with no state) moves
-    // nothing: the owning chat keeps polling it and keeps its note.
-    const route = routeOf(body)
+    const own = statusState(body)
+    const terminal = own === 'done' || own === 'failed'
+    // Read to its end here (the review's own status, whatever the route): the hunt is this chat's now, and whatever
+    // the server said before, this chat owes the verdicts; a press note has done its job. A read that is not the end
+    // (running, or an error with no state) moves nothing: the owning chat keeps polling it and keeps its note. An
+    // answer older than the route the row holds moves nothing at all.
     const next = await put($, id, cur => {
       if (!cur) return undefined
-      // Followed, not adopted: a read that is not the end moves nothing, so the owning chat keeps the row.
-      const followed = route.next && follow(cur, route.next, now)
+      const r = routeRead(body, cur.route)
+      if (!r) return undefined
+      // Followed, not adopted: the child is a new hunt the owning chat keeps.
+      const followed = r.next && follow(cur, r.next, now)
       if (followed) return followed
       const h = terminal ? adopt(cur, cwd) : cur
-      return { ...h, state: state ?? h.state, seen: terminal || h.seen, settled: terminal ? false : h.settled,
-        findings: state === 'done' ? findingsOf(body).length : h.findings, pressed: terminal ? undefined : h.pressed }
+      return { ...h, route: r.route, state: r.state ?? h.state, seen: terminal || h.seen, settled: terminal ? false : h.settled,
+        findings: own === 'done' ? findingsOf(body).length : h.findings, pressed: terminal ? undefined : h.pressed }
     })
     if (!next) return
     if (bandNow?.kind === 'hunt' && bandNow.id === id) setBand($, null)
     if (heldId === id) heldId = undefined
     // The deep offer comes in the answer for this tracked hunt, and only there.
     const offer = body.deep_offer as Record<string, unknown> | undefined
-    if (kind === 'get_findings' && next.state === 'done' && !route.open && offer && typeof offer === 'object' && str(offer.pitch)) {
+    if (kind === 'get_findings' && next.state === 'done' && !routeOpen(next) && offer && typeof offer === 'object' && str(offer.pitch)) {
       // A strong offer is the server's recommendation, with its reasons in the pitch; the price is the server's quote.
       // Its own buttons when the server sends their addresses; an older server's offer keeps the chat buttons.
       setBand($, { kind: 'deep', id, text: str(offer.pitch)!.slice(0, 280), strong: offer.strength === 'strong', price: num(offer.price_usd),
         start: buttonUrl(offer.start_url, next.statusUrl), snooze: buttonUrl(offer.snooze_url, next.statusUrl) })
     }
   } else if (kind === 'confirm_findings' && num(body.confirmed) !== undefined) {
-    // Step 1's verdicts are in and the route decides next: the child when it is named, or polled again while the
-    // route is open, as a hunt already read here (its `final` is no news).
-    const route = routeOf(body)
-    const next = await put($, id, cur => !cur ? undefined : (route.next && follow(cur, route.next, now))
-      || (route.open ? { ...cur, judged: true, state: 'running', seen: true, nextAt: now } : { ...cur, judged: true }))
+    // The verdicts are in. On a routed step 1 the answer names where the route went: the child, or the rank the row
+    // takes (polled at once while still open: the service decides on the verdicts). A confirm exists only for a done
+    // review, so it reads as one. It never changes `seen`: that is the agent's read.
+    const next = await put($, id, cur => {
+      if (!cur) return undefined
+      const r = routeRead({ ...body, status: 'done' }, cur.route)
+      if (!r || r.route === undefined) return { ...cur, judged: true }
+      const followed = r.next && follow(cur, r.next, now)
+      if (followed) return followed
+      const h: BughunterHunt = { ...cur, judged: true, route: r.route, state: r.state ?? cur.state }
+      return r.route < ROUTE_OVER ? { ...h, nextAt: now } : h
+    })
     if (!next) return
     if (bandNow?.id === id && bandNow.kind === 'hunt') setBand($, null)
   } else {
@@ -324,7 +342,7 @@ async function pollDue($: Engine) {
   // A done hunt nobody here has read yet is asked again on the slow clock: the
   // server knows when another session read or judged it, and the nudges (band,
   // auto-resume) then read that here with no network call of their own.
-  for (const h of huntList.filter(x => ours(x, cwd) && x.state === 'done' && !x.seen && x.statusUrl && now >= x.nextAt)) {
+  for (const h of huntList.filter(x => ours(x, cwd) && x.state === 'done' && !x.seen && !routeOpen(x) && x.statusUrl && now >= x.nextAt)) {
     let body
     try {
       const res = await $.http.fetch(tagged(h.statusUrl!))
@@ -341,7 +359,7 @@ async function pollDue($: Engine) {
     if (settle && bandNow?.kind === 'hunt' && bandNow.id === h.id) setBand($, null)
     if (settle && heldId === h.id) heldId = undefined
   }
-  const due = huntList.filter(h => ours(h, cwd) && isOpen(h) && h.statusUrl && now >= h.nextAt)
+  const due = huntList.filter(h => ours(h, cwd) && watched(h) && h.statusUrl && now >= h.nextAt)
   for (const h of due) {
     let res
     try {
@@ -354,29 +372,33 @@ async function pollDue($: Engine) {
       continue
     }
     ctx.blocked = false
-    if (res.status === 404) { await apply($, h.id, () => ({ state: 'failed', seen: true })); continue }
+    if (res.status === 404) { await apply($, h.id, cur => ({ state: 'failed', seen: true, ...(cur.route !== undefined ? { route: ROUTE_OVER } : {}) })); continue }
     let body
     try { body = res.ok ? JSON.parse(res.text) : undefined } catch { body = undefined }
-    const state = body && typeof body === 'object' ? pollState(body) : undefined
     const wait = Math.min(240, Math.max(30, num(body?.next_poll_after_s) ?? 60))
     // Judged against the hunt as apply() finds it, not the copy taken before the
-    // fetch: a tool result read meanwhile may already have moved it there.
+    // fetch: a tool result read meanwhile may already have moved it there, and a
+    // body older than the route it holds moves nothing (routeRead).
     let moved = false
-    const route = body && typeof body === 'object' ? routeOf(body) : { open: false }
-    if (route.next) {
-      let followed = false
-      await apply($, h.id, cur => { const f = follow(cur, route.next!, now); followed = !!f; return f ?? {} })
-      if (followed) continue
-    }
+    let left = false
     const next = await apply($, h.id, cur => {
+      const r = body && typeof body === 'object' ? routeRead(body, cur.route) : undefined
+      if (!r) return { nextAt: now + wait * 1000 }
+      const followed = r.next && follow(cur, r.next, now)
+      if (followed) { left = true; return followed }
+      const state = r.state
       moved = !!state && state !== cur.state
-      const settled = moved && state === 'done' && dealtWith(body)
-      return moved
-        ? { nextAt: now + wait * 1000, state, findings: num(body.findings) ?? cur.findings, ...(settled ? settledBy(body) : {}) }
-        : { nextAt: now + wait * 1000 }
+      // An ordinary hunt settles on its move to done; a routed one whenever it is done and this agent has not read it.
+      const settled = state === 'done' && dealtWith(body) && (cur.route === undefined && r.route === undefined ? moved : !cur.seen)
+      if (settled) left = true
+      return { nextAt: now + wait * 1000, route: r.route, ...(moved ? { state, findings: num(body.findings) ?? cur.findings } : {}),
+        ...(settled ? settledBy(body) : {}) }
     })
+    // Followed or settled: nothing of the old row is left to show.
+    if (left && bandNow?.kind === 'hunt' && bandNow.id === h.id) setBand($, null)
+    if (left && heldId === h.id) heldId = undefined
     // Back to running (files served) is news to nobody.
-    if (next && moved && state !== 'running') await announce($, next)
+    if (next && moved && next.state !== 'running') await announce($, next)
   }
   await refreshStatus($)
 }
@@ -385,7 +407,7 @@ async function pollDue($: Engine) {
  *  another chat take it over, and a stale copy would undo either. */
 async function apply($: Engine, id: string, change: (cur: BughunterHunt) => Partial<BughunterHunt>) {
   const cwd = await $.session.cwd()
-  return put($, id, cur => cur && isOpen(cur) && ours(cur, cwd) ? { ...cur, ...change(cur) } : undefined)
+  return put($, id, cur => cur && watched(cur) && ours(cur, cwd) ? { ...cur, ...change(cur) } : undefined)
 }
 
 const httpsUrl = (v: unknown): string | undefined => { const s = str(v); return s && /^https:\/\//.test(s) ? s : undefined }
