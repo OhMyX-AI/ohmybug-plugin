@@ -876,15 +876,16 @@ for phrase in ("### Hunt modes: lite, snap, fast", "send it as `submit_review`'s
     assert phrase in skill, phrase
 # The upload prints the refusal's body and code on any curl (no -f, no 7.76-only flag).
 assert "curl -sS -w '\\nHTTP %{http_code}\\n' -X POST" in skill and "--fail-with-body" not in skill
+assert "Otherwise send no `mode`: the hunt is `fast`" not in skill and "may start with a first step" in skill
 assert "once the last line reads `HTTP 200`" in skill and "ask which one they want" in skill
 review_cmd = open(str(Path(router).parent.parent / "commands/review.md"), encoding="utf-8").read()
-assert "send it as `submit_review`'s `mode`" in review_cmd and "A mode does\nnot go with `deep`:" in review_cmd
-assert "the first stage, in the mode the user named (else fast)" in review_cmd and "default" not in review_cmd and "`lite`, `snap` and `fast`" in review_cmd
+assert "send it as `submit_review`'s `mode`" in review_cmd and "A mode does not go with `deep`:" in review_cmd
+assert "the first stage, in the mode the user named (with none named, see below)" in review_cmd and "the hunt is fast" not in review_cmd and "may start with a first step" in review_cmd and "default" not in review_cmd and "`lite`, `snap` and `fast`" in review_cmd
 assert "`deep` / `--deep` is the user asking for the deep hunt up front" in review_cmd and "ask which one they want" in review_cmd
 # The Codex sentence is what Codex sessions get: pinned in the emitted text, and mode asks are routed.
 for phrase in ("goes as submit_review's top-level mode; with none named send no mode", "never mode: fast",
                "(mode_unavailable, mode_needs_repo, mode_too_large, mode_with_deep)", "never a silent switch", "Never send mode with deep",
-               "The heartbeat's <mode> is the submit answer's hunt_mode", "with none named send no mode, and the hunt is fast"):
+               "The heartbeat's <mode> is the submit answer's hunt_mode", "with none named send no mode: on a pushed commit the service may start with a first step"):
     assert phrase in router_text, phrase
 # Slice 1 has no default mode and no typical minutes: nothing may promise them.
 for text in (skill, router_text, stats):
