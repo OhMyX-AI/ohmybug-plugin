@@ -647,6 +647,17 @@ assert "3 consecutive wakes that could not read a status at all" in router_text,
 # ...and the age cap beside it: a cap shorter than the deep budget drops a live
 # hunt, and the counter alone lets a heartbeat nothing can satisfy run forever.
 assert "Retire a heartbeat older than 180 minutes" in router_text, "ROUTING must carry the 180-minute age cap"
+# The finished hunt's offer (found live: a Codex wake allowed one status line
+# was the only read of a finished hunt, so the pitch was never shown). One
+# sentence, the same words on both surfaces, because the agent copies it into
+# the heartbeat prompt. No route, strength or price wording: the server sends
+# deep_offer only when it may be shown, and the pitch carries the rest.
+OFFER_WAKE = ("Beside that line, when a wake's read (wait_review or get_findings) carries deep_offer, the wake prints deep_offer.pitch word for word after its status line, "
+              "asks whether to start the deep hunt, and starts nothing itself: the answer is the user's. "
+              "Write this sentence into the heartbeat prompt word for word, because that wake is often the only read of a finished hunt.")
+assert OFFER_WAKE in router_text, "ROUTING must carry the wake's offer sentence"
+assert OFFER_WAKE in " ".join(codex_bullet.split()), "the skill's Codex bullet must carry the same sentence"
+assert "A yes to a pitch a wake printed is the same yes: read `get_findings` for that `how` first." in " ".join(skill.split()), "a yes to a wake's pitch goes through get_findings' how"
 # Said at the start of every session: a session that began without the tools
 # never gets them, and the merge gate is too late to learn it.
 assert "confirm the ohmybug MCP tools are present" in router_text, "ROUTING must ask for the tools-present check at session start"
