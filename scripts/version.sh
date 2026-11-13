@@ -71,8 +71,19 @@ EOF
 # them. `--check` does catch it on any re-run, and main goes red afterwards, so
 # the exposure is a stale green check. Fetch before computing if branches start
 # overlapping often enough for that to be a real risk.
+# The live repository. A clone made before the move keeps `origin` on the retired
+# one, whose main stopped at an older release: reading it stamped a number the
+# marketplace already had (0.157.0 again, for 0.158.0). Its remote wins, under any name.
+LIVE_REPO='OhMyX-AI/ohmybug-plugin'
+
 main_ref() {
-  local b
+  local b r
+  for r in $(git remote); do
+    case "$(git remote get-url "$r" 2>/dev/null)" in
+      *"$LIVE_REPO"|*"$LIVE_REPO".git|*"$LIVE_REPO"/)
+        git rev-parse --verify -q "$r/main" >/dev/null && { printf '%s' "$r/main"; return 0; } ;;
+    esac
+  done
   for b in origin/main origin/master main master; do
     git rev-parse --verify -q "$b" >/dev/null && { printf '%s' "$b"; return 0; }
   done
@@ -469,6 +480,26 @@ case "${1:-}" in
       echo "self-test: --check must refuse loudly when main's number is unreadable (rc=$rc): $out" >&2
       rm -rf "$tmp"; exit 1
     fi
+
+    # A clone whose `origin` is the retired repository, with the live one beside
+    # it under another name: main is read from the live one, whatever origin says.
+    live=$tmp/live/OhMyX-AI/ohmybug-plugin.git  # spelled out: a mutated LIVE_REPO must not move the fixture too
+    mkdir -p "$(dirname "$live")"
+    git clone -q --bare "$origin" "$live"
+    gitc checkout -q main
+    gitc reset -q --hard origin/main
+    gitc remote add live "$live"
+    gitc remote set-url origin "$tmp/retired.git"
+    git clone -q --bare "$origin" "$tmp/retired.git"
+    git -C "$tmp/retired.git" update-ref refs/heads/main "$(git -C "$tmp/retired.git" rev-list --first-parent main | sed -n 3p)"
+    gitc fetch -q origin
+    gitc fetch -q live
+    want="0.$(( $(git -C "$repo" rev-list --count --first-parent live/main) + 1 )).0"
+    got=$(cd "$repo" && bash "$SELF")
+    [ "$got" = "$want" ] || {
+      echo "self-test: with a stale origin beside the live remote, the version came out $got, not $want" >&2
+      rm -rf "$tmp"; exit 1
+    }
 
     rm -rf "$tmp"
     echo "version self-test: ok ($V)"
