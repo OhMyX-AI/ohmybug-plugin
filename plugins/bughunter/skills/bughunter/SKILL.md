@@ -971,7 +971,11 @@ others are refused before anything starts.
 - **The mode is the user's word.** When they name one – "lite hunt",
   "snap review", `lite` / `snap` / `fast` or `--mode <m>` as the
   argument of `/bughunter:review` – send it as `submit_review`'s top-level
-  `mode`. Otherwise send no `mode`: the hunt is `fast`. Never pick a mode on your own to save or
+  `mode`. Otherwise send no `mode`: on a pushed commit the service may start with a first step
+  (`snap`, or `lite` on lite accounts) and go on with a fast hunt of the same commit (§the routed
+  hunt under the watch loop: a `route_state` in the answer); uncommitted work, an uploaded diff and
+  a change the first step cannot take (such as one over snap's 1 MB) get the `fast` hunt. Never pick
+  a mode on your own to save or
   spend the user's money.
 - **Before the submit** of a named mode, say in one line what will run: the
   mode and its price, read from `get_balance` `modes` (`price_usd`). A mode
