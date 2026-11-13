@@ -65,20 +65,30 @@ assert "set targetThreadId" not in session_text
 for phrase in ("A routed hunt carries route_state", "done on it is not the end until final: true", "replace the heartbeat with one on <id>", "its own retire_at, from now", "take get_attestation from <id>, never from the first review", "and neither is failed", "except that a file request still comes first", "it stays routed until final: true", "the rules above that stop on, or delete the heartbeat on, done or failed do not apply"):
     assert phrase in session_text, phrase
 # The Codex wake holds nothing but its prompt either: the route memory line, the
-# route word decided first, one keep-or-move per wake, and the continuation's own cap.
-for phrase in ("carries a line routed: no at creation",
-               "Route branch (route_state), decided before the rules that stop on done or failed, first match only",
-               "with none and routed: yes in the prompt, call get_findings once and take its route_state; still none under routed: yes counts as pending",
-               "snap_running or pending, with any status, or a route_state not named here: keep the heartbeat on the same review and print bughunt · <mode> · running",
-               "judge with confirm_findings only the findings that carry no verdict yet (none left: send nothing), print bughunt · <mode> · running and keep the heartbeat on it",
-               "a refused confirm is shown verbatim and the heartbeat is kept",
-               "After either of these keep arms, when the prompt says routed: no, update the heartbeat to the same prompt saying routed: yes (same retire_at)",
-               "call get_findings on the first review once, then replace the heartbeat with one on <id>, mode fast, routed: no",
-               "its own retire_at, from now: this wake + 180 min, because it is a new review; no routed: yes copy stays on the first review",
-               "rather than the age cap; that fresh heartbeat keeps the prompt's routed: line",
-               "(a continued_by review is a new review with its own retire_at)"):
+# health checks before the route word, one keep-or-move per wake, the
+# continuation's own cap. Walked in order, so a rule moved ahead of another fails.
+def walk_order(text, steps, what):
+    at = -1
+    for phrase in steps:
+        assert phrase in text, "%s: %s" % (what, phrase)
+        assert text.index(phrase) > at, "%s out of order: %s" % (what, phrase)
+        at = text.index(phrase)
+walk_order(session_text, (
+    "the heartbeat prompt carries a line routed: yes when the submit answer carried a route_state other than final, else routed: no",
+    "Route branch (route_state), walked after the age cap, after the read (a wake with no answer prints poll-failed and counts towards retirement before any route rule) and after a file request, and before the rules that stop on done or failed, first match only",
+    "with none and routed: yes in the prompt, call get_findings once and take its route_state (that call failing makes it a wake with no answer); still none under routed: yes counts as pending; none under routed: no is an ordinary hunt",
+    "final (the word, or final: true): the review is the answer, the rules that stop on done or failed apply",
+    "continued: the review that goes on is continued_by from that read, or from one get_findings when it names none; with none, print bughunt · <mode> · running and keep the heartbeat",
+    "call get_findings on the first review once, then replace the heartbeat with one on <id>, mode fast, routed: no (its own monitor fields from get_findings(<id>)",
+    "its own retire_at, from now: this wake + 180 min, because it is a new review; no routed: yes copy stays on the first review)",
+    "creating the new heartbeat before deleting the old one and keeping the old one when the read of <id> fails",
+    "awaiting_verdicts: judge with confirm_findings only the findings that carry no verdict yet (none left: send nothing), print bughunt · <mode> · running and keep the heartbeat on it; a refused confirm is shown verbatim and the heartbeat is kept",
+    "snap_running, pending or any other route_state, with any status: keep the heartbeat on the same review and print bughunt · <mode> · running",
+    "After either of these keep arms, when the prompt says routed: no, update the heartbeat to the same prompt saying routed: yes (same retire_at)",
+    "No route_state under routed: no means an ordinary hunt."), "router")
+for phrase in ("rather than the age cap; that fresh heartbeat keeps the prompt's routed: line", "(a continued_by review is a new review with its own retire_at)"):
     assert phrase in session_text, phrase
-assert "once a read carries a route_state other than final, update the heartbeat" not in session_text, "routed: yes is set only after a keep arm, never beside the continuation"
+assert "No route_state means an ordinary hunt." not in session_text
 # The README's contract table: each route field in the get_findings row, each hold error on the Errors line.
 readme_all = open(str(Path(router).parents[3] / "README.md"), encoding="utf-8").read()
 assert "## MCP contract" in readme_all, "README lost its MCP contract heading"
@@ -90,7 +100,7 @@ for phrase in ("review_of_record}` (`review_of_record` on every `done`", "route_
 assert "plus the route fields of `get_findings` on a routed hunt" in row("confirm_findings")
 assert "refused on a routed first review that is not the answer" in row("get_attestation")
 errors = next((l for l in readme.splitlines() if l.startswith("Errors:")), "")
-for phrase in ("`route_pending` (`get_attestation` on a routed first review whose route is not decided", "`route_continued` (`get_attestation` on a first review that was continued: take the proof from `continued_by`)", "`route_unavailable` ("):
+for phrase in ("`route_pending` (`get_attestation` on a routed first review whose route is not decided", "`route_continued` (`get_attestation` on a first review that was continued: take the proof from `continued_by`)", "`route_unavailable` (any read or `get_attestation`: where the route stands could not be read: read again)"):
     assert phrase in errors, phrase
 
 skill = open(str(Path(router).parent.parent / "skills/bughunter/SKILL.md"), encoding="utf-8").read()
@@ -554,9 +564,10 @@ assert "`watch_poll_s` is the sleep, `monitor.heartbeat_s` the line\n  clock" in
 assert "rounded up to\n  whole poll cadences" in props and "must stay under the\n  prompt-cache TTL" in props
 assert "~9 min" not in skill and "13 min" not in skill and "9–12 min" not in skill, "the failure window is a time, and the cadence is the server's"
 claude_bullet = skill.split("- **Claude Code:**", 1)[1].split("\n\nIf the runtime cannot create its monitor", 1)[0]
+F = lambda t: " ".join(t.split())
 for phrase in ("`Bash` tool, `run_in_background: true`", "re-arm\n  the same command on each heartbeat wake", "`next_poll_after_s`", "on the `monitor.heartbeat_s` clock", "Every number in the loop\n  comes from the server", "up to 150 min", "CronCreate", "`3-59/4 * * * *`", "KEEP this job", "after `<fail_cap>` consecutive poll failures (3 for a job at\n  `interval_s`, 12 for one every minute", "older than 180 minutes", "print `bughunt · <mode> · watch-retired` and only then\n  `CronDelete`", "One job per review", "older review id", "answered with that one line and a re-arm", "the loop has already exited", "`~/.ohmybug/watch/<review_id>`", "do\n  not add a foreground `get_findings` beside an armed monitor"):
-    assert phrase in claude_bullet, phrase
-assert "up to 2 h" not in claude_bullet
+    assert F(phrase) in F(claude_bullet), phrase
+assert F("up to 2 h") not in F(claude_bullet)
 # No cadence literal in the bullet either (#67): the 240 in the cron example is
 # a derivation from interval_s, stated as one; the rest are the server's.
 for literal in ("every 45 seconds", "every 240 seconds", "180 s budget", "every 4 minutes"):
@@ -572,22 +583,23 @@ assert "call `get_findings` once; if the review is still running or\nwaiting for
 # condition must be the one the loop actually breaks on: the flags, not a status
 # word that body never carries. And the cron job, the surface with no Monitor
 # behind it, retires with the same remedy as the other two: read once, re-arm.
-assert "exits on `done` / `failed` or on the\n  `awaiting_client_files`/`files_requested` flags" in claude_bullet
-assert "never in its status word" in claude_bullet
-assert "call `get_findings` once and create a fresh job if the\n  review is still running" in claude_bullet
+assert F("exits on `done` / `failed` or on the\n  `awaiting_client_files`/`files_requested` flags") in F(claude_bullet)
+assert F("never in its status word") in F(claude_bullet)
+assert F("call `get_findings` once and create a fresh job if the\n  review is still running") in F(claude_bullet)
 assert "fourteen minutes" not in skill
 # The cron prompt is the whole instruction its wake sees, so it carries the wake
 # rule itself: without it, failures one and two have no line but the remembered
 # one, which is the incident.
-assert "call `get_findings`\n  once and print what that answered, and only if THAT fails too print `bughunt ·\n  <mode> · poll-failed` and count the wake as a poll failure — never the\n  previous status" in claude_bullet
+assert F("if it answered nothing, call `get_findings` once; if THAT fails too, this wake has no answer: print `bughunt · <mode> · poll-failed` and count the wake as a poll failure") in F(claude_bullet)
+assert F("for the step that ended it — never the previous status") in F(claude_bullet)
 # Either shape means a file request: the status body flags it beside the word,
 # get_findings puts it IN the word — and the wake that falls back to the tool
 # is exactly the one that would otherwise match neither branch.
-assert "or `needs_files`\n  from the `get_findings` fallback (which flags it exactly there) call\n  `get_findings`, serve the files and KEEP this job" in claude_bullet
-assert "review is still running or waiting for files AND the retirement came from poll\n  failures, not from the age cap" in claude_bullet
+assert F("or `needs_files`\n  from the `get_findings` fallback (which flags it exactly there) call\n  `get_findings`, serve the files and KEEP this job") in F(claude_bullet)
+assert F("review is still running or waiting for files AND the retirement came from poll\n  failures, not from the age cap") in F(claude_bullet)
 # The cron fallback curls the same status body as the deep wake, so it reads the
 # request off the flags too: keyed to the status word it sits through the window.
-assert "on `awaiting_client_files`/`files_requested` in the status\n  body (which flags a request there, not in its status word)" in claude_bullet
+assert F("on `awaiting_client_files`/`files_requested` in the status\n  body (which flags a request there, not in its status word)") in F(claude_bullet)
 codex_bullet = skill.split("- **Codex:**", 1)[1].split("- **Claude Code:**", 1)[0]
 # #1003: a heartbeat printed `running` on three wakes after the hunt was done,
 # with no tool call in the thread — the cadence fields say when to wake, and
@@ -632,7 +644,7 @@ for phrase in ("the one exception is a payload submit", "inside that wake call w
 # The Monitor surface reads on a failed poll like the other two (found in
 # review): a fresh poll-failed file keeps the Stop hook quiet while the loop fails,
 # so without this read a review sat done and unread behind that silence.
-assert "on `poll-failed` → one\n  `get_findings`, print what it answered" in claude_bullet
+assert F("on `poll-failed` → one\n  `get_findings`, print what it answered") in F(claude_bullet)
 after_loop = skill.split("Every printed line wakes you.", 1)[1].split("The loop above keeps", 1)[0]
 assert "**A `poll-failed`\nwake is a wake with no answer, and the wake rule applies: call `get_findings`\nonce" in after_loop
 assert "this surface must not be the one that only prints" in after_loop
@@ -640,11 +652,11 @@ assert "this surface must not be the one that only prints" in after_loop
 # submit's next_poll_after_s is under a minute and its file request is held open
 # for minutes, so the job runs every minute there and at interval_s otherwise.
 for phrase in ("the submit response names — `next_poll_after_s`", "an older server's submit\n  answer carries only `interval_s`: then curl `status_url` ONCE before creating\n  the job", "Under a minute", "every minute, the tightest cron\n  allows (`* * * * *`)", "otherwise `interval_s`", "one\n  job at one cadence for the whole hunt", "3 consecutive failures at `interval_s`, 12 at every minute"):
-    assert phrase in claude_bullet, phrase
+    assert F(phrase) in F(claude_bullet), phrase
 # The placeholders the cron prompt carries: the fail cap is one of them now, so
 # a job created every minute is not retired by a three-minute blip.
-assert "after `<fail_cap>` consecutive poll failures" in claude_bullet
-assert "after 3\n  consecutive poll failures" not in claude_bullet
+assert F("after `<fail_cap>` consecutive poll failures") in F(claude_bullet)
+assert F("after 3\n  consecutive poll failures") not in F(claude_bullet)
 # No literal hold or cadence on either surface: the server caps the hold and
 # names the cadence, and a number written here is the one an agent obeys when
 # the two disagree (measured: the tool's 45 beat the field's 240).
@@ -770,10 +782,10 @@ assert "terminal by construction" not in router_text
 # The CronCreate fallback is the other model-driven wake: a fresh cron turn has
 # no creation time, so the same ISO instant and the same first-read clause
 # travel in its prompt (rev: the remedy had landed on the Codex heartbeat only).
-assert "past `<retire_at>` (an\n  ISO timestamp you substitute at creation: the SUBMIT time + 180 minutes,\n  carried unchanged into every replacement job" in claude_bullet
+assert F("past `<retire_at>` (an\n  ISO timestamp you substitute at creation: the SUBMIT time + 180 minutes,\n  carried unchanged into every replacement job") in F(claude_bullet)
 assert "now + 180" not in skill and "tool result" not in codex_bullet
-assert "begins \"this is the first read after done\", say so" in claude_bullet
-assert "print `findings=N` from that answer" in claude_bullet
+assert F("begins \"this is the first read after done\", say so") in F(claude_bullet)
+assert F("print `findings=N` from that answer") in F(claude_bullet)
 # The count is `done`'s alone on this surface too: the Codex rule scopes it to
 # done and the enumerated failed line is bare, but the cron prompt read
 # "on done/failed … print findings=N" (rev: a failed hunt has no count to quote).
@@ -781,48 +793,55 @@ assert "print `findings=N` from that answer" in claude_bullet
 # its get_findings is the only tool call that clears the pending record on a
 # failed hunt (rev: the first cut dropped the call with the count, and the
 # gate then said "a hunt is RUNNING" until the record aged out).
-assert "on `done` or `failed` call `get_findings`" in claude_bullet
-assert "on `done`\n  print `findings=N` from that answer, on `failed` the bare `bughunt ·\n  <mode> · failed`" in claude_bullet
-assert "on done/failed call `get_findings`" not in claude_bullet
-assert "on `failed` print the bare" not in claude_bullet, "a bare print on failed with no read leaves the pending record"
-# The cron fallback's route branch: a fresh cron turn remembers nothing but its
-# prompt, so the route memory is a line INSIDE the quoted prompt, and the branch is
-# one ordered table the wake walks before the terminal rule.
-cron_prompt = claude_bullet.split('Prompt: "bughunt', 1)[1].split('a live hunt".', 1)[0]
+assert F("on `done` or `failed` call `get_findings`") in F(claude_bullet)
+assert F("on `done`\n  print `findings=N` from that answer, on `failed` the bare `bughunt ·\n  <mode> · failed`") in F(claude_bullet)
+assert F("on done/failed call `get_findings`") not in F(claude_bullet)
+assert F("on `failed` print the bare") not in F(claude_bullet), "a bare print on failed with no read leaves the pending record"
+# The cron fallback: a fresh cron turn remembers nothing but its prompt, so the
+# route memory is a line INSIDE the quoted prompt, and the wake is one numbered
+# procedure: the age cap and the read come before any route rule, the file
+# request before the route word, the route table before the terminal step.
+cron_prompt = claude_bullet.split('Prompt: "bughunt', 1)[1].split('KEEP this job".', 1)[0]
 assert any(l.strip() == "routed: no" for l in cron_prompt.splitlines()[:3]), "the cron prompt lost its routed: line"
-assert "review carried a `route_state` other than `final`. Prompt:" in " ".join(claude_bullet.split())
-cron_flat = " ".join(cron_prompt.split())
-steps = ("Route branch (route_state), decided before any rule below:",
-         "with none and `routed: yes` above, call `get_findings` once and take its `route_state`; still none under `routed: yes` counts as `pending`. Then, first match only:",
-         "(1) `continued` with `continued_by: <id>` → call `get_findings` on `<review_id>` once, `CronDelete` this job, call `get_findings(<id>)`, and create ONE job on `<id>` at its `monitor.interval_s` with a fail cap of 3 (its status URL is this one with the id replaced, `<mode>` fast, `routed: no`, and its own `<retire_at>` = this wake + 180 min: it is a new review);",
-         "(2) `awaiting_verdicts` → call `get_findings`, judge with `confirm_findings` only the findings that carry no verdict yet (none left: send nothing), print `bughunt · <mode> · running` and KEEP this job; a refused confirm is shown verbatim and the job is kept;",
-         "(3) `snap_running`, `pending` or a word not named here, whatever the status says (`failed` included) → print `bughunt · <mode> · running` and KEEP this job;",
-         "after (2) or (3) with `routed: no` above, replace this job with the same prompt saying `routed: yes` (same cadence, same `<retire_at>`);",
-         "(4) `final: true` → step 1 is the answer: the rules below apply, and a `continuation_refused` gets one line saying no fast hunt followed and why;",
-         "(5) no route word and `routed: no` → an ordinary hunt: the rules below;",
-         "otherwise, on `done` or `failed` call `get_findings`")
-at = -1
-for phrase in steps:
-    assert phrase in cron_flat, phrase
-    assert cron_flat.index(phrase) > at, "out of order: " + phrase
-    at = cron_flat.index(phrase)
-for phrase in ("carried unchanged into every replacement job of the same review", "(that fresh job keeps this prompt's `routed:` line)"):
-    assert phrase in cron_flat, phrase
-# The skill's Codex bullet restates the same table for an agent that reads the skill, not the router.
-codex_flat = " ".join(codex_bullet.split())
-for phrase in ("Route branch (route_state): the heartbeat prompt carries a line `routed: no` at creation",
-               "with none under `routed: yes` the `route_state` of one `get_findings`, still none counting as `pending`",
-               "`continued` → call `get_findings` on the first review once, then replace the heartbeat with one on the `continued_by` review, mode fast, `routed: no`",
-               "its own `retire_at` = this wake + 180 min (a new review), and no `routed: yes` copy left on the first review",
-               "`awaiting_verdicts` → judge only the findings with no verdict yet, print `running`, keep",
-               "`snap_running`, `pending` or another word, any status → print `running`, keep",
-               "after either keep, a `routed: no` prompt is updated to `routed: yes` (same `retire_at`)",
-               "a fresh heartbeat after unreadable wakes keeps the prompt's `routed:` line",
-               "(a `continued_by` review is a new review with its own `retire_at`)"):
-    assert phrase in codex_flat, phrase
+assert "`routed: yes` at creation when the submit answer carried a `route_state` other than `final`, else `routed: no`; a wake that keeps the job in step 5 (c) or (d) sets it to `routed: yes`. Prompt:" in F(claude_bullet)
+cron_flat = F(cron_prompt)
+walk_order(cron_flat, (
+    "the wake prints ONE compact line, at the end, for the step that ended it — never the previous status.",
+    "Step 1, age: if the current time is past `<retire_at>`",
+    "carried unchanged into every replacement job of the same review",
+    "Step 2, read: curl `<status_url>` once; if it answered nothing, call `get_findings` once; if THAT fails too, this wake has no answer: print `bughunt · <mode> · poll-failed` and count the wake as a poll failure",
+    "after `<fail_cap>` consecutive poll failures",
+    "not from the age cap (this prompt, its `routed:` line kept)",
+    "Step 3, files: on `awaiting_client_files`/`files_requested` in the status body",
+    "serve the files and KEEP this job; print `bughunt · <mode> · needs-files`. End.",
+    "Step 4, route word: the `route_state` of this wake's answer; with none and `routed: yes` above, call `get_findings` once and take its `route_state` (that call failing makes this a wake with no answer: step 2's poll-failed); still none under `routed: yes` counts as `pending`; none under `routed: no` → step 6.",
+    "Step 5, route table, first match only:",
+    "(a) `final`, or `final: true` → this review is the answer; a `continuation_refused` gets one line saying no fast hunt followed and why; go to step 6.",
+    "(b) `continued` → the review that goes on is `continued_by` from this answer, or from one `get_findings` when it names none; still none → print `bughunt · <mode> · running` and KEEP this job. End.",
+    "call `get_findings` on `<review_id>` once, call `get_findings(<id>)` and create ONE job on `<id>` by the creation rule above, at the cadence and fail cap that answer's `monitor` gives, its status URL this one with the id replaced, `<mode>` fast, `routed: no`, and its own `<retire_at>` = this wake + 180 min (it is a new review); only once that job exists, `CronDelete` this one — if the read of `<id>` fails, keep this job and make no other.",
+    "(c) `awaiting_verdicts` → call `get_findings`, judge with `confirm_findings` only the findings that carry no verdict yet (none left: send nothing), print `bughunt · <mode> · running` and KEEP this job; a refused confirm is shown verbatim and the job is kept. End.",
+    "(d) `snap_running`, `pending` or any other word, whatever the status says (`failed` included) → print `bughunt · <mode> · running` and KEEP this job. End.",
+    "Ending in (c) or (d) under `routed: no` above, replace this job with the same prompt saying `routed: yes` (same cadence, same `<retire_at>`); (b) never makes a `routed: yes` copy.",
+    "Step 6, terminal: on `done` or `failed` call `get_findings`",
+    "either way `CronDelete` this job",
+    "Any other status → print it and"), "cron prompt")
+assert "otherwise, on `done`" not in cron_flat
+# The skill's Codex bullet restates the same procedure for an agent that reads the skill, not the router.
+codex_flat = F(codex_bullet)
+walk_order(codex_flat, (
+    "Route branch (route_state): the heartbeat prompt carries a line `routed: yes` when the submit answer carried a `route_state` other than `final`, else `routed: no`",
+    "A wake walks, in order: the age cap; the read (no answer → `poll-failed`, counted towards retirement, before any route rule); a file request; then the route word, decided before the done/failed rule, first match only:",
+    "or with none under `routed: yes` the `route_state` of one `get_findings` (that call failing is a wake with no answer), still none counting as `pending`, none under `routed: no` an ordinary hunt;",
+    "`final` (the word or `final: true`) → this review is the answer, the done/failed rule applies;",
+    "`continued` → the `continued_by` review (from the read, or one `get_findings`; still none → print `running`, keep): call `get_findings` on the first review once, then replace the heartbeat with one on the `continued_by` review, mode fast, `routed: no`, its own monitor fields from `get_findings` of that review, its own `retire_at` = this wake + 180 min (a new review), the new heartbeat made before the old one is deleted, and no `routed: yes` copy left on the first review;",
+    "`awaiting_verdicts` → judge only the findings with no verdict yet, print `running`, keep;",
+    "`snap_running`, `pending` or another word, any status → print `running`, keep;",
+    "after either keep, a `routed: no` prompt is updated to `routed: yes` (same `retire_at`), and a fresh heartbeat after unreadable wakes keeps the prompt's `routed:` line."), "codex bullet")
+assert "(a `continued_by` review is a new review with its own `retire_at`)" in codex_flat
+assert "follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge" not in codex_flat
 # The age-cap retirement is honest on this surface too: a bare watch-retired on
 # a live hunt reads as "the hunt is over" (the queued deep hunt past 180 min).
-assert "either\n  way print what that `get_findings` answered — `still running` when it is" in claude_bullet
+assert F("either\n  way print what that `get_findings` answered — `still running` when it is") in F(claude_bullet)
 assert "status_url read, whichever that wake uses" in router_text
 for text in (skill, router_text):
     assert "timeout_s=225" not in text, "a 225 s hold is capped by the server to 45 s"

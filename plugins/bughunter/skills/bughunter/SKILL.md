@@ -115,7 +115,7 @@ This is a required client action, not a reminder to do later:
   needs-files` and serves the files first. If the poll itself fails, the wake
   falls back to one `get_findings` before it counts as a wake that read nothing.
   On `needs_files`, send files first; on `done` or
-  `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Route branch (route_state): the heartbeat prompt carries a line `routed: no` at creation, because a wake holds nothing but its prompt; the route word is decided before the done/failed rule, first match only: the read's `route_state`, or with none under `routed: yes` the `route_state` of one `get_findings`, still none counting as `pending`; `continued` → call `get_findings` on the first review once, then replace the heartbeat with one on the `continued_by` review, mode fast, `routed: no`, its own monitor fields from `get_findings` of that review, its own `retire_at` = this wake + 180 min (a new review), and no `routed: yes` copy left on the first review; `awaiting_verdicts` → judge only the findings with no verdict yet, print `running`, keep; `snap_running`, `pending` or another word, any status → print `running`, keep; after either keep, a `routed: no` prompt is updated to `routed: yes` (same `retire_at`), and a fresh heartbeat after unreadable wakes keeps the prompt's `routed:` line. Retire it too when
+  `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says. Route branch (route_state): the heartbeat prompt carries a line `routed: yes` when the submit answer carried a `route_state` other than `final`, else `routed: no`, because a wake holds nothing but its prompt. A wake walks, in order: the age cap; the read (no answer → `poll-failed`, counted towards retirement, before any route rule); a file request; then the route word, decided before the done/failed rule, first match only: the read's `route_state`, or with none under `routed: yes` the `route_state` of one `get_findings` (that call failing is a wake with no answer), still none counting as `pending`, none under `routed: no` an ordinary hunt; `final` (the word or `final: true`) → this review is the answer, the done/failed rule applies; `continued` → the `continued_by` review (from the read, or one `get_findings`; still none → print `running`, keep): call `get_findings` on the first review once, then replace the heartbeat with one on the `continued_by` review, mode fast, `routed: no`, its own monitor fields from `get_findings` of that review, its own `retire_at` = this wake + 180 min (a new review), the new heartbeat made before the old one is deleted, and no `routed: yes` copy left on the first review; `awaiting_verdicts` → judge only the findings with no verdict yet, print `running`, keep; `snap_running`, `pending` or another word, any status → print `running`, keep; after either keep, a `routed: no` prompt is updated to `routed: yes` (same `retire_at`), and a fresh heartbeat after unreadable wakes keeps the prompt's `routed:` line. Retire it too when
   it is older than 180 minutes or after 3 consecutive wakes that could not read
   a status at all — a failed `wait_review`, `get_findings` or `status_url` read,
   whichever that wake uses: print `bughunt · <mode> ·
@@ -207,64 +207,76 @@ This is a required client action, not a reminder to do later:
   with it — 3 consecutive failures at `interval_s`, 12 at every minute — so
   a three-minute blip does not retire the one watcher a payload hunt has. The
   prompt's second line is its route memory, because a fresh cron turn holds
-  nothing else: `routed: no` at creation, `routed: yes` once a read of this
-  review carried a `route_state` other than `final`. Prompt: "bughunt
+  nothing else: `routed: yes` at creation when the submit answer carried a
+  `route_state` other than `final`, else `routed: no`; a wake that keeps the
+  job in step 5 (c) or (d) sets it to `routed: yes`. Prompt: "bughunt
   heartbeat for `<review_id>`.
   routed: no
-  Curl `<status_url>` once and print the compact
-  line for what THAT read answered; if it answered nothing, call `get_findings`
-  once and print what that answered, and only if THAT fails too print `bughunt ·
-  <mode> · poll-failed` and count the wake as a poll failure — never the
-  previous status; on `awaiting_client_files`/`files_requested` in the status
+  Walk these steps in order; the first one that ends the wake ends it, and
+  the wake prints ONE compact line, at the end, for the step that ended it —
+  never the previous status.
+  Step 1, age: if the current time is past `<retire_at>` (an ISO timestamp you
+  substitute at creation: the SUBMIT time + 180 minutes, carried unchanged
+  into every replacement job of the same review – the watch is then older
+  than 180 minutes, the longest hunt's 150 min budget (a scan) plus queue
+  time – as an instant, because a fresh cron turn has no creation time to
+  count from, and anchored at submit so a replacement job cannot restart the
+  cap) print `bughunt · <mode> · watch-retired` and only then `CronDelete`
+  this job, call `get_findings` once and print what it answered — `still
+  running` when it is, so the user knows the watch ended on a live hunt. End.
+  Step 2, read: curl `<status_url>` once; if it answered nothing, call
+  `get_findings` once; if THAT fails too, this wake has no answer: print
+  `bughunt · <mode> · poll-failed` and count the wake as a poll failure, and
+  after `<fail_cap>` consecutive poll failures (3 for a job at `interval_s`,
+  12 for one every minute — substitute the number that matches the cadence
+  you created the job at) print `bughunt · <mode> · watch-retired` and only
+  then `CronDelete` it, then call `get_findings` once and create a fresh job if the
+  review is still running or waiting for files AND the retirement came from poll
+  failures, not from the age cap (this prompt, its `routed:` line kept) – a job nothing can satisfy is how a control gets disarmed, and a
+  job that vanishes in silence reads as 'still running'; either way print
+  what that `get_findings` answered — `still running` when it is. End.
+  Step 3, files: on `awaiting_client_files`/`files_requested` in the status
   body (which flags a request there, not in its status word) or `needs_files`
   from the `get_findings` fallback (which flags it exactly there) call
-  `get_findings`, serve the files and KEEP this job;
-  Route branch (route_state), decided before any rule below: the route word
-  is this read's `route_state`; with none and `routed: yes` above, call
-  `get_findings` once and take its `route_state`; still none under
-  `routed: yes` counts as `pending`. Then, first match only:
-  (1) `continued` with `continued_by: <id>` → call `get_findings` on
-  `<review_id>` once, `CronDelete` this job, call `get_findings(<id>)`, and
-  create ONE job on `<id>` at its `monitor.interval_s` with a fail cap of 3
-  (its status URL is this one with the id replaced, `<mode>` fast,
-  `routed: no`, and its own `<retire_at>` = this wake + 180 min: it is a new
-  review);
-  (2) `awaiting_verdicts` → call `get_findings`, judge with `confirm_findings`
+  `get_findings`, serve the files and KEEP this job; print `bughunt · <mode> ·
+  needs-files`. End.
+  Step 4, route word: the `route_state` of this wake's answer; with none and
+  `routed: yes` above, call `get_findings` once and take its `route_state`
+  (that call failing makes this a wake with no answer: step 2's poll-failed);
+  still none under `routed: yes` counts as `pending`; none under
+  `routed: no` → step 6.
+  Step 5, route table, first match only:
+  (a) `final`, or `final: true` → this review is the answer; a
+  `continuation_refused` gets one line saying no fast hunt followed and why;
+  go to step 6.
+  (b) `continued` → the review that goes on is `continued_by` from this
+  answer, or from one `get_findings` when it names none; still none → print
+  `bughunt · <mode> · running` and KEEP this job. End. With that `<id>`: call
+  `get_findings` on `<review_id>` once, call `get_findings(<id>)` and create
+  ONE job on `<id>` by the creation rule above, at the cadence and fail cap
+  that answer's `monitor` gives, its status URL this one with the id
+  replaced, `<mode>` fast, `routed: no`, and its own `<retire_at>` = this
+  wake + 180 min (it is a new review); only once that job exists, `CronDelete`
+  this one — if the read of `<id>` fails, keep this job and make no other.
+  Print `bughunt · <mode> · continued <id>`. End.
+  (c) `awaiting_verdicts` → call `get_findings`, judge with `confirm_findings`
   only the findings that carry no verdict yet (none left: send nothing), print
   `bughunt · <mode> · running` and KEEP this job; a refused confirm is shown
-  verbatim and the job is kept;
-  (3) `snap_running`, `pending` or a word not named here, whatever the status
-  says (`failed` included) → print `bughunt · <mode> · running` and KEEP this
-  job;
-  after (2) or (3) with `routed: no` above, replace this job with the same
-  prompt saying `routed: yes` (same cadence, same `<retire_at>`);
-  (4) `final: true` → step 1 is the answer: the rules below apply, and a
-  `continuation_refused` gets one line saying no fast hunt followed and why;
-  (5) no route word and `routed: no` → an ordinary hunt: the rules below;
-  otherwise, on `done` or `failed` call `get_findings` (this surface reads with curl,
-  and only a tool read tells the local hooks the hunt is over — skip it on
-  `failed` and the merge gate keeps saying a hunt is RUNNING); on `done`
-  print `findings=N` from that answer, on `failed` the bare `bughunt ·
-  <mode> · failed` — the count belongs to `done` alone, as in the
-  enumerated lines; either way `CronDelete` this
-  job; if that `get_findings` answer's `next_step`
-  begins "this is the first read after done", say so — this job outlived
-  the hunt; after `<fail_cap>` consecutive poll failures (3 for a job at
-  `interval_s`, 12 for one every minute — substitute the number that matches
-  the cadence you created the job at) or once the current time is past `<retire_at>` (an
-  ISO timestamp you substitute at creation: the SUBMIT time + 180 minutes,
-  carried unchanged into every replacement job of the same review – the watch is then older than 180 minutes,
-  the longest hunt's 150 min budget (a scan) plus queue time – as an instant,
-  because a fresh cron turn has no creation time to count from, and anchored
-  at submit so a replacement job cannot restart the cap)
-  print `bughunt · <mode> · watch-retired` and only then
-  `CronDelete` it, then call `get_findings` once and create a fresh job if the
-  review is still running or waiting for files AND the retirement came from poll
-  failures, not from the age cap (that fresh job keeps this prompt's `routed:`
-  line) – a job nothing can satisfy is how a control gets
-  disarmed, and a job that vanishes in silence reads as 'still running'; either
-  way print what that `get_findings` answered — `still running` when it is, so
-  the user knows the watch ended on a live hunt".
+  verbatim and the job is kept. End.
+  (d) `snap_running`, `pending` or any other word, whatever the status says
+  (`failed` included) → print `bughunt · <mode> · running` and KEEP this job.
+  End.
+  Ending in (c) or (d) under `routed: no` above, replace this job with the
+  same prompt saying `routed: yes` (same cadence, same `<retire_at>`); (b)
+  never makes a `routed: yes` copy.
+  Step 6, terminal: on `done` or `failed` call `get_findings` (this surface
+  reads with curl, and only a tool read tells the local hooks the hunt is over
+  — skip it on `failed` and the merge gate keeps saying a hunt is RUNNING); on
+  `done` print `findings=N` from that answer, on `failed` the bare `bughunt ·
+  <mode> · failed` — the count belongs to `done` alone, as in the enumerated
+  lines; either way `CronDelete` this job; if that `get_findings` answer's
+  `next_step` begins "this is the first read after done", say so — this job
+  outlived the hunt. Any other status → print it and KEEP this job".
   One job per review: `CronDelete` any earlier bughunt job before creating
   the next – never leave one pointing at an older review id. Only
   as the last resort keep a `run_in_background` until-loop – and say so:
