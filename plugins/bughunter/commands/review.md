@@ -24,10 +24,13 @@ narrower path or branch) – except a hunt mode (see below) and `deep` /
 If the server refuses (`repo_required`, `repo_too_big`, `commit_required`,
 `fast_running`, `deep_at_capacity`), show its answer verbatim and offer the
 fast hunt instead; never downgrade silently. Without those words the hunt is
-the first stage, in the mode the user named (else fast), and deep only when the server offers it
-and the user agrees.
+the first stage, in the mode the user named (with none named, see below), and deep only when the
+server offers it and the user agrees.
 
 `lite`, `snap` and `fast` (bare or as `--mode <m>`) pick the hunt mode:
 send it as `submit_review`'s `mode`, following the skill's "Hunt modes"
-section; without one, send no `mode` and the hunt is fast. A mode does
-not go with `deep`: when the user names both, ask which one they want.
+section; with none, send no `mode`: on a pushed commit the service may start with a first step
+(`snap`, or `lite` on lite accounts) and go on with a fast hunt of the same commit when that step
+finds no medium or worse bug, or after your verdicts on confirm billing (the skill's routed hunt);
+uncommitted work, an uploaded diff and a change the first step cannot take (such as one over
+snap's 1 MB) get the fast hunt. A mode does not go with `deep`: when the user names both, ask which one they want.
