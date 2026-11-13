@@ -106,9 +106,17 @@ same MCP server explicitly:
 ```bash
 npx skills add OhMyX-AI/ohmybug-plugin --skill bughunter
 codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp
+printf '\n[mcp_servers.ohmybug.http_headers]\n"X-OhMyBug-Follows" = "continued_by"\n' \
+  >> "${CODEX_HOME:-$HOME/.codex}/config.toml"
 ```
 
 `codex mcp add` detects OAuth and opens the GitHub sign-in flow automatically.
+The last line adds the `X-OhMyBug-Follows` header, which the plugin install
+sends on its own: it tells the service that this client follows a hunt to the
+review that finishes it, as the skill does, so the service may answer a first
+step and continue the hunt from there. `codex mcp add` has no header option, and
+running it again rewrites the entry without the header, so add the line again
+after it.
 
 For headless CI, use an operator-issued raw `omb_` key — write to
 [hi@ohmybug.ai](mailto:hi@ohmybug.ai) or DM [@ohmybug](https://x.com/ohmybug)
@@ -118,12 +126,21 @@ to get one:
 export OHMYBUG_API_KEY=omb_...
 codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp \
   --bearer-token-env-var OHMYBUG_API_KEY
+printf '\n[mcp_servers.ohmybug.http_headers]\n"X-OhMyBug-Follows" = "continued_by"\n' \
+  >> "${CODEX_HOME:-$HOME/.codex}/config.toml"
 ```
 
 (Claude Code users who prefer a key over OAuth can do the same with
 `claude mcp add --transport http ohmybug https://mcp.ohmybug.ai/mcp
---header "Authorization: Bearer $OHMYBUG_API_KEY"` — an explicit
+--header "Authorization: Bearer $OHMYBUG_API_KEY"
+--header "X-OhMyBug-Follows: continued_by"` — an explicit
 Authorization header disables the OAuth flow.)
+
+These lines are for an agent that runs the bughunter skill or plugin. A client
+that talks to the MCP server with no skill (your own script, another MCP host)
+must leave `X-OhMyBug-Follows` out: with it, a hunt can answer with a first step
+that points at the review that continues it, and a client that does not follow
+that pointer reports the first step instead of the result.
 
 Questions → [Discord](https://discord.gg/6d7g8J44C7).
 
