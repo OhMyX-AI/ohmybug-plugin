@@ -20,7 +20,7 @@ free, first review free.
 - **Fast review** · $4 · finds 72.4% of known bugs on our benchmark · up to 15 minutes
 - **Deep review** · $12 ($24 on a wide change) · finds 86.1% of known bugs on our benchmark · up to 2 hours
 
-Pick a mode for one hunt with `/bughunter:review lite` (or `snap`, `fast`); without one the hunt is fast. Lite and snap read the repository, so they need a pushed GitHub commit the service can read, and snap a diff under 1 MB. `/bughunter:stats` lists the modes the service runs for your key.
+Pick a mode for one hunt with `/bughunter:review lite` (or `snap`, `fast`); without one, the service may start with a first step (snap, or lite on accounts set to lite), and a fast review follows when that step finds no medium or worse bug ([how it works](https://ohmybug.ai/modes/#route)). Lite and snap read the repository, so they need a pushed GitHub commit the service can read, and snap a diff under 1 MB. `/bughunter:stats` lists the modes the service runs for your key.
 
 See the bug species our hunts keep finding in the [Bugarium](https://mcp.ohmybug.ai/bugs).
 
