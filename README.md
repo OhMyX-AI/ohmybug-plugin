@@ -209,7 +209,7 @@ repository per week, and is not a merge gate.
 - The upload script's boundary: POSIX sh (tested under dash and bash on Linux and bash 3.2 on macOS),
   git >= 2.25, python3 >= 3.7, curl, gzip, on macOS or Linux. Anything else
   is unsupported: where the script can tell (python3 missing or older than
-  3.7, no curl) it refuses with one sentence, and it never sends what it did
+  3.7, git older than 2.25, no curl) it refuses with one sentence, and it never sends what it did
   not scan, unless the scan is turned off. The secret-name list is best
   effort. Stated, not handled: a hard kill leaves its private temporary folder behind, a full temporary folder sends
   nothing, and a working copy near the 1 GiB ceiling may not fit the agent's

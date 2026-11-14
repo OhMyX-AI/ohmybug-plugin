@@ -166,6 +166,65 @@ def scan_snapshot(hits, path):
     return hit_members, count
 
 
+def read_listed(top, listed, p):
+    """A requested file below the git top level `top`, as (rel, bytes).
+
+    Opened one part at a time from the fd of the top level, never through a
+    symlink, and read from the fd that was checked: nothing can swap the file
+    between the check and the read. Returns (None, None) for a path that is
+    not a regular file inside the top level (missing, a symlink in any part,
+    an empty, "." or ".." part), (rel, None) for one git does not list, and
+    (rel, bytes) for a listed one. Every fd is closed here."""
+    import stat
+    RD = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    NOFOLLOW, NONBLOCK, DIRECTORY = (getattr(os, f, 0) for f in ("O_NOFOLLOW", "O_NONBLOCK", "O_DIRECTORY"))
+    try:
+        # The name opened is the name sent: a part that is empty, "." or ".." is
+        # refused, never tidied away, or "x/." would open x under another name.
+        parts = os.fsencode(p).replace(os.fsencode(os.sep), b"/").split(b"/")
+        while len(parts) > 1 and parts[0] == b".":
+            parts = parts[1:]
+        if any(c in (b"", b".", b"..") for c in parts):
+            return None, None
+        rel = b"/".join(parts)
+        if os.open not in os.supports_dir_fd:
+            # shortcut: no dir_fd (Windows python), so the whole path is checked for any link or
+            # junction and then opened, a window for someone rewriting the checkout mid-call;
+            # upgrade if it gains dir_fd.
+            full = os.path.join(os.fsencode(top), *parts)
+            if os.path.realpath(full) != os.path.normpath(full):
+                return None, None
+            before = os.stat(full)
+            fd = os.open(full, RD | NONBLOCK)
+            after = os.fstat(fd)
+            if (after.st_ino, after.st_dev) != (before.st_ino, before.st_dev):
+                os.close(fd)
+                return None, None
+        else:
+            dfd = os.open(top, RD)
+            try:
+                for c in parts[:-1]:
+                    sub = os.open(c, RD | NOFOLLOW | DIRECTORY, dir_fd=dfd)
+                    os.close(dfd)
+                    dfd = sub
+                fd = os.open(parts[-1], RD | NOFOLLOW | NONBLOCK, dir_fd=dfd)
+            finally:
+                os.close(dfd)
+    except (OSError, ValueError):
+        return None, None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None, None
+        if rel not in listed:
+            return rel, None
+        with open(fd, "rb", closefd=False) as f:
+            return rel, f.read()
+    except OSError:
+        return None, None
+    finally:
+        os.close(fd)
+
+
 def shown(hits):
     hits = list(dict.fromkeys(hits))
     return hits[:12] + (["... and %d more" % (len(hits) - 12)] if len(hits) > 12 else [])

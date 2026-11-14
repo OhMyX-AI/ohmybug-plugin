@@ -338,71 +338,45 @@ is empty or cannot be computed (no `origin`, no merge base, HEAD equals the
 base), take the ladder below.
 
 Every rung sends only what step 2's privacy rules allow. These rungs reach
-files no branch diff ever did (untracked ones, the whole history). The upload
-script scans the diff and the snapshot for credentials before anything is
-sent, but a secret-named file must not reach it at all, so every rung is
-ONE `git diff` whose secret filter is git's own exclude pathspecs, the first
-filter: a path is
-dropped when any of its segments is a secret name – `secrets/config.yml` as
-much as `.env` – at any depth, in any case, from any directory, and file
-names never pass through the shell. The diff runs on a throwaway copy of the
-index, never the user's own. Each agent shell call starts a fresh process,
-so paste this block, as it stands, at the top of EVERY command that calls a
-rung, including the command that writes `diff.patch` for the upload:
-
-```bash
-EMPTY=$(git hash-object -t tree /dev/null)
-OMB_SECRETS=('.env*' '*secret*' '*credential*' 'id_rsa*' 'id_dsa*' 'id_ecdsa*' 'id_ed25519*' '*.pem' '*.key' '*.p12' '*.pfx'
-  '.npmrc' '.netrc' '.pgpass' '.pypirc' '.git-credentials' '*.tfstate*' '*.tfvars*' 'kubeconfig' '.kube' '.docker'
-  '*.ppk' '*.jks' '*.keystore' '.ssh' '.aws' '.gnupg')
-# omb_diff <base> [paths...]: everything from <base> to the working tree, new files
-# included, secrets excluded. Paths are relative to where you stand; none = the whole repo.
-omb_diff() (
-  local base=${1} T rc p x=(); shift
-  for p in "${OMB_SECRETS[@]}"; do x+=(":(exclude,top,icase,glob)**/$p" ":(exclude,top,icase,glob)**/$p/**"); done
-  T=$(mktemp); cp "$(git rev-parse --git-path index)" "$T" 2>/dev/null || rm -f "$T"
-  GIT_INDEX_FILE=$T git add -N -- :/ && GIT_INDEX_FILE=$T git -c diff.relative=false diff --no-color --no-textconv --no-ext-diff "$base" -- "${@:-:/}" "${x[@]}"
-  rc=$?; rm -f "$T"; return $rc
-)
-# omb_commits <N>: the last N commits only – commit to commit, nothing from the working
-# tree; with N or fewer commits, the whole history. Secrets excluded the same way.
-omb_commits() (
-  local p x=()
-  for p in "${OMB_SECRETS[@]}"; do x+=(":(exclude,top,icase,glob)**/$p" ":(exclude,top,icase,glob)**/$p/**"); done
-  git -c diff.relative=false diff --no-color --no-textconv --no-ext-diff "$(git rev-parse -q --verify "HEAD~${1}" || echo "$EMPTY")" HEAD -- :/ "${x[@]}"
-)
-# omb_nogit [paths...]: a folder that is not a git repository, as new code. The git
-# directory is a throwaway one outside the folder; nothing is left behind.
-omb_nogit() (
-  local G rc; G=$(mktemp -d)
-  git --git-dir="$G" --work-tree=. init -q && GIT_DIR=$G GIT_WORK_TREE=. omb_diff "$EMPTY" "$@"
-  rc=$?; rm -rf "$G"; return $rc
-)
-```
+files no branch diff ever did (untracked ones, the whole history), so each is a
+scope of the plugin's upload script, which writes the diff itself: the working
+copy is read as a commit would read it (ignored files out, new files in, the
+user's index untouched), and secret-named files – `secrets/config.yml` as much
+as `.env`, at any depth, in any case – are left out by git's own exclude
+pathspecs, the snapshot's list. The script also scans what is left for
+credentials before anything is sent.
 
 Work down the list and stop at the first rung that yields code:
 
 1. **The user named files or a folder** – the whole of it, committed or not:
-   `omb_diff "$EMPTY" src/solver/`. **"The last N commits"** – `omb_commits N`.
-2. **Uncommitted work, new files included** – `omb_diff HEAD`, or
-   `omb_diff "$EMPTY"` before the first commit (`git add -N` on the index copy
-   makes untracked files part of the diff without staging them).
-3. **Recent commits** – `omb_commits 10`; with 10 or fewer commits it is
-   the whole history.
-4. **Not a git repository** – `omb_nogit`, run in the folder. Pass only the
-   source folders when it also holds generated, vendored or binary files
-   (`omb_nogit src/ lib/`).
+   `--all --only src/solver/` (a path below the current folder; one
+   `--only` per path). **"The last N commits"** – `--commits N`.
+2. **Uncommitted work, new files included** – `--head`, or `--all` before
+   the first commit.
+3. **Recent commits** – `--commits 10`; with 10 or fewer commits it is the
+   whole history.
+4. **Not a git repository** – `--all`, run in the folder; add `--only src/`
+   (and more `--only`) when it also holds generated, vendored or binary
+   files.
 
-Say in one line which rung you took and how big it is, and list the file
-names ("no branch here – hunting your uncommitted changes: src/solver.py,
+Before `submit_review`, see what the rung holds with a dry run, which sends
+nothing and prints the manifest line and one file name per line (new,
+untracked files are marked):
+
+```bash
+bash '<skill_dir>/../../hooks/omb-upload.sh' --dry-run off <scope>
+```
+
+From that dry run, say in one line which rung you took and how big it is,
+and list the file names ("no branch here – hunting your uncommitted changes: src/solver.py,
 src/io.py, tests/test_solver.py – 380 lines"), so the user can redirect or
 drop a file before anything is sent. The payload limit is 2 MB of diff (the
 repository snapshot goes with it unless diff mode is on): if a rung is larger,
 ask which part matters (a folder, a feature) rather than cutting silently.
 
 Send it as a payload (rung 3 of "How the diff gets here" below: `upload: true`,
-and the repository snapshot first when the ticket asks for it) with
-`meta.repo_hint` saying which rung this is, and
+the upload script with the same scope, and the repository snapshot first when
+the ticket asks for it) with `meta.repo_hint` saying which rung this is, and
 **without `meta.base_branch`**: repo + ref + base_branch tell the server it
 can fetch the merge-base diff itself, and it then reviews that instead of
 your payload – on a `main` whose head is its own base, an empty diff.
@@ -423,9 +397,8 @@ over callees. Pass them to the upload script at the end of the command. Never
 include files matching `.env*`, `*secret*`, `*credential*`, key material, or
 anything gitignored, and never a file outside the repository root or reached
 through a symlink: the script sends only regular files git lists, never a
-symlink itself (a file reached through a linked folder inside the repository
-is sent under its real path, when git lists it there), and names any it
-skips.
+symlink and never a file reached through a symlinked folder inside the
+repository (give the file by its own path), and names any it skips.
 
 The manifest is the upload script's: before anything is sent it prints one
 line saying what leaves the machine (the diff's size, the snapshot's file
@@ -580,9 +553,7 @@ inline `diff` outside diff mode is refused anyway.
    anyway: the reviewers read files with them. **Except a no-branch ladder
    payload:** leave `base_branch`
    out there (the server would review its own empty merge-base diff instead),
-   and use the second block below: the ladder block pasted where it says,
-   then the chosen rung's output (`omb_diff HEAD`, `omb_commits 10`,
-   `omb_nogit`, …) written to `"$d/diff.patch"`. A `review_id` with `status: running` instead of
+   and give the block below the rung's scope in place of `--base`. A `review_id` with `status: running` instead of
    `awaiting_upload` happens only on a deep hunt whose commit the server
    fetched itself: nothing to upload, go monitor. A fast `upload: true`
    always answers `awaiting_upload`.
@@ -590,11 +561,14 @@ inline `diff` outside diff mode is refused anyway.
    it stands. `<skill_dir>` is the folder this SKILL.md was loaded from (the
    client names it when it loads the skill); the script sits in the plugin's
    `hooks/` folder beside it. `<upload_url>` and `<snapshot>`
-   are the answer's `upload_url` and `snapshot`; `<base_branch>` is
-   `meta.base_branch`. Check all three values BEFORE you write the command:
+   are the answer's `upload_url` and `snapshot`; `<scope>` is
+   `--base '<base_branch>'` (`meta.base_branch`) for a branch, or the ladder
+   rung's scope. Check every value BEFORE you write the command:
    `<upload_url>` is `https://mcp.ohmybug.ai/u/` followed only by letters, digits, `_` or `-`,
-   `<snapshot>` is exactly `required` or `off`, and `<base_branch>` holds only
-   letters, digits, `.`, `_`, `/` or `-` and does not start with `-`.
+   `<snapshot>` is exactly `required` or `off`, `<base_branch>` holds only
+   letters, digits, `.`, `_`, `/` or `-` and does not start with `-`, `<N>` is
+   digits only, and an `--only` path goes inside single quotes and holds no
+   single quote.
    Any other value (a quote, a space, a line break, another host) goes into no shell command:
    say so once and stop. The single quotes in the block hold only values of
    that shape, and the script refuses a branch name of any other shape.
@@ -606,13 +580,14 @@ inline `diff` outside diff mode is refused anyway.
    answer's instruction. With `snapshot_received: true` in an answer, run it
    all the same: the snapshot door answers 409 `snapshot_taken`, and the
    script goes on if the working copy is unchanged, and retires the ticket if
-   not. With `--base` the script writes the diff itself (the working tree
-   against the merge base with `origin/<base_branch>`) in a private folder of
-   its own; the ladder block writes its rung's output to a private directory
-   that goes on any exit, and a failed rung stops it before the script runs.
+   not. The script writes the diff itself, in a private folder of its own.
+   `--base` sends the commits beyond the merge base with
+   `origin/<base_branch>` plus staged, unstaged AND new files git does not
+   ignore (the manifest names the new ones); the diff ignores the
+   repository's and the user's git diff settings and diff attributes.
    The script's boundary: POSIX sh (tested under dash and bash on Linux and bash 3.2 on macOS), git >= 2.25,
    `python3` >= 3.7, curl, gzip, on macOS or Linux. Anything else is unsupported:
-   where the script can tell (`python3` missing or older than 3.7, no curl) it
+   where the script can tell (`python3` missing or older than 3.7, git older than 2.25, no curl) it
    refuses with one sentence, and it never sends what it did not scan, unless
    the scan is turned off. The secret-name list is best effort. Stated, not
    handled: a hard kill leaves its private temporary folder behind; a full temporary folder fails
@@ -621,16 +596,7 @@ inline `diff` outside diff mode is refused anyway.
    (a call the client stops at 600 s counts as `75` below).
 
 ```bash
-bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' --base '<base_branch>'
-```
-
-A no-branch ladder payload, one shell call:
-
-```bash
-(set -e; umask 077; d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
-# the ladder block goes here
-omb_diff HEAD > "$d/diff.patch"
-bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' "$d/diff.patch")
+bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' <scope>
 ```
 
 3. Before the first POST the script prints one manifest line: what leaves
@@ -644,8 +610,8 @@ bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' "$d/dif
      `OHMYBUG_SECRET_SCAN=0`, or commit + push + rung 1. A snapshot file that
      carries a credential is not a refusal: the script leaves that file out
      and names it in the manifest.
-   - `4` – no `python3` 3.7 or newer, or no `curl`, so nothing was sent.
-     Say so once and stop.
+   - `4` – no `python3` 3.7 or newer, no `curl`, or git older than 2.25, so
+     nothing was sent. Say so once and stop.
    - `75` – no final answer (busy, unreachable, or the connection was cut).
      Call `get_findings` for this review. Only with `awaiting_upload: true`,
      run the same command again, after the seconds it names if it names any.

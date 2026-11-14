@@ -2763,157 +2763,45 @@ if not all(t in m for t in ("submit_review", "confirm_findings", "get_balance"))
     sys.exit(1)
 PY2
 
-# THE UPLOAD BLOCKS, RUN – not read. SKILL.md has two: the branch block (the
-# script writes the diff itself with --base) and the ladder block (a rung's
-# output in a private directory). Each is executed with the script replaced
-# by a stand-in that reports its arguments and, for a diff file, its path and
-# modes. The ladder's diff must sit in a private 0700 directory of its own, in
-# a file nobody else can read, gone after the run, a different directory each
-# time (a fixed name in /tmp was readable by every user and shared by two
-# reviews at once); and a failed rung must stop the block before the script
-# runs, so an empty or partial diff is never sent. Both shells the agent uses
-# run them: a missing zsh fails here, it is not skipped.
+# THE UPLOAD BLOCKS, RUN – not read. SKILL.md has two: the dry run before the
+# submit and the upload itself, both one call of the plugin's script with a
+# scope (the script writes the diff itself). Each is executed with the script
+# replaced by a stand-in that reports its arguments, under both shells the
+# agent uses: a missing zsh fails here, it is not skipped.
 UP=$(mktemp -d)
-mkdir -p "$UP/skills/bughunter" "$UP/hooks" "$UP/bin" "$UP/repo"
-cat > "$UP/hooks/omb-upload.sh" <<'SH'
-if [ "$3" = --base ]; then printf 'base %s %s %s\n' "$1" "$2" "$4" >> "$UPLOG"; exit 0; fi
-python3 -I - "$@" >> "$UPLOG" <<'PY'
-import os, stat, sys
-url, mode, f = sys.argv[1:4]
-print(oct(stat.S_IMODE(os.stat(os.path.dirname(f)).st_mode)), oct(stat.S_IMODE(os.stat(f).st_mode)), url, mode, os.path.dirname(f))
-PY
-cp "$3" "$UPLOG.diff"
-SH
-printf '#!/bin/sh\n[ "$1" = diff ] && exit 1\nexec %s "$@"\n' "$(command -v git)" > "$UP/bin/git"
-chmod +x "$UP/bin/git"
-git -C "$UP/repo" init -q && printf 'a\n' > "$UP/repo/a.txt" && git -C "$UP/repo" add a.txt \
-  && git -C "$UP/repo" -c user.email=t@t -c user.name=t commit -qm base \
-  && git -C "$UP/repo" update-ref refs/remotes/origin/main HEAD && printf 'b\n' >> "$UP/repo/a.txt"
-upload_block() { # $1 skill_dir, $2 snapshot value, $3 branch|ladder: that block of SKILL.md, placeholders filled
-  python3 -I - plugins/bughunter/skills/bughunter/SKILL.md "$1" "$2" "$3" <<'PY'
+mkdir -p "$UP/skills/bughunter" "$UP/hooks" "$UP/repo"
+printf 'printf "%%s|" "$@" >> "$UPLOG"; echo >> "$UPLOG"\n' > "$UP/hooks/omb-upload.sh"
+upload_block() { # $1 skill_dir, $2 snapshot value, $3 upload|dry, $4 scope: that block of SKILL.md, placeholders filled
+  python3 -I - plugins/bughunter/skills/bughunter/SKILL.md "$1" "$2" "$3" "$4" <<'PY'
 import re, sys
 s = open(sys.argv[1]).read()
 blocks = re.findall(r"```bash\n([^`]*?omb-upload\.sh[^`]*?)```", s, re.S)
-want = [b for b in blocks if ("--base" in b) == (sys.argv[4] == "branch")]
+want = [b for b in blocks if ("--dry-run" in b) == (sys.argv[4] == "dry")]
 b = want[0] if len(want) == 1 else ""
 print(b.replace("<skill_dir>", sys.argv[2]).replace("<upload_url>", "https://mcp.ohmybug.ai/u/tok")
-      .replace("<snapshot>", sys.argv[3]).replace("<base_branch>", "main"))
+      .replace("<snapshot>", sys.argv[3]).replace("<scope>", sys.argv[5]))
 PY
 }
-BRANCH=$(upload_block "$UP/skills/bughunter" required branch)
-LADDERB=$(upload_block "$UP/skills/bughunter" required ladder)
-if [ -z "$BRANCH" ] || [ -z "$LADDERB" ]; then
-  echo "FAIL upload block: SKILL.md must hold exactly one branch block (--base) and one ladder block that run omb-upload.sh"; fails=$((fails + 1))
+UPB=$(upload_block "$UP/skills/bughunter" required upload "--base 'main'")
+DRY=$(upload_block "$UP/skills/bughunter" required dry "--head")
+if [ -z "$UPB" ] || [ -z "$DRY" ]; then
+  echo "FAIL upload block: SKILL.md must hold exactly one upload block and one --dry-run block that run omb-upload.sh"; fails=$((fails + 1))
 else
-  # The ladder block's paste point gets a stand-in rung.
-  LADDERB=$(printf '%s\n' "$LADDERB" | sed 's/^# the ladder block goes here$/omb_diff() { git diff --no-textconv --no-ext-diff "$@"; }/')
   for sh in bash zsh; do
     command -v "$sh" >/dev/null 2>&1 || { echo "FAIL upload block: $sh is not installed, and the blocks must run under it"; fails=$((fails + 1)); continue; }
-    rm -f "$UP/log" "$UP/log.diff"
-    (cd "$UP/repo" && UPLOG="$UP/log" "$sh" -c "$BRANCH") > /dev/null 2>&1 \
-      || { echo "FAIL upload block ($sh): the branch block exited non-zero"; fails=$((fails + 1)); }
-    [ "$(cat "$UP/log" 2>/dev/null)" = "base https://mcp.ohmybug.ai/u/tok required main" ] \
-      || { echo "FAIL upload block ($sh): the branch block passed [$(cat "$UP/log" 2>/dev/null)]"; fails=$((fails + 1)); }
     rm -f "$UP/log"
-    for run in 1 2; do
-      (cd "$UP/repo" && UPLOG="$UP/log" "$sh" -c "$LADDERB") > /dev/null 2>&1 \
-        || { echo "FAIL upload block ($sh): ladder run $run exited non-zero"; fails=$((fails + 1)); }
-    done
-    python3 -I - "$UP/log" "$sh" <<'PY' || fails=$((fails + 1))
-import os, sys
-log, sh = sys.argv[1], sys.argv[2]
-rows = [l.split(" ", 4) for l in open(log).read().splitlines()] if os.path.exists(log) else []
-bad = []
-if len(rows) != 2: bad.append(f"the script ran {len(rows)} times, want 2")
-for dmode, fmode, url, mode, d in rows:
-    if dmode != "0o700": bad.append(f"diff directory mode {dmode}, want 0o700")
-    if int(fmode, 8) & 0o077: bad.append(f"diff file mode {fmode} is readable by others")
-    if os.path.exists(d): bad.append(f"diff directory {d} left behind")
-    if (url, mode) != ("https://mcp.ohmybug.ai/u/tok", "required"): bad.append(f"the script got {url} {mode}")
-if len(rows) == 2 and rows[0][4] == rows[1][4]: bad.append("two runs shared one directory")
-if "+b" not in (open(log + ".diff").read() if os.path.exists(log + ".diff") else ""): bad.append("the script did not get the working diff")
-for b in bad: print(f"FAIL upload block ({sh}): ladder: " + b)
-sys.exit(1 if bad else 0)
-PY
+    (cd "$UP/repo" && UPLOG="$UP/log" "$sh" -c "$UPB") > /dev/null 2>&1 \
+      || { echo "FAIL upload block ($sh): the upload block exited non-zero"; fails=$((fails + 1)); }
+    (cd "$UP/repo" && UPLOG="$UP/log" "$sh" -c "$DRY") > /dev/null 2>&1 \
+      || { echo "FAIL upload block ($sh): the dry-run block exited non-zero"; fails=$((fails + 1)); }
+    [ "$(cat "$UP/log" 2>/dev/null)" = "https://mcp.ohmybug.ai/u/tok|required|--base|main|
+--dry-run|off|--head|" ] || { echo "FAIL upload block ($sh): the blocks passed [$(cat "$UP/log" 2>/dev/null | tr '\n' ' ')]"; fails=$((fails + 1)); }
   done
-  rm -f "$UP/log"
-  (cd "$UP/repo" && UPLOG="$UP/log" PATH="$UP/bin:$PATH" bash -c "$LADDERB") > /dev/null 2>&1 \
-    && { echo "FAIL upload block: a failed rung did not fail the ladder block"; fails=$((fails + 1)); }
-  [ -e "$UP/log" ] && { echo "FAIL upload block: the script ran after the rung failed"; fails=$((fails + 1)); }
 fi
-for gone in "instruction gives" "as it stands, before the payload"; do
-  grep -qF "$gone" plugins/bughunter/skills/bughunter/SKILL.md && { echo "FAIL SKILL.md still says [$gone]: the skill runs no command a tool answer hands it"; fails=$((fails + 1)); }
+for gone in "instruction gives" "as it stands, before the payload" "omb_diff" "omb_commits" "omb_nogit" "diff.patch"; do
+  grep -qF "$gone" plugins/bughunter/skills/bughunter/SKILL.md && { echo "FAIL SKILL.md still says [$gone]: the skill runs no command a tool answer hands it, and the script writes every diff"; fails=$((fails + 1)); }
 done
 rm -rf "$UP"
-
-# THE NO-BRANCH LADDER, RUN — not read. Its rungs reach files no branch diff
-# ever did (untracked ones, the whole history), so the secret filter and the
-# throwaway index are guards: SKILL.md's own bash block is sourced here and
-# every rung runs on a repo holding secret names at every depth — `.env`
-# variants, the key files secret-scan.sh's KEY_FILE names, and directories
-# named for secrets — with a file already staged, a non-ASCII name, from the
-# root AND from a subdirectory, and on a folder with no git. None of the
-# secrets may be sent, and the user's index must not move.
-LD=$(mktemp -d)
-LADDER=$(python3 - plugins/bughunter/skills/bughunter/SKILL.md <<'PY'
-import re, sys
-s = open(sys.argv[1]).read()
-i = s.find("#### No branch, no pull request")
-m = re.search(r"```bash\n(.*?)```", s[i:], re.S) if i >= 0 else None
-print(m.group(1) if m and "omb_nogit" in m.group(1) and "omb_commits" in m.group(1) else "")
-PY
-)
-if [ -z "$LADDER" ]; then
-  echo "FAIL ladder: the no-branch ladder's bash block (omb_diff/omb_commits/omb_nogit) is gone from SKILL.md"; fails=$((fails + 1))
-else
-  printf '%s\n' "$LADDER" > "$LD/ladder.sh"
-  OUT=$(cd "$LD" && mkdir r ng && cd r && bash -c '
-    set -u; export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
-    git init -q . && . ../ladder.sh
-    mkdir -p deploy sub secrets config/credentials src/solver
-    for f in .env .env.local .envrc .env-production sub/.ENV id_rsa id_dsa id_ecdsa id_ed25519 deploy/id_ed25519 \
-             cert.pem server.KEY cert.p12 cert.pfx API_SECRETS.txt aws_credentials secrets/config.yml \
-             config/credentials/gcp.json src/.env; do printf "s\n" > "$f"; done
-    printf "a\n" > a.py; printf "m\n" > src/solver/m.py
-    # git quotes a non-ASCII name in the header: names() skips it, and its + line is the proof it was sent.
-    names() { sed -n "s|^diff --git a/\([^ ]*\) .*|\1|p" | sort | tr "\n" " "; }
-    echo "unborn=$(omb_diff "$EMPTY" | names)"
-    git add -A && git commit -qm base
-    echo "folder=$(omb_diff "$EMPTY" src/solver/ | names)"
-    printf "b\n" >> a.py && git add a.py && printf "n\n" > sub/new.py && printf "r\n" > "résumé.py"
-    before=$(git status --porcelain)
-    echo "rung2=$(omb_diff HEAD | names)"
-    echo "accent=$(omb_diff HEAD | grep -c "^+r$")"
-    [ "$before" = "$(git status --porcelain)" ] && echo "index=same" || echo "index=moved"
-    # The last N commits are commits only: the dirty a.py, sub/new.py and résumé.py stay out.
-    # Two commits on top of base, made in a clone so this tree stays dirty as it is: N=1
-    # is the last one, N=2 both, and N past the history is all of it.
-    git clone -q . ../h && (cd ../h && printf "c1\n" > c1.py && git add c1.py && git commit -qm c1 \
-      && printf "c2\n" > src/solver/c2.py && git add src/solver/c2.py && git commit -qm c2 \
-      && printf "dirty\n" >> c1.py && printf "u\n" > untracked.py \
-      && echo "last1=$(omb_commits 1 | names)" && echo "last2=$(omb_commits 2 | names)" \
-      && echo "last9=$(omb_commits 9 | names)")
-    echo "commits9=$(omb_commits 9 | names)"
-    # From a subdirectory, with NEW secrets in the root and in other folders: only `top`
-    # keeps them out of a whole-repo rung run from src/.
-    printf "s\n" > .env.new && printf "s\n" > secrets/new.yml && printf "s\n" > sub/id_rsa
-    cd src && echo "sub2=$(omb_diff HEAD | names)" && echo "subroot=$(omb_diff "$EMPTY" | names)" \
-      && echo "subfolder=$(omb_diff "$EMPTY" solver/ | names)" && cd ..
-    cd ../ng && mkdir k && printf "q\n" > q.py && printf "s\n" > .env && printf "s\n" > k/a.pem
-    echo "nogit=$(omb_nogit | names)"; [ -e .git ] && echo "nogit=left .git" || true
-  ' 2>&1)
-  for want in "unborn=a.py src/solver/m.py " "folder=src/solver/m.py " "rung2=a.py sub/new.py " \
-              "accent=1" "index=same" "last1=src/solver/c2.py " "last2=c1.py src/solver/c2.py " \
-              "last9=a.py c1.py src/solver/c2.py src/solver/m.py " "commits9=a.py src/solver/m.py " \
-              "sub2=a.py sub/new.py " "subroot=a.py src/solver/m.py sub/new.py " \
-              "subfolder=src/solver/m.py " "nogit=q.py "; do
-    printf '%s\n' "$OUT" | grep -qxF "$want" || { echo "FAIL ladder: want [$want] in: $(printf '%s' "$OUT" | tr '\n' '|')"; fails=$((fails + 1)); }
-  done
-  grep -qF '3. **Recent commits** – `omb_commits 10`' plugins/bughunter/skills/bughunter/SKILL.md \
-    || { echo "FAIL ladder: SKILL.md rung 3 no longer calls omb_commits (the function that falls back to the whole history)"; fails=$((fails + 1)); }
-  printf '%s\n' "$OUT" | grep -q 'left .git' && { echo "FAIL ladder: omb_nogit left a .git behind"; fails=$((fails + 1)); }
-fi
-rm -rf "$LD"
 
 # DIFF DRIVERS NEVER RUN. A repository's own .gitattributes can name a diff
 # driver, and its config a textconv or an external diff: any of them would run
@@ -2940,24 +2828,21 @@ if [ ! -e "$DD/marker-diff.evil.command" ] || [ ! -e "$DD/marker-diff.external" 
   echo "FAIL diff drivers: the planted drivers did not fire without the flags ($(ls "$DD" | tr '\n' ' ')), so this row proves nothing"; fails=$((fails + 1))
 fi
 rm -f "$DD"/marker-*
-printf '%s\n' "${LADDER:-}" > "$DD/ladder.sh"
 # SKILL.md's branch block, run to the end with the real script (diff mode, so
 # no snapshot) and a curl that keeps the payload it is given: the "default"
 # spelling is the diff the script writes itself.
 mkdir -p "$DD/bin"; printf '#!/bin/sh\nfor a; do case $a in @*) cp "${a#@}" "$UPLOG" ;; esac; done\nprintf 200\n' > "$DD/bin/curl"; chmod +x "$DD/bin/curl"
-DRECIPE=$(upload_block "$(cd "$G/../skills/bughunter" && pwd)" off branch)
+DRECIPE=$(upload_block "$(cd "$G/../skills/bughunter" && pwd)" off upload "--base 'main'")
 [ -n "$DRECIPE" ] || { echo "FAIL diff drivers: no branch block in SKILL.md to run"; fails=$((fails + 1)); }
 dd_run() { # repo -> each spelling's bytes, one file per spelling, under $DD/out-<repo>
   local r=$1 o="$DD/out-$(basename "$1")"
   mkdir -p "$o"
   ( cd "$r" && . "$G/diff-id.sh" && ohmybug_diff_raw > "$o/raw" && ohmybug_sig_id > "$o/sig" )
-  ( cd "$r" && export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t && . "$DD/ladder.sh" \
-      && omb_diff HEAD > "$o/omb_diff" && omb_commits 2 > "$o/omb_commits" )
   ( cd "$r" && UPLOG="$o/default" PATH="$DD/bin:$PATH" bash -c "$DRECIPE" ) >"$DD/log-$(basename "$1")" 2>&1 \
     || { echo "FAIL diff drivers: the branch block did not run to the end in $(basename "$1"): $(tail -n 3 "$DD/log-$(basename "$1")")"; fails=$((fails + 1)); }
 }
 dd_run "$DD/a"; dd_run "$DD/b"
-for f in raw sig omb_diff omb_commits default; do
+for f in raw sig default; do
   if [ ! -s "$DD/out-b/$f" ] || [ ! -s "$DD/out-a/$f" ]; then echo "FAIL diff drivers: $f was not written in both runs, so the row proves nothing"; fails=$((fails + 1))
   elif ! cmp -s "$DD/out-a/$f" "$DD/out-b/$f"; then echo "FAIL diff drivers: $f differs from a driver-free run"; fails=$((fails + 1)); fi
 done
