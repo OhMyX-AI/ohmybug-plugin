@@ -492,12 +492,25 @@ pack() (
   home_check pack
   o=$(cd "$(git rev-parse --git-path objects)" && pwd); rm -rf "$k"; mkdir "$k"
   cp -p "$(git rev-parse --git-path index)" "$k/i" 2>/dev/null || :; f=$(git rev-parse --show-object-format 2>/dev/null) || :; case $f in sha1|sha256) g=--object-format=$f;; *) g=;; esac; mkdir -p "$k/o/info"; printf '%s\n' "$o" > "$k/o/info/alternates"; export GIT_INDEX_FILE="$k/i" GIT_OBJECT_DIRECTORY="$k/o"; s='-c splitIndex.maxPercentChange=100'
+  # A partial clone: every blob the snapshot reads, fetched in ONE request
+  # before the index is touched (older git fetches a missing blob one at a
+  # time in read-tree and write-tree), into this private object folder; the
+  # archive's bare repository cannot fetch at all. The diff's batched
+  # prefetch, from the empty tree; its exit status is not read: a blob still
+  # missing stops the archive.
+  pre() { git -c core.quotePath=true diff-tree -r -p --no-color --no-ext-diff --no-textconv "$empty" "$1" -- > /dev/null || :; }
+  # A partial clone: extensions.partialClone (older git) or a promisor remote.
+  partial=$(git config --get-regexp '^(extensions\.partialclone|remote\..*\.promisor)$' 2>/dev/null) || partial=
+  if [ -n "$partial" ]; then
+    if [ "$scope" = commits ]; then pre "$to^{tree}"; elif git rev-parse -q --verify 'HEAD^{tree}' >/dev/null; then pre 'HEAD^{tree}'; fi
+  fi
   git ls-files -z -t > "$k/l"; xargs -0 sh -c 'for e; do case $e in "S "*) printf "%s\0" "${e#S }";; esac; done' sh < "$k/l" > "$k/s"
   [ "$scope" = commits ] && git $s read-tree "$to"
   git $s update-index -z --force-remove --stdin < "$k/s"
   [ "$scope" = commits ] || add_all $s
   git $s update-index -z --force-remove --stdin < "$drop"
   t=$(git $s write-tree); printf '%s\n' "$t" > "$k/t"
+  [ -z "$partial" ] || pre "$t"  # what the index holds beyond HEAD; no request when nothing is missing
   c=$(GIT_AUTHOR_NAME=omb GIT_AUTHOR_EMAIL=omb GIT_AUTHOR_DATE='946684800 +0000' GIT_COMMITTER_NAME=omb GIT_COMMITTER_EMAIL=omb GIT_COMMITTER_DATE='946684800 +0000' git commit-tree --no-gpg-sign -m omb "$t")
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
   { git init -q --bare $g "$k/g" 2>/dev/null || git init -q --bare "$k/g"; }; mkdir -p "$k/g/info"; printf '%s\n%s\n' "$o" "$k/o" > "$k/g/objects/info/alternates"

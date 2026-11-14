@@ -940,6 +940,22 @@ miss=$(git -C "$ROOT/p50" rev-list --objects --missing=print "$b50" | grep -c '^
 nf=$(wc -l < "$ROOT/p50-count" | tr -d ' ')
 [ "$rc" = 0 ] && [ "$miss" = 51 ] && [ "$nf" = 1 ] && payload_diff | grep -q '^-f1.txt' && payload_diff | grep -q '^+f2.txt' && [ "$(payload_diff | grep -c '^+new ')" = 50 ] \
   && ok "a blobless clone, 51 unfetched blobs (a symlink's among them): one fetch, the link's change in the diff" || fail "one fetch: rc $rc missing $miss fetches $nf $out"
+# The snapshot of a blobless clone whose 30 HEAD blobs were never fetched
+# (--no-checkout): --commits 1 with a snapshot makes exactly 2 fetches, one
+# for the diff (the one changed file) and one for the pack (the other 29), and
+# the tar holds every file.
+SP="$ROOT/sp-src"; mkdir -p "$SP"; g -C "$SP" init -q
+for i in $(seq 1 30); do printf 'f %d\n' "$i" > "$SP/f$i.txt"; done; g -C "$SP" add -A; g -C "$SP" commit -qm one
+printf 'changed\n' >> "$SP/f1.txt"; g -C "$SP" commit -qam two
+g -C "$SP" config uploadpack.allowFilter true; g -C "$SP" config uploadpack.allowAnySHA1InWant true
+g clone -q --no-checkout --filter=blob:none --upload-pack="$ROOT/p50-up" "file://$SP" "$ROOT/sp" 2>/dev/null
+g -C "$ROOT/sp" config remote.origin.uploadpack "$ROOT/p50-up"
+miss=$(git -C "$ROOT/sp" rev-list --objects --missing=print HEAD | grep -c '^?')
+: > "$ROOT/p50-count"; fresh; run "$ROOT/sp" "$URL" required --commits 1
+nf=$(wc -l < "$ROOT/p50-count" | tr -d ' ')
+[ "$rc" = 0 ] && [ "$miss" = 31 ] && [ "$nf" = 2 ] && [ "$(tar -tzf "$STUB/repo.1.sent" | grep -c '^f[0-9]*\.txt$')" = 30 ] \
+  && [ "$(tar -xzOf "$STUB/repo.1.sent" f30.txt)" = 'f 30' ] \
+  && ok "the snapshot of a blobless clone: every file packed, one fetch for the pack and one for the diff" || fail "blobless snapshot: rc $rc missing $miss fetches $nf $out"
 # The remote is gone: the read fails with a sentence, never a traceback.
 g -C "$ROOT/p50" remote set-url origin "file://$ROOT/no-such-remote"; g -C "$ROOT/p50" config --unset remote.origin.uploadpack
 fresh; g clone -q --filter=blob:none "file://$P50" "$ROOT/p50b" 2>/dev/null; g -C "$ROOT/p50b" update-ref refs/remotes/origin/main "$b50"
