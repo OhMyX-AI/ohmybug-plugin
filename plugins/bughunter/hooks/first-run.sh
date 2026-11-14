@@ -50,7 +50,7 @@ INPUT=$(cat 2>/dev/null) || INPUT=
 
 mkdir -p "$STATE"
 printf '%s' "$INPUT" | python3 -I -c '
-import json, os, sys
+import json, os, re, sys
 state, home, proj = sys.argv[1:4]
 try:
     d = json.loads(sys.stdin.read() or "{}")
@@ -62,15 +62,19 @@ tool = str(d.get("tool_name") or "")
 # Every rule in the four files a user edits. Allow, ask and deny are all
 # decisions: re-suggesting a rule against a deliberate deny would be nagging
 # someone to undo their own choice.
-P = "mcp__plugin_bughunter_ohmybug"
-rules, mentioned = [], False
+# The rule is named after the server this call goes through (tool_name minus
+# its last part): the plugin server, or a second server at the same URL that
+# hides it. With no tool in hand there is no name to give, so nothing is said.
+P = tool.rpartition("__")[0]
+if event != "PreToolUse" or not re.fullmatch(r"mcp__[A-Za-z0-9_-]{1,120}", P):
+    sys.exit(0)
+rules = []
 for f in (home + "/.claude/settings.json", home + "/.claude/settings.local.json",
           proj + "/.claude/settings.json", proj + "/.claude/settings.local.json"):
     try:
         text = open(f, encoding="utf-8", errors="replace").read()
     except OSError:
         continue
-    mentioned = mentioned or "bughunter_ohmybug" in text
     try:
         perms = json.loads(text).get("permissions") or {}
     except (ValueError, AttributeError):
@@ -78,6 +82,7 @@ for f in (home + "/.claude/settings.json", home + "/.claude/settings.local.json"
     for kind in ("allow", "ask", "deny"):
         rules += [r for r in perms.get(kind) or [] if isinstance(r, str)]
 covers = lambda rs, t: any(r in (P, P + "__*", P + "__" + t) for r in rs)
+mentioned = any(r == P or r.startswith(P + "__") for r in rules)
 files_decided = covers(rules, "provide_files")
 
 def once(mark):
@@ -96,7 +101,7 @@ if not mentioned:
                "refuses the files the reviewers ask for mid-run, at any size; the hunt then\n"
                "goes on without them. One rule lets the OhMyBug\n"
                "tools through, and only you can add it — /permissions -> Add rule ->\n"
-               "mcp__plugin_bughunter_ohmybug__* . One tool at a time instead? Then allow both\n"
+               + P + "__* . One tool at a time instead? Then allow both\n"
                + P + "__submit_review and " + P + "__provide_files .\n"
                + "Nothing will add them for you. With the rule, the files go through the plugin,\n"
                "read from disk; no shell command uploads them.")

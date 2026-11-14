@@ -26,7 +26,7 @@ set -euo pipefail
 
 [ -n "${PLUGIN_DATA:-}" ] && exit 0
 
-NOTE='First thing this session: confirm the OhMyBug MCP tools (mcp__plugin_bughunter_ohmybug__*) are present. If they are not, tell the user once, now — a session that began without them will not get them, and a restart (claude -c) usually does — then let the user decide and go on with what they asked; do not leave the discovery to the merge gate hours later.'
+NOTE='First thing this session: confirm the OhMyBug MCP tools (submit_review, get_findings, confirm_findings, from a server named ohmybug) are present. If they are not, tell the user once, now — a session that began without them will not get them, and a restart (claude -c) usually does — then let the user decide and go on with what they asked; do not leave the discovery to the merge gate hours later.'
 
 python3 -I - "$NOTE" <<'PY' || exit 0
 import json, sys

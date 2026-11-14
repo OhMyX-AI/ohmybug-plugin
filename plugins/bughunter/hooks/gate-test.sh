@@ -716,6 +716,41 @@ if [ -n "$ID" ]; then
   # one aborted submit opened the merge for the attempt's whole TTL.
   rc=$(mk "$V" "$PWD" | PLUGIN_DATA=/x bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
   [ "$rc" = 2 ] || { printf 'FAIL under Codex a bare attempt stood the gate down (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+  # The attempt carries the server name the call went through. A second server
+  # at the same URL hides the plugin's, and its tools are mcp__ohmybug__*: the
+  # allow check and the advice follow that name, and a rule for the other name
+  # says nothing about it (a stale rule hard-blocked; a right one warned through).
+  prek() {
+    git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
+    python3 -c "import json,os,sys;print(json.dumps({
+      'tool_name':'mcp__ohmybug__submit_review',
+      'tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
+      'cwd':sys.argv[1]}))" "$PWD" | bash "$G/stamp-hunt.sh"
+  }
+  krow() { # name, settings json ('' = none), want rc
+    if [ -n "$2" ]; then printf '%s\n' "$2" > "$HOME/.claude/settings.json"; else rm -f "$HOME/.claude/settings.json"; fi
+    rc=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
+    [ "$rc" = "$3" ] || { printf 'FAIL live name: %s: rc=%s, want %s\n' "$1" "$rc" "$3"; fails=$((fails + 1)); }
+  }
+  prek
+  [ "$(ohmybug_attempt_prefix "$ID")" = mcp__ohmybug ] || { printf 'FAIL live name: the attempt did not keep its server name\n'; fails=$((fails + 1)); }
+  krow "key server, a stale plugin rule: warn" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}' 0
+  out=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" 2>&1 >/dev/null)
+  case "$out" in *"/permissions -> mcp__ohmybug__*"*) ;; *) printf 'FAIL live name: the warn named another rule: %s\n' "$out"; fails=$((fails + 1)) ;; esac
+  krow "key server, its own rule: block" '{"permissions":{"allow":["mcp__ohmybug__*"]}}' 2
+  krow "key server, its bare server rule: block" '{"permissions":{"allow":["mcp__ohmybug"]}}' 2
+  krow "key server, a lookalike name: warn" '{"permissions":{"allow":["mcp__ohmybugx__*"]}}' 0
+  krow "key server, no rule: warn" '' 0
+  pre submit_review
+  krow "plugin server, only the key rule: warn" '{"permissions":{"allow":["mcp__ohmybug__*"]}}' 0
+  out=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" 2>&1 >/dev/null)
+  case "$out" in *"/permissions -> mcp__plugin_bughunter_ohmybug__*"*) ;; *) printf 'FAIL live name: the plugin warn named another rule: %s\n' "$out"; fails=$((fails + 1)) ;; esac
+  # A record from before the name was stored is the plugin server's.
+  : > "$(ohmybug_hunt_dir)/attempt:$ID"
+  krow "an old empty record, the plugin rule: block" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}' 2
+  printf 'mcp__../x' > "$(ohmybug_hunt_dir)/attempt:$ID"
+  krow "a record of no prefix shape reads as the plugin server" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}' 2
+  rm -f "$HOME/.claude/settings.json"
   # ...and a Codex-shaped payload: tool_name spelled out, hook_event_name set,
   # and the command handed over as argv. A parser that dies on the list is read
   # as "no verdict", and that branch OPENS the gate.
@@ -2112,7 +2147,12 @@ rm -rf "$BK"
 # advice here is about the user's own permission settings — the one place this
 # plugin must never write.
 FR=$(mktemp -d)
-say() { OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh" </dev/null; }
+# The notice speaks at the first OhMyBug tool call, naming the rule after the
+# server that call goes through; a session start has no tool name, so it is silent.
+say() { printf '{"hook_event_name":"PreToolUse","tool_name":"mcp__plugin_bughunter_ohmybug__get_balance","permission_mode":"default","session_id":"f0"}' \
+  | OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh"; }
+[ -z "$(OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh" </dev/null)" ] || { printf 'FAIL first-run: spoke at a session start, with no tool name to give\n'; fails=$((fails + 1)); }
+[ ! -e "$FR/state/permission-notice-v1" ] || { printf 'FAIL first-run: a session start consumed the once-per-machine mark\n'; fails=$((fails + 1)); }
 # Under Codex (PLUGIN_DATA set) the notice is about the wrong client: silent,
 # and the mark is NOT written, so a Claude Code session on the same machine
 # still hears it once.
@@ -2167,6 +2207,19 @@ rm -f "$FR/.claude/settings.local.json"
 mkdir -p "$FR/p/.claude"
 printf '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__provide_files"]}}\n' > "$FR/p/.claude/settings.json"
 fr_row "a project rule counts too" "$(pre provide_files auto s5)" ''
+# A second server at the same URL: the advice names its tools, and only a rule
+# for that name is a decision.
+rm -rf "$FR/state" "$FR/.claude" "$FR/p/.claude"; mkdir -p "$FR/.claude"
+kpre() { printf '{"hook_event_name":"PreToolUse","tool_name":"mcp__ohmybug__%s","permission_mode":"auto","session_id":"%s"}' "$1" "$2" \
+  | OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh"; }
+printf '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}\n' > "$FR/.claude/settings.json"
+fr_row "key server beside a plugin rule: the notice names the key server" "$(kpre get_balance k1)" 'Add rule ->\\nmcp__ohmybug__\* \. One tool'
+fr_row "key server beside a plugin rule: the provide_files hint names its tool" "$(kpre provide_files k1)" 'Add rule -> mcp__ohmybug__provide_files'
+rm -rf "$FR/state"
+printf '{"permissions":{"allow":["mcp__ohmybug__*"]}}\n' > "$FR/.claude/settings.json"
+fr_row "key server with its own rule: no notice on a fresh machine" "$(kpre get_balance k2)" ''
+fr_row "key server with its own rule: no provide_files hint" "$(kpre provide_files k2)" ''
+rm -rf "$FR/state" "$FR/.claude"
 
 # --- the scan hint: once per machine, Claude Code only, a suggestion ----------
 SH=$(mktemp -d)
@@ -2220,7 +2273,8 @@ for turn in 1 2; do
 import json, sys
 d = json.loads(sys.argv[1])
 ctx = d.get('hookSpecificOutput', {}).get('additionalContext', '')
-ok = ('confirm the OhMyBug MCP tools (mcp__plugin_bughunter_ohmybug__*) are present' in ctx
+ok = ('confirm the OhMyBug MCP tools (submit_review, get_findings, confirm_findings, from a server named ohmybug) are present' in ctx
+      and 'mcp__' not in ctx
       and 'tell the user once' in ctx and 'go on with what they asked' in ctx
       and 'do not start' not in ctx and 'systemMessage' not in d)
 sys.exit(0 if ok else 1)
@@ -3290,7 +3344,7 @@ mkdir -p "$PLD/h0/.claude"; printf '{"permissions":{"allow":["mcp__plugin_bughun
 plrow "diff-id.sh still reads the permission rule" 0 "$(cd "$PL" && HOME="$PLD/h0" CLAUDE_PROJECT_DIR="$PL" PLUGIN_DATA= ohmybug_tools_allowed; echo $?)"
 IN=$(plj '{"tool_name":"mcp__plugin_bughunter_ohmybug__get_balance","tool_response":{"content":[{"type":"text","text":"{\"bugarium\":{\"vote\":{\"url\":\"https://example.invalid/bugs/vote/7\",\"closes_at\":\"2026-09-28T04:00:00.000Z\"}}}"}]}}')
 plrow "bugarium-notice.sh still hands the vote over" yes "$(printf '%s' "$IN" | (cd "$PL" && bash "$G/bugarium-notice.sh" 2>/dev/null) | grep -q 'example.invalid/bugs/vote/7' && echo yes)"
-plrow "first-run.sh still gives its notice" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s1" HOME="$PLD/h1" CLAUDE_PROJECT_DIR="$PLD/p1" PLUGIN_DATA= bash "$G/first-run.sh" </dev/null 2>/dev/null | grep -q . && echo yes)"
+plrow "first-run.sh still gives its notice" yes "$(cd "$PL" && printf '{"hook_event_name":"PreToolUse","tool_name":"mcp__plugin_bughunter_ohmybug__get_balance"}' | OMB_STATE_DIR="$PLD/s1" HOME="$PLD/h1" CLAUDE_PROJECT_DIR="$PLD/p1" PLUGIN_DATA= bash "$G/first-run.sh" 2>/dev/null | grep -q . && echo yes)"
 plrow "scan-hint.sh still names the commands" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s2" HOME="$PLD/h2" PLUGIN_DATA= bash "$G/scan-hint.sh" 2>/dev/null | grep -q '/bughunter:scan' && echo yes)"
 plrow "tools-check.sh still asks for the tools check" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s3" HOME="$PLD/h3" PLUGIN_DATA= bash "$G/tools-check.sh" 2>/dev/null | grep -q 'additionalContext' && echo yes)"
 rm -rf "$(cd "$PL" && ohmybug_hunt_dir)" "$(cd "$PL" && ohmybug_hunt_dir).pending" "$PLD"
