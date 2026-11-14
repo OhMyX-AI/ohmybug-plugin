@@ -127,13 +127,13 @@ review = "" if tool == "submit_review" else inp.get("review_id")
 # TICKET: the server hunts the uploaded bytes, never repo@ref, so the ref may
 # not key the record either (one junk upload plus meta.ref=HEAD would credit a
 # clean checkout). "1" is an upload the server answered without a ticket: a
-# deep hunt of the pushed commit it fetched itself. Only an answer that reads,
-# and reads as no ticket, is "1": anything else is a ticket (errs shut), and so
-# is a duplicate, which may be a running upload of the same ref.
+# deep hunt of the pushed commit it fetched itself. An allow-list: only an
+# answer whose status reads "running", with no upload_url and not a duplicate
+# (which may be a running upload of the same ref), is "1". Anything else is a
+# ticket: the gate errs shut.
 upload = "0"
 if inp.get("upload") is True:
-    st = body.get("status")
-    fetched = isinstance(st, str) and st not in ("", "awaiting_upload") and body.get("already_running") is not True
+    fetched = body.get("status") == "running" and "upload_url" not in body and body.get("already_running") is not True
     upload = "1" if fetched else "2"
 if not isinstance(review, str) or not review:
     review = body.get("review_id") if isinstance(body.get("review_id"), str) else ""
@@ -426,6 +426,17 @@ case "$TOOL" in
     # The sent bytes first, because that one is true from any directory; the
     # working-tree ids only when the payload proves to BE this tree; the ref
     # last, for the no-payload path where there are no bytes to hash.
+    # An upload ticket keys nothing the gate may credit, so it gets no record:
+    # a record would hold the Stop nudge for hours on an upload that may never
+    # happen (a refused script call, a credential in the diff, the user's no).
+    # The tombstone makes the finished poll a quiet no-op instead of a search
+    # for a record that was never meant to exist.
+    if [ "${UPLOAD:-0}" = 2 ]; then
+      mkdir -p "$(dirname "$TOMB")" 2>/dev/null && : > "$TOMB" 2>/dev/null
+      say "ohmybug: an uploaded hunt is not recorded for the merge gate. To record this change: commit, push, and submit with meta.repo + meta.ref = the pushed head sha + meta.base_branch and no payload."
+      live_tail
+      exit 0
+    fi
     mkdir -p "$PENDING_DIR" 2>/dev/null || { live_tail; exit 0; }
     TREEOK=0 REFOK=0
     {
@@ -452,7 +463,7 @@ case "$TOOL" in
       # the ref too would let one junk diff plus a HEAD sha bless a clean
       # checkout the reviewers never saw. Which spellings may key the record
       # is ohmybug_ref_here's rule, shared with the PreToolUse branch above.
-      if [ -z "$SENT" ] && [ -n "$REF" ] && [ "${UPLOAD:-0}" != 2 ]; then
+      if [ -z "$SENT" ] && [ -n "$REF" ]; then
         if R=$(ohmybug_ref_here "$REF") && [ -n "$R" ]; then
           printf 'ref:%s\n' "$R"
           REFOK=1
@@ -483,10 +494,6 @@ case "$TOOL" in
       # what decides whether a record exists at all: a record carrying only who
       # wrote it names no diff, satisfies no gate lookup, and would turn every
       # unrecordable submit into a permanent nag with nothing to satisfy it.
-      # An upload ticket keys nothing the gate looks up, but its record still
-      # exists, so the Stop nudge follows the running hunt and the finished
-      # poll promotes quietly.
-      [ "${UPLOAD:-0}" = 2 ] && printf 'upload:%s\n' "$REVIEW"
       [ -n "$SESSION" ] && printf 'session:%s\n' "$SESSION"
       true
     } > "$PENDING.tmp" 2>/dev/null || { live_tail; exit 0; }
@@ -498,12 +505,6 @@ case "$TOOL" in
       # A record holding only the sent bytes' hash satisfies no gate lookup:
       if [ "$TREEOK" = 0 ] && [ "$REFOK" = 0 ] && [ -n "$SENT" ]; then
         say "ohmybug: the payload does not match this working tree, so the merge gate will not recognise this tree as hunted. Commit, push, and submit with no payload and meta.ref set to the pushed head commit sha; or, in diff mode, send the full working diff verbatim"
-      fi
-      # ...and an upload ticket is never recorded for the gate, while with
-      # uncommitted work a fetched upload's ref: line is never honoured either:
-      if [ -z "$SENT" ] && [ "${UPLOAD:-0}" != 0 ] && [ "$TREEOK" = 0 ] &&
-         { [ "$REFOK" = 0 ] || [ -n "$(git status --porcelain 2>/dev/null)" ]; }; then
-        say "ohmybug: an uploaded hunt is not recorded for the merge gate. To record this change: commit, push, and submit with meta.repo + meta.ref = the pushed head sha + meta.base_branch and no payload."
       fi
     else
       rm -f "$PENDING.tmp"

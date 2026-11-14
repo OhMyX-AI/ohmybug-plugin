@@ -1688,14 +1688,30 @@ UNREC="an uploaded hunt is not recorded for the merge gate. To record this chang
 UREPO=$(mktemp -d)/repo
 mkrepo "$UREPO"
 printf 'big unpushed work\n' >> "$UREPO/a.ts"
+UHUNTS=$(cd "$UREPO" && . "$G/diff-id.sh" && ohmybug_hunt_dir)
+# A deep upload the server fetched itself (status running, no upload_url) from a
+# DIRTY tree: its ref: line is written but not honoured on a dirty tree, and it
+# is not told the ticket sentence, which is about tickets only.
+usub "$UREPO" rev_fd running >"$HOME/hook.out"; out=$(ctx <"$HOME/hook.out")
+case "$out" in *"not recorded for the merge gate"*) printf 'FAIL a fetched upload was told it is not recorded: %s\n' "$out"; fails=$((fails + 1)) ;; esac
+grep -qx "ref:$(git -C "$UREPO" rev-parse HEAD)" "$UHUNTS.pending/rev_fd" 2>/dev/null \
+  || { printf 'FAIL a fetched upload did not record its ref\n'; fails=$((fails + 1)); }
+ppost get_findings done "$UREPO" "" rev_fd >/dev/null 2>&1
+rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
+[ "$rc" = 2 ] || { printf 'FAIL a fetched upload credited the dirty tree (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
 usub "$UREPO" rev_up awaiting_upload >"$HOME/hook.out"; rc=$?; out=$(ctx <"$HOME/hook.out")
+# No record at all for a ticket: one would hold the Stop nudge for hours on an
+# upload that may never happen.
+[ -e "$UHUNTS.pending/rev_up" ] && { printf 'FAIL an upload ticket left a pending record\n'; fails=$((fails + 1)); }
 case "$out" in
   *"$UNREC"*) ;;
   *) printf 'FAIL an upload ticket from a dirty tree was filed silently: %s\n' "$out"; fails=$((fails + 1)) ;;
 esac
 [ "$rc" = 0 ] || { printf 'FAIL the upload note blocked or replaced the result (rc=%s)\n' "$rc"
                    fails=$((fails + 1)); }
-ppost get_findings done "$UREPO" "" rev_up
+out=$(ppost get_findings done "$UREPO" "" rev_up 2>&1)
+[ -z "$out" ] || { printf 'FAIL the finished poll of an upload ticket spoke: %s\n' "$out"; fails=$((fails + 1)); }
+ls "$UHUNTS" 2>/dev/null | grep -q '^upload:' && { printf 'FAIL an upload line was promoted into the hunts dir\n'; fails=$((fails + 1)); }
 rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
 [ "$rc" = 2 ] || { printf 'FAIL out-of-band bytes credited the dirty tree (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
 # ...and a CLEAN checkout at meta.ref does not launder an upload ticket either.
@@ -1712,8 +1728,12 @@ usub "$UREPO" rev_dup running '{"already_running":true}' >/dev/null
 ppost get_findings done "$UREPO" "" rev_dup
 usub "$UREPO" rev_nost '' >/dev/null
 ppost get_findings done "$UREPO" "" rev_nost
+usub "$UREPO" rev_url running '{"upload_url":"https://mcp.ohmybug.ai/u/t"}' >/dev/null
+ppost get_findings done "$UREPO" "" rev_url
+usub "$UREPO" rev_q queued >/dev/null
+ppost get_findings done "$UREPO" "" rev_q
 rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
-[ "$rc" = 2 ] || { printf 'FAIL a duplicate or status-less upload answer was credited through its ref (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+[ "$rc" = 2 ] || { printf 'FAIL a duplicate, status-less, upload_url-carrying or not-running upload answer was credited through its ref (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
 # A deep submit the server fetched itself answers `running`, not a ticket: it
 # hunted repo@ref, so the ref keeps its credit on a clean checkout...
 usub "$UREPO" rev_up3 running >/dev/null
@@ -2730,8 +2750,8 @@ PY2
 # shared by two reviews at once); and a failed `git diff` must stop the block
 # before the script runs, so an empty or partial diff is never sent.
 UP=$(mktemp -d)
-mkdir -p "$UP/skills/bughunter" "$UP/hooks" "$UP/bin" "$UP/repo"
-cat > "$UP/hooks/omb-upload.sh" <<'SH'
+mkdir -p "$UP/skills/bughunter" "$UP/bin" "$UP/repo"
+cat > "$UP/skills/bughunter/omb-upload.sh" <<'SH'
 python3 - "$@" >> "$UPLOG" <<'PY'
 import os, stat, sys
 url, mode, f = sys.argv[1:4]
@@ -2886,8 +2906,8 @@ if [ ! -e "$DD/marker-diff.evil.command" ] || [ ! -e "$DD/marker-diff.external" 
 fi
 rm -f "$DD"/marker-*
 printf '%s\n' "${LADDER:-}" > "$DD/ladder.sh"
-mkdir -p "$DD/up/skills/bughunter" "$DD/up/hooks"
-printf '#!/bin/sh\ncp "$3" "$UPLOG"\n' > "$DD/up/hooks/omb-upload.sh"
+mkdir -p "$DD/up/skills/bughunter"
+printf '#!/bin/sh\ncp "$3" "$UPLOG"\n' > "$DD/up/skills/bughunter/omb-upload.sh"
 DRECIPE=$(upload_block "$DD/up")
 dd_run() { # repo -> each spelling's bytes, one file per spelling, under $DD/out-<repo>
   local r=$1 o="$DD/out-$(basename "$1")"

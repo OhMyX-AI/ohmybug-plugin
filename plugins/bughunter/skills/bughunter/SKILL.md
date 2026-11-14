@@ -422,7 +422,8 @@ symlink in any part of its path, and names any it skips.
 
 The manifest is the upload script's: before anything is sent it prints one
 line saying what leaves the machine (the diff's size, the snapshot's file
-count and size, what was left out, the credential scan's result). Show that
+count and size, what was left out of each (secret-named files leave the
+diff as they leave the snapshot), the credential scan's result). Show that
 line to the user as it stands; do not ask.
 
 ### 3. Submit
@@ -443,9 +444,10 @@ Work down this list and stop at the first rung that applies:
    a repo that is not on GitHub, changes that are **not pushed** (the usual case
    is re-hunting your own fixes), or an org that will not install the App. Send
    the **whole working diff against the merge base** (`git diff <base>`,
-   verbatim). A payload buys a review of those bytes, never a merge-gate
-   record: the gate credits no payload hunt. To record the change for the
-   gate, commit, push and hunt it by rung 1 (`ref` = the pushed head sha),
+   verbatim). An uploaded payload buys a review of those bytes, never a
+   merge-gate record: the gate credits no upload. (Only an inline diff, which
+   runs in diff mode alone, is credited, and only when it is the whole working
+   diff of this tree.) To record the change for the gate, commit, push and hunt it by rung 1 (`ref` = the pushed head sha),
    which sends nothing. On a fast hunt `upload: true` always hands a ticket,
    even when the server could fetch the commit: it hunts your working copy,
    not the pushed commit, so send it only when rung 1 cannot serve.
@@ -596,7 +598,7 @@ inline `diff` outside diff mode is refused anyway.
 (set -e; umask 077; d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
 BASE=$(git merge-base HEAD 'origin/<base_branch>')
 git diff --no-textconv --no-ext-diff "$BASE" > "$d/diff.patch"
-bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' "$d/diff.patch")
+bash '<skill_dir>/omb-upload.sh' '<upload_url>' '<snapshot>' "$d/diff.patch")
 ```
 
 3. Before the first POST the script prints one manifest line: what leaves
@@ -610,8 +612,8 @@ bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' "$d/dif
      `OHMYBUG_SECRET_SCAN=0`, or commit + push + rung 1. A snapshot file that
      carries a credential is not a refusal: the script leaves that file out
      and names it in the manifest.
-   - `4` – no `python3`, so nothing could be scanned and nothing was sent.
-     Say so once and stop.
+   - `4` – no `python3` or no `curl`, so nothing was sent. Say so once and
+     stop.
    - `75` – busy or unreachable. The ticket stays valid: run the same command
      again (after the seconds it names, if it names any).
    - `1` – refused; the last line says why and what to do. A 413
@@ -623,7 +625,8 @@ bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' "$d/dif
    `mode_needs_repo` (see "Hunt modes").
 
 An uploaded hunt is never credited by the merge gate: the gate credits a
-hunt of the pushed commit (rung 1), never uploaded bytes. To record a change,
+hunt of the pushed commit (rung 1) and, in diff mode only, an inline diff
+that is the whole working diff of this tree; never uploaded bytes. To record a change,
 commit and push it, then use rung 1 (`ref` = the pushed head sha); the
 recorder says so at submit time.
 
