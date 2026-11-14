@@ -680,6 +680,14 @@ printf '%s' "$out" | grep -q 'The diff includes 1 untracked file git does not ig
 fresh; run "$T2" --dry-run off --base main
 [ "$rc" = 0 ] && [ "$(calls)" = 0 ] && printf '%s\n' "$out" | grep -qx 'never.txt (new, untracked)' && printf '%s\n' "$out" | grep -qx 'a.txt' \
   && ok "--dry-run lists the untracked file as new, sends nothing" || fail "dry-run: rc $rc calls $(calls) $out"
+# The dry run prints the manifest line the upload would, byte for byte, with
+# a snapshot and without, and makes no request.
+for sv in required off; do
+  fresh; run "$T2" --dry-run "$sv" --base main; m1=$(printf '%s\n' "$out" | grep '^OhMyBug upload'); c1=$(calls)
+  fresh; run "$T2" "$URL" "$sv" --base main; m2=$(printf '%s\n' "$out" | grep '^OhMyBug upload')
+  [ -n "$m1" ] && [ "$m1" = "$m2" ] && [ "$c1" = 0 ] && [ "$rc" = 0 ] \
+    && ok "--dry-run $sv: the same manifest line as the $sv upload, no request" || fail "dry-run manifest $sv: calls $c1 / [$m1] / [$m2]"
+done
 for i in 1 2 3 4 5 6; do printf 'u\n' > "$T2/u$i.txt"; done
 fresh; run "$T2" --dry-run off --base main
 printf '%s' "$out" | grep -q 'The diff includes 7 untracked files git does not ignore: never.txt, u1.txt, u2.txt, u3.txt, u4.txt and 2 more' \

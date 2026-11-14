@@ -369,10 +369,18 @@ store, on a dry run too.
 
 Before `submit_review`, see what the rung holds with a dry run, which sends
 nothing and prints the manifest line and one file name per line (new,
-untracked files are marked):
+untracked files are marked). It takes the same `<snapshot>` value as the
+upload and, with `required`, packs and scans the repository snapshot exactly
+as the upload will, so its manifest line is the one the upload prints.
+`<snapshot>` here is `required`, unless an upload ticket earlier in this
+session answered `snapshot: "off"` (the account is in diff mode, the only
+way you can know before the submit): then `off`. When you cannot know, use
+`required`: it over-states what leaves the machine rather than
+under-stating it. After `submit_review`, the ticket's `snapshot` decides,
+and if it says `off`, the upload's own manifest line is the one that counts.
 
 ```bash
-bash '<skill_dir>/../../hooks/omb-upload.sh' --dry-run off <scope>
+bash '<skill_dir>/../../hooks/omb-upload.sh' --dry-run '<snapshot>' <scope>
 ```
 
 From that dry run, say in one line which rung you took and how big it is,

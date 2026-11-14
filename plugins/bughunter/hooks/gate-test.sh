@@ -2795,7 +2795,7 @@ else
     (cd "$UP/repo" && UPLOG="$UP/log" "$sh" -c "$DRY") > /dev/null 2>&1 \
       || { echo "FAIL upload block ($sh): the dry-run block exited non-zero"; fails=$((fails + 1)); }
     [ "$(cat "$UP/log" 2>/dev/null)" = "https://mcp.ohmybug.ai/u/tok|required|--base|main|
---dry-run|off|--head|" ] || { echo "FAIL upload block ($sh): the blocks passed [$(cat "$UP/log" 2>/dev/null | tr '\n' ' ')]"; fails=$((fails + 1)); }
+--dry-run|required|--head|" ] || { echo "FAIL upload block ($sh): the blocks passed [$(cat "$UP/log" 2>/dev/null | tr '\n' ' ')]"; fails=$((fails + 1)); }
   done
 fi
 for gone in "instruction gives" "as it stands, before the payload" "omb_diff" "omb_commits" "omb_nogit" "diff.patch"; do
