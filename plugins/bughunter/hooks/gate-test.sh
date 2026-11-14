@@ -2171,7 +2171,9 @@ d = json.loads(sys.argv[1])
 ctx = d.get('hookSpecificOutput', {}).get('additionalContext', '')
 ok = ('confirm the OhMyBug MCP tools (mcp__plugin_bughunter_ohmybug__*) are present' in ctx
       and 'tell the user once' in ctx and 'go on with what they asked' in ctx
-      and 'If only mcp__ohmybug__* is there' in ctx and 'give the user the matching mcp__ohmybug__... name instead' in ctx
+      and 'If they are not, but OhMyBug tools are there under another server name (mcp__ohmybug__*' in ctx
+      and 'claude mcp remove <that name> and a restart bring the plugin server back (a restart alone does not)' in ctx
+      and 'If no OhMyBug tools are there at all, tell the user once' in ctx and 'If they are not, tell' not in ctx
       and 'do not start' not in ctx and 'systemMessage' not in d)
 sys.exit(0 if ok else 1)
 " "$tc" || { printf 'FAIL tools-check: session %s did not get a one-notice, non-blocking tools check in additionalContext only\n' "$turn"; fails=$((fails + 1)); }
