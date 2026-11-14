@@ -734,19 +734,25 @@ if [ -n "$ID" ]; then
   }
   prek
   [ "$(ohmybug_attempt_prefix "$ID")" = mcp__ohmybug ] || { printf 'FAIL live name: the attempt did not keep its server name\n'; fails=$((fails + 1)); }
-  krow "key server, a stale plugin rule: warn" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}' 0
+  # The verdict reads the user's settings alone, never the record (the agent
+  # can write it): a rule under either name blocks, no rule warns. The record
+  # only names the rule in the advice.
+  krow "key server, a plugin rule: block" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}' 2
+  krow "key server, no rule: warn" '' 0
   out=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" 2>&1 >/dev/null)
   case "$out" in *"/permissions -> mcp__ohmybug__*"*) ;; *) printf 'FAIL live name: the warn named another rule: %s\n' "$out"; fails=$((fails + 1)) ;; esac
   krow "key server, its own rule: block" '{"permissions":{"allow":["mcp__ohmybug__*"]}}' 2
+  krow "key server, submit_review alone: block" '{"permissions":{"allow":["mcp__ohmybug__submit_review"]}}' 2
+  krow "plugin submit_review alone: block" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__submit_review"]}}' 2
   krow "key server, its bare server rule: block" '{"permissions":{"allow":["mcp__ohmybug"]}}' 2
   krow "key server, a lookalike name: warn" '{"permissions":{"allow":["mcp__ohmybugx__*"]}}' 0
-  krow "key server, no rule: warn" '' 0
   krow "key server, a provide_files-only rule: warn" '{"permissions":{"allow":["mcp__ohmybug__provide_files"]}}' 0
   # The commit-keyed attempt keeps the server name too.
   python3 -c "import json,sys;print(json.dumps({'tool_name':'mcp__ohmybug__submit_review','tool_input':{'meta':{'ref':sys.argv[1]}},'cwd':sys.argv[2]}))" "$(git rev-parse HEAD)" "$PWD" | bash "$G/stamp-hunt.sh"
   [ "$(ohmybug_attempt_prefix "ref:$(git rev-parse HEAD)")" = mcp__ohmybug ] || { printf 'FAIL live name: the ref attempt did not keep its server name\n'; fails=$((fails + 1)); }
   pre submit_review
-  krow "plugin server, only the key rule: warn" '{"permissions":{"allow":["mcp__ohmybug__*"]}}' 0
+  krow "plugin server, only the key rule: block" '{"permissions":{"allow":["mcp__ohmybug__*"]}}' 2
+  krow "plugin server, no rule: warn" '' 0
   out=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" 2>&1 >/dev/null)
   case "$out" in *"/permissions -> mcp__plugin_bughunter_ohmybug__*"*) ;; *) printf 'FAIL live name: the plugin warn named another rule: %s\n' "$out"; fails=$((fails + 1)) ;; esac
   # A record from before the name was stored is the plugin server's.
@@ -755,8 +761,16 @@ if [ -n "$ID" ]; then
   rm -f "$HOME/.claude/settings.json"
   out=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" 2>&1 >/dev/null)
   case "$out" in *"/permissions -> mcp__plugin_bughunter_ohmybug__*"*) ;; *) printf 'FAIL live name: an old record named another rule: %s\n' "$out"; fails=$((fails + 1)) ;; esac
-  printf 'mcp__../x' > "$(ohmybug_hunt_dir)/attempt:$ID"
-  krow "a record of no prefix shape reads as the plugin server" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}' 2
+  # A record that is not one whole name reads as the plugin server in the advice.
+  for junk in 'mcp__../x' 'mcp__x
+evil' 'mcp__'; do
+    printf '%s' "$junk" > "$(ohmybug_hunt_dir)/attempt:$ID"
+    [ "$(ohmybug_attempt_prefix "$ID")" = mcp__plugin_bughunter_ohmybug ] || { printf 'FAIL live name: record [%s] read as a name\n' "$junk"; fails=$((fails + 1)); }
+  done
+  # A Codex call writes no name: the directory is shared, and a Codex name is no Claude Code rule.
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null
+  python3 -c "import json,os,sys;print(json.dumps({'tool_name':'mcp__ohmybug__submit_review','hook_event_name':'PreToolUse','tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},'cwd':sys.argv[1]}))" "$PWD" | PLUGIN_DATA=/x bash "$G/stamp-hunt.sh"
+  [ "$(ohmybug_attempt_prefix "$ID")" = mcp__plugin_bughunter_ohmybug ] || { printf 'FAIL live name: a Codex attempt kept a name\n'; fails=$((fails + 1)); }
   rm -f "$HOME/.claude/settings.json"
   # ...and a Codex-shaped payload: tool_name spelled out, hook_event_name set,
   # and the command handed over as argv. A parser that dies on the list is read
@@ -2229,6 +2243,10 @@ printf '{"permissions":{"allow":["mcp__ohmybug__*"]}}\n' > "$FR/.claude/settings
 fr_row "key server with its own rule: no notice on a fresh machine" "$(kpre get_balance k2)" ''
 fr_row "key server with its own rule: no provide_files hint" "$(kpre provide_files k2)" ''
 rm -rf "$FR/state" "$FR/.claude"
+# A machine that heard the old notice is not told again on the plugin server.
+mkdir -p "$FR/state" && : > "$FR/state/permission-notice-v1"
+fr_row "the plugin server keeps the old mark" "$(pre get_balance default o1)" ''
+rm -rf "$FR/state"
 fr_row "a call that names no event still carries the notice" "$(printf '{"tool_name":"mcp__plugin_bughunter_ohmybug__get_balance"}' | OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh")" 'Add rule ->'
 rm -rf "$FR/state" "$FR/.claude"
 

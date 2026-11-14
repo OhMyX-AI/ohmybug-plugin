@@ -45,7 +45,9 @@ environment. From a CI secret:
 (umask 077; mkdir -p ~/.ohmybug && printf '%s\n' "$OHMYBUG_API_KEY" > ~/.ohmybug/api-key && chmod 600 ~/.ohmybug/api-key)
 ```
 
-Never type the key itself on a command line.
+Never type the key itself on a command line. A key in the file takes the place
+of the browser sign-in; a file that holds no key is ignored with a one-line note
+(`OHMYBUG_API_KEY` is read only by clients that pass it to the plugin).
 
 ## Install (pi)
 

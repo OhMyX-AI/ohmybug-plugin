@@ -62,6 +62,24 @@ rm "$TMP/st/api-key"
 out=$(hd OHMYBUG_API_KEY="$K
 \",\"X\":\"y")
 [ "$out" = "$got" ] || { echo "multi-line variable: sent something"; exit 1; }
+grep -q 'OHMYBUG_API_KEY is not an omb_ key' "$TMP/err" && ! grep -q '"X"' "$TMP/err" || { echo "bad variable: no note, or its content echoed"; exit 1; }
+# The whole file is the value: a BOM and a leading blank line are dropped; a
+# second line or an inner space is not a key; the length bounds hold.
+printf '\357\273\277\n%s\n\n' "$K" > "$TMP/st/api-key"
+[ "$(hd)" = "$(withk "$K")" ] || { echo "bom and blank line: not read"; exit 1; }
+for bad in "$K
+$K2" "omb_0123456789 abcdef0123456789" "omb_$(printf '%0201d' 0)" "omb_012345678901234"; do
+  printf '%s\n' "$bad" > "$TMP/st/api-key"
+  [ "$(hd)" = "$got" ] || { echo "file [${bad%%
+*}...]: sent something"; exit 1; }
+  grep -q 'does not hold an omb_ key' "$TMP/err" || { echo "file [${bad%%
+*}...]: no note"; exit 1; }
+done
+for good in "omb_0123456789abcdef" "omb_$(printf '%0200d' 0 | cut -c1-200)"; do
+  printf '%s\n' "$good" > "$TMP/st/api-key"
+  [ "$(hd)" = "$(withk "$good")" ] || { echo "file length bound: ${#good} rejected"; exit 1; }
+done
+rm "$TMP/st/api-key"
 # The default path: no OMB_STATE_DIR, the key under HOME.
 mkdir -p "$TMP/h2/.ohmybug" && printf '%s\n' "$K" > "$TMP/h2/.ohmybug/api-key"
 [ "$(env -u OHMYBUG_API_KEY -u OMB_STATE_DIR HOME="$TMP/h2" CLAUDE_PLUGIN_ROOT="$ROOT" sh "$ROOT/hooks/mcp-headers.sh")" = "$(withk "$K")" ] || { echo "default path: no header"; exit 1; }

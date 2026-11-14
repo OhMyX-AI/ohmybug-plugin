@@ -234,6 +234,8 @@ ROUTE_STATE=$(printf '%s' "$FIELDS" | sed -n 17p)
 CONT_BY=$(printf '%s' "$FIELDS" | sed -n 18p)
 CONTINUES=$(printf '%s' "$FIELDS" | sed -n 19p)
 PREFIX=$(printf '%s' "$FIELDS" | sed -n 20p)
+# A Codex record names no Claude Code rule: the directory is shared by both clients.
+[ -z "${PLUGIN_DATA:-}" ] || PREFIX=
 
 [ -n "${TOOL:-}" ] || exit 0
 [ -n "${CWD:-}" ] && [ -d "$CWD" ] && cd "$CWD" 2>/dev/null

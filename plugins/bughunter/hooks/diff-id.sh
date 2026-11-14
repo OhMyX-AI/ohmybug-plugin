@@ -264,14 +264,11 @@ ohmybug_hunted() {
 # finished hunt. The gate needs the distinction because "never tried" and "tried
 # and was refused" are different facts and only the first deserves a block.
 #
-# The empty guard is repeated rather than inherited: `attempt:` prepended to
-# nothing is a non-empty string, so the guard inside ohmybug_record_hunt can no
-# longer fire — and an id-less record would be a file that answers every lookup.
-#
-# Written here, not through ohmybug_record_hunt: the file holds the live tool
-# prefix, the tool_name the client handed the recorder minus its last `__<tool>`. The client alone knows which server the
-# session hunts through (the plugin server, or a second server at the same URL
-# that hides it), so the gate reads that name here instead of guessing.
+# An id-less record would be a file that answers every lookup, so the empty
+# guard comes first. The file holds the server name the call went through (the
+# client's tool_name minus its last `__<tool>`): the plugin server, or a second
+# server at the same URL that hides it. It names the rule in the gate's advice
+# and nothing else: the file is the agent's to write, so it never decides.
 ohmybug_record_attempt() {
   local dir
   [ -n "${1:-}" ] || return 1
@@ -279,13 +276,15 @@ ohmybug_record_attempt() {
   mkdir -p "$dir" && printf '%s' "${2:-}" > "$dir/attempt:$1"
 }
 
-# The prefix an attempt was made through; the plugin server for a record from
-# before the prefix was stored, or for anything not of a prefix's shape.
+# The server name an attempt was made through, for the advice text only; the
+# plugin server for a record from before the name was stored, or for anything
+# that is not one whole name.
 ohmybug_attempt_prefix() {
   local dir p=
   dir=$(ohmybug_hunt_dir) && [ -n "${1:-}" ] && p=$(head -c 200 "$dir/attempt:$1" 2>/dev/null)
-  printf '%s' "$p" | grep -Eqx 'mcp__[A-Za-z0-9_-]+' || p=mcp__plugin_bughunter_ohmybug
-  printf '%s' "$p"
+  case "$p" in mcp__?*) ;; *) p= ;; esac
+  case "${p#mcp__}" in *[!A-Za-z0-9_-]*) p= ;; esac
+  printf '%s' "${p:-mcp__plugin_bughunter_ohmybug}"
 }
 
 # Attempts EXPIRE. A refusal is a statement about the environment right now; a
@@ -347,21 +346,23 @@ ohmybug_tools_allowed() {
   # permission surface Codex does not have. So Codex answers "allowed": the
   # tools work there, and an unfinished hunt is the thing to finish.
   [ -n "${PLUGIN_DATA:-}" ] && return 0
-  python3 -I - "${1:-mcp__plugin_bughunter_ohmybug}" "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json" \
+  python3 -I - "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json" \
     "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/settings.json" \
     "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/settings.local.json" <<'PY' 2>/dev/null
 import json, sys
-# A rule that lets submit_review run on the server the attempt went through:
-# the bare prefix, all its tools, or that tool. A rule for another tool of it
-# (provide_files alone) does not, and a rule for the other name says nothing.
-p = sys.argv[1]
-for path in sys.argv[2:]:
+# A rule that lets submit_review run, under either name the tools can carry:
+# the plugin server, or a second server named ohmybug that hides it. The bare
+# name, all its tools, or that tool; a rule for another tool alone does not.
+# Only the user's settings decide: never the attempt record, which the agent
+# can write.
+ok = {p + s for p in ("mcp__plugin_bughunter_ohmybug", "mcp__ohmybug") for s in ("", "__*", "__submit_review")}
+for path in sys.argv[1:]:
     try:
         data = json.load(open(path))
     except Exception:
         continue
     rules = (data.get("permissions") or {}).get("allow") or []
-    if any(str(r) in (p, p + "__*", p + "__submit_review") for r in rules):
+    if any(str(r) in ok for r in rules):
         sys.exit(0)
 sys.exit(1)
 PY

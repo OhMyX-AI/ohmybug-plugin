@@ -18,8 +18,9 @@
 # prints the rule and stops. Adding it is the user's click, in their own
 # settings, and nothing here writes to those files.
 #
-# Printed ONCE per machine, and only while no rule mentions our tools — a plugin
-# that reminds you of something you already did is a plugin you turn off.
+# Printed ONCE per machine for each server name the tools come through, and only
+# while no rule mentions that name — a plugin that reminds you of something you
+# already did is a plugin you turn off.
 #
 # It runs before every call to an OhMyBug tool (PreToolUse, print-only, beside
 # secret-scan.sh), not at SessionStart: the rule is named after the server the
