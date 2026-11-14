@@ -199,13 +199,13 @@ refused() { # name, dir, HOME, want text, [env]
   if [ "$rc" != 0 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q "$4"; then ok "$1"; else fail "$1: rc $rc, calls $(calls): $out"; fi
 }
 H2="$ROOT/home2"; mkdir -p "$H2/u"; printf 'x\n' > "$H2/a.py"
-refused "no git: a folder above the home folder is refused" "$H2" "$H2/u" "refusing to pack"
-refused "no git: the home folder is refused" "$H2" "$H2" "refusing to pack"
+refused "no git: a folder above the home folder is refused" "$H2" "$H2/u" "refusing to read"
+refused "no git: the home folder is refused" "$H2" "$H2" "refusing to read"
 R="$ROOT/fx2"; fixture "$R" 1
 refused "an empty HOME is refused, naming that cause" "$R" "" "HOME is not set"
 refused "a HOME that cannot be entered is refused" "$R" "$R/no-such-home" "HOME is not set"
 H3="$ROOT/dot"; mkdir -p "$H3/proj"; g -C "$H3" init -q; printf 'x\n' > "$H3/proj/a.ts"
-refused "a dotfiles repository holding the home folder is refused" "$H3/proj" "$H3" "refusing to pack"
+refused "a dotfiles repository holding the home folder is refused" "$H3/proj" "$H3" "refusing to read"
 H4="$ROOT/ctr"; mkdir -p "$H4"; printf 'print(1)\n' > "$H4/main.py"
 refused "a project that is the home folder names the opt-in" "$H4" "$H4" "OMB_SNAPSHOT_HOME_OK=1"
 fresh; out=$(cd "$H4" && HOME="$H4" OMB_SNAPSHOT_HOME_OK=1 PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required --all 2>&1); rc=$?
@@ -265,6 +265,7 @@ fresh; out=$(cd "$R" && OHMYBUG_TEST_SCAN_RAISE=1 PATH="$BIN:$PATH" "$TSH" "$UP"
 # without naming a member, and one whose hit survives the second pack (a
 # rescan that still hits). None may send anything.
 FS="$ROOT/fakescan"; mkdir -p "$FS"; cp "$UP" "$FS/omb-upload.sh"
+printf 'z\n' > "$R/z.txt"; commit_in z.txt
 for v in 2 3 still; do
   # Imported (the payload builder reads context files with it), it is the real
   # detector; run, it is the stand-in.
@@ -281,8 +282,9 @@ else:
     sys.exit(int("$v"))
 PY
   fresh; out=$(cd "$R" && PATH="$BIN:$PATH" "$TSH" "$FS/omb-upload.sh" "$URL" required "$P" 2>&1); rc=$?
-  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -qE 'could not scan the repository snapshot|could not be packed' && ok "a snapshot scan that ends '$v' sends nothing" || fail "snapshot scan $v: rc $rc calls $(calls) $out"
+  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'could not scan the repository snapshot' && ok "a snapshot scan that ends '$v' sends nothing" || fail "snapshot scan $v: rc $rc calls $(calls) $out"
 done
+uncommit z.txt
 # No detector beside the script: nothing sent, and the sentence names the way on.
 rm -f "$FS/omb_scan.py"
 fresh; out=$(cd "$R" && PATH="$BIN:$PATH" "$TSH" "$FS/omb-upload.sh" "$URL" required "$P" 2>&1); rc=$?
@@ -542,6 +544,7 @@ st "P4 413: refused, same answer again" 1 '' '413|{"code":"too_large"}|' '' requ
 st "P5 429 with Retry-After: 75 with the seconds" 75 '' '429|{"code":"rate_limited"}|5' '' required "repo payload " "in about 5 seconds"
 st "P5 503 with Retry-After 120: 75 with the seconds" 75 '' '503|{}|120' '' required "repo payload " "in about 120 seconds"
 st "P6 408 (the server stopped receiving at 300 s): final" 1 '' '408||' '' required "repo payload " "the payload did not reach the server in 5 minutes"
+st "P6 408 in diff mode: no diff-mode advice" 1 '' '408||' '' off "payload " "Tell the user: push and hunt the pushed commit." "diff mode at"
 st "P7 500: 75, no seconds" 75 '' '500|{}|9' '' required "repo payload " "$AGAIN;" "in about"
 st "P7 no answer: 75" 75 '' '000|x|' '' required "repo payload " "$AGAIN;"
 st "P7 a 200 cut mid-body: 75" 75 '' 'cut|{"ok":true}|' '' required "repo payload " "$AGAIN;"
@@ -655,11 +658,11 @@ refdiff() { # repo from [to]: to = the working copy when absent
 mkdir -p "$ROOT/nohome"
 
 # T1: a file without a final newline, changed on both sides: git's own markers, no filter.
-T1="$ROOT/t1"; mkdir -p "$T1"; g -C "$T1" init -q; printf 'x' > "$T1/nonl.txt"; g -C "$T1" add -A; g -C "$T1" commit -qm one
-printf 'y' > "$T1/nonl.txt"
-# Same size, and the same mtime as the index: only a racy-git check (which a
-# copied index keeps only with its own mtime) sees the edit.
-touch -r "$T1/.git/index" "$T1/nonl.txt"
+# Same size and the same mtime as when it was added, and the index file of
+# that same second: git sees the edit only through its racy-entry check,
+# which a copied index keeps only when the copy keeps the index's mtime.
+T1="$ROOT/t1"; mkdir -p "$T1"; g -C "$T1" init -q; printf 'x' > "$T1/nonl.txt"; touch -t 202001010000 "$T1/nonl.txt"; g -C "$T1" add -A; g -C "$T1" commit -qm one
+printf 'y' > "$T1/nonl.txt"; touch -t 202001010000 "$T1/nonl.txt" "$T1/.git/index"
 fresh; run "$T1" "$URL" off --head
 [ "$rc" = 0 ] && [ "$(payload_diff | grep -c '^\\ No newline at end of file')" = 2 ] && [ "$(payload_diff)" = "$(refdiff "$T1" HEAD)" ] \
   && ok "T1 no final newline on both sides: both markers, the diff is git's" || fail "T1 no newline: rc $rc $out / $(payload_diff)"
@@ -723,8 +726,9 @@ done
 # T4: a conflicted merge reads as the working file, markers and all; the user's
 # index keeps its three stages.
 T4="$ROOT/t4"; mkdir -p "$T4"; g -C "$T4" init -q; printf 'a\nb\nc\n' > "$T4/m.txt"; g -C "$T4" add -A; g -C "$T4" commit -qm base
+b4=$(git -C "$T4" symbolic-ref --short HEAD)  # main, or master on git before 2.28
 g -C "$T4" checkout -q -b other; printf 'a\nOTHER\nc\n' > "$T4/m.txt"; g -C "$T4" commit -qam other
-g -C "$T4" checkout -q main; printf 'a\nMINE\nc\n' > "$T4/m.txt"; g -C "$T4" commit -qam mine
+g -C "$T4" checkout -q "$b4"; printf 'a\nMINE\nc\n' > "$T4/m.txt"; g -C "$T4" commit -qam mine
 g -C "$T4" merge other >/dev/null 2>&1 || :
 fresh; run "$T4" "$URL" off --head
 [ "$rc" = 0 ] && payload_diff | grep -q '^+<<<<<<<' && ! payload_diff | grep -qi 'unmerged' && [ "$(git -C "$T4" ls-files -u | wc -l | tr -d ' ')" = 3 ] \
@@ -858,6 +862,51 @@ printf '#!/bin/sh\n[ "$1" = version ] && { echo "git version 2.24.0"; exit 0; }\
 fresh; out=$(cd "$R" && PATH="$OG:$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 4 ] && [ "$(calls)" = 0 ] && [ "$out" = "omb-upload: git 2.24.0 found, 2.25 or newer is needed: update git; nothing was sent" ] \
   && ok "T12 git 2.24: exit 4, the version found and the fix, nothing sent" || fail "T12 old git: rc $rc $out"
+
+# ---- 6d. Partial and shallow clones, many files, snapshot of HEAD, arguments
+# A blobless partial clone: --base needs a blob the clone never fetched; the
+# one cat-file read in the real repository fetches it.
+PS="$ROOT/pc-src"; mkdir -p "$PS"; g -C "$PS" init -q; printf 'v1\n' > "$PS/a.txt"; g -C "$PS" add -A; g -C "$PS" commit -qm one
+c1=$(git -C "$PS" rev-parse HEAD); printf 'v2\n' > "$PS/a.txt"; g -C "$PS" commit -qam two; g -C "$PS" config uploadpack.allowFilter true
+PC="$ROOT/pc"; g clone -q --filter=blob:none "file://$PS" "$PC" 2>/dev/null
+g -C "$PC" update-ref refs/remotes/origin/main "$c1"; printf 'v3\n' > "$PC/a.txt"
+git -C "$PC" rev-list --objects --missing=print "$c1" 2>/dev/null | grep -q "^?" \
+  || fail "partial clone: the old blob is already present, so the row proves nothing"
+fresh; run "$PC" "$URL" off --base main
+[ "$rc" = 0 ] && payload_diff | grep -q '^-v1' && payload_diff | grep -q '^+v3' && ok "a blobless partial clone: --base reaches an unfetched blob, exit 0" || fail "partial clone: rc $rc $out"
+# 2000 small files and one Latin-1 file: one cat-file read, a fixed number of diff runs.
+MF="$ROOT/many"; mkdir -p "$MF/f"; g -C "$MF" init -q
+python3 -I -c 'import sys
+for i in range(2000): open("%s/f/%04d.txt" % (sys.argv[1], i), "w").write("x%d\n" % i)
+open(sys.argv[1] + "/latin.txt", "wb").write(b"caf\xe9\n")' "$MF"
+GW="$ROOT/gitwrap"; mkdir -p "$GW"; : > "$ROOT/gitcalls"
+printf '#!/bin/sh\necho "$*" >> %s\nexec %s "$@"\n' "$ROOT/gitcalls" "$(command -v git)" > "$GW/git"; chmod +x "$GW/git"
+fresh; out=$(cd "$MF" && PATH="$GW:$BIN:$PATH" "$TSH" "$UP" "$URL" off --all 2>&1); rc=$?
+ncat=$(grep -c 'cat-file --batch' "$ROOT/gitcalls"); ndt=$(grep -c 'diff-tree' "$ROOT/gitcalls")
+[ "$rc" = 0 ] && [ "$ncat" = 1 ] && [ "$ndt" -le 6 ] && printf '%s' "$out" | grep -q 'not UTF-8 text: latin.txt' && printf '%s' "$out" | grep -q '(2000 files)' \
+  && ok "2000 files and one Latin-1 file: one cat-file read, $ndt diff runs, the Latin-1 file named" || fail "many files: rc $rc cat-file $ncat diff-tree $ndt $(printf '%s' "$out" | head -c 300)"
+# --commits with a snapshot: the snapshot is HEAD's tree, not the dirty working copy.
+SH5="$ROOT/snaphead"; mkdir -p "$SH5"; g -C "$SH5" init -q; printf 'one\n' > "$SH5/a.txt"; g -C "$SH5" add -A; g -C "$SH5" commit -qm one
+printf 'two\n' > "$SH5/a.txt"; g -C "$SH5" commit -qam two; printf 'dirty\n' > "$SH5/a.txt"; printf 'new\n' > "$SH5/untracked.txt"
+fresh; run "$SH5" "$URL" required --commits 1
+[ "$rc" = 0 ] && [ "$(tar -xzOf "$STUB/repo.1.sent" a.txt 2>/dev/null)" = two ] && ! tar -tzf "$STUB/repo.1.sent" | grep -q untracked.txt \
+  && printf '%s' "$out" | grep -q 'repository snapshot of HEAD of' && ok "--commits with a snapshot: the snapshot is HEAD's tree, and says so" || fail "snapshot of HEAD: rc $rc $(tar -xzOf "$STUB/repo.1.sent" a.txt 2>/dev/null) $out"
+# A shallow clone with fewer commits than asked: refused, never the whole tree as new.
+g clone -q --depth 1 "file://$PS" "$ROOT/shallow" 2>/dev/null
+fresh; run "$ROOT/shallow" "$URL" off --commits 3
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'this clone is shallow and holds fewer than 3 commits: fetch more history (git fetch --deepen=3)' \
+  && ok "a shallow clone and --commits 3: refused, nothing sent" || fail "shallow: rc $rc $out"
+# A context file name that starts with '-' is refused; one from a subfolder is sent under its full path.
+fresh; run "$R" "$URL" off "$P" -x.txt
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q "may not start with '-'" && ok "a context file name starting with '-' refuses" || fail "dash context: rc $rc $out"
+mkdir -p "$R/sub"; printf 'c\n' > "$R/sub/c.py"; commit_in sub
+fresh; run "$R/sub" "$URL" off --head c.py ./c.py
+python3 -I -c 'import json, sys; sys.exit(0 if [f["path"] for f in json.load(open(sys.argv[1]))["files"]] == ["sub/c.py", "sub/c.py"] else 1)' "$STUB/payload.1.sent" 2>/dev/null \
+  && ok "a context file from a subfolder is sent under its full path" || fail "subfolder context: $out"
+uncommit sub
+# --only . at the top with another --only: no narrowing at all.
+fresh; run "$T3" "$URL" off --head --only . --only a.txt
+[ "$rc" = 0 ] && payload_diff | grep -q 'ren2.txt' && ok "--only . at the top with another --only: the whole repository" || fail "--only . plus: rc $rc $(payload_diff | grep '^diff')"
 
 # ---- 7. URL and arguments ------------------------------------------------------
 for bad in "https://evil.example/u/tok" "http://mcp.ohmybug.ai/u/tok" "https://mcp.ohmybug.ai/u/x; touch $ROOT/pwned" "https://mcp.ohmybug.ai/u/" "https://mcp.ohmybug.ai.evil/u/tok" "https://mcp.ohmybug.ai/u/a/../b"; do

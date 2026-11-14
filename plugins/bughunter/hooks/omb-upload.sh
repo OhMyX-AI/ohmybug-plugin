@@ -124,6 +124,7 @@ while [ "${1:-}" = --only ]; do
   only="$only$o$nl"
 done
 [ "$dry" = 1 ] && [ $# -gt 0 ] && die "omb-upload: --dry-run takes no context files; nothing was sent"
+for a; do case $a in -*) die "omb-upload: a context file name may not start with '-' (got '$a'); nothing was sent" ;; esac; done
 if [ "$dry" = 0 ]; then
   case $url in "https://$HOST/u/"*) tok=${url#"https://$HOST/u/"} ;; *) die "omb-upload: not an upload URL of $HOST; nothing was sent" ;; esac
   case $tok in ''|*[!A-Za-z0-9_-]*) die "omb-upload: not an upload URL of $HOST; nothing was sent" ;; esac
@@ -173,10 +174,10 @@ fi
 
 # The home-folder check, shared by the working-copy tree and the pack: a
 # folder that is the home folder or holds it is never read as a project.
-home_check() {
+home_check() { # $1: what is refused (pack, read)
   [ "${OMB_SNAPSHOT_HOME_OK:-}" = 1 ] && return 0
-  h=; [ -n "${HOME:-}" ] && h=$(cd "$HOME" 2>/dev/null && pwd -P) || :; [ -n "$h" ] || { echo "refusing to pack: HOME is not set to a folder this shell can enter, so the home-folder check cannot run; if this folder is the project, run the same command again as one call with OMB_SNAPSHOT_HOME_OK=1 in front of it (OMB_SNAPSHOT_HOME_OK=1 bash .../omb-upload.sh ...)" >&2; exit 1; }
-  p=$(pwd -P); case "$h/" in "${p%/}/"*) echo "refusing to pack $p: it is your home folder or a folder above it; run this from the project folder, or, if this folder is the project itself (a container checkout), run the same command again as one call with OMB_SNAPSHOT_HOME_OK=1 in front of it (OMB_SNAPSHOT_HOME_OK=1 bash .../omb-upload.sh ...)" >&2; exit 1;; esac
+  h=; [ -n "${HOME:-}" ] && h=$(cd "$HOME" 2>/dev/null && pwd -P) || :; [ -n "$h" ] || { echo "refusing to $1: HOME is not set to a folder this shell can enter, so the home-folder check cannot run; if this folder is the project, run the same command again as one call with OMB_SNAPSHOT_HOME_OK=1 in front of it (OMB_SNAPSHOT_HOME_OK=1 bash .../omb-upload.sh ...)" >&2; exit 1; }
+  p=$(pwd -P); case "$h/" in "${p%/}/"*) echo "refusing to $1 $p: it is your home folder or a folder above it; run this from the project folder, or, if this folder is the project itself (a container checkout), run the same command again as one call with OMB_SNAPSHOT_HOME_OK=1 in front of it (OMB_SNAPSHOT_HOME_OK=1 bash .../omb-upload.sh ...)" >&2; exit 1;; esac
 }
 
 # `git add -A` that also reaches files outside a sparse checkout's cone: with
@@ -196,7 +197,7 @@ add_all() {
 # working file, markers and all.
 worktree_tree() (
   set -e; umask 077; unset CDPATH; r=$(git rev-parse --show-toplevel); cd "$r"
-  home_check
+  home_check read
   o=$(cd "$(git rev-parse --git-path objects)" && pwd); k=$d/j; mkdir -p "$k/o/info"
   printf '%s\n' "$o" > "$k/o/info/alternates"
   cp -p "$(git rev-parse --git-path index)" "$k/i" 2>/dev/null || :
@@ -214,7 +215,11 @@ case $scope in
   all) from=$empty ;;
   commits)
     to=$(git rev-parse -q --verify 'HEAD^{commit}') || die "omb-upload: there is no commit yet, so --commits has nothing to send: use --all; nothing was sent"
-    from=$(git rev-parse -q --verify "HEAD~$ncommits^{commit}") || from=$empty ;;
+    from=$(git rev-parse -q --verify "HEAD~$ncommits^{commit}") || {
+      [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" != true ] \
+        || die "omb-upload: this clone is shallow and holds fewer than $ncommits commits: fetch more history (git fetch --deepen=$ncommits) or use a smaller N; nothing was sent"
+      from=$empty
+    } ;;
 esac
 if [ -z "$to" ]; then
   set +e; worktree_tree; rc=$?; set -e
@@ -272,9 +277,10 @@ ENV = {"PATH": path, "HOME": d + "/h", "XDG_CONFIG_HOME": d + "/h", "GIT_CONFIG_
 FLAGS = ["-c", "core.quotePath=true", "diff-tree", "-r", "-M", "--no-color", "--no-ext-diff", "--no-textconv",
          "--src-prefix=a/", "--dst-prefix=b/", "--submodule=short"]
 EXCL = [x for x in os.environ["excl"].split("\n") if x]
-# "." is the current folder: its prefix, or the whole repository at the top.
-ONLY = [":(top,literal)" + (prefix + x if x != "." else prefix) for x in os.environ["only"].split("\n")
-        if x and (x != "." or prefix)]
+# "." is the current folder: its prefix; at the top it is the whole
+# repository, so no narrowing at all.
+ONLY = [x for x in os.environ["only"].split("\n") if x]
+ONLY = [] if "." in ONLY and not prefix else [":(top,literal)" + (prefix + x if x != "." else prefix) for x in ONLY]
 
 def git(extra, specs):
     p = subprocess.run(["git", "--git-dir=" + d + "/g"] + FLAGS + extra + [frm, to, "--"] + specs,
@@ -297,28 +303,61 @@ def clean1(x):
 def names(extra, specs):
     return [n for n in git(extra + ["--name-only", "-z"], specs).split(b"\0") if n]
 
-lit = lambda p: ":(top,literal)" + p.decode("utf-8", "surrogateescape")
 every = names(["--no-renames"], ONLY)
 kept = names(["--no-renames"], ONLY + EXCL)
-dropped = [n for n in every if n not in set(kept)]
+keptset = set(kept)
+dropped = [n for n in every if n not in keptset]
 specs = ONLY + EXCL
-raw = git(["-p"], specs)
+
+# Every blob the diff will read, read once, in the REAL repository: one
+# `git cat-file --batch`, which fetches what a partial clone lacks where git
+# can (the bare repository below cannot), and whose bytes tell which files
+# are not UTF-8 text, with no git call per file. Only object ids and blob
+# bytes are read here, so the user's own settings may apply.
+RENV = dict(os.environ)
+if os.path.isdir(d + "/j/o"):
+    RENV["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = d + "/j/o"
+p = subprocess.run(["git", "diff-tree", "-r", "--raw", "--no-abbrev", "--no-renames", "-z", frm, to, "--"] + specs,
+                   env=RENV, stdout=subprocess.PIPE)
+if p.returncode:
+    say("git could not list the changed files")
+f = p.stdout.split(b"\0")
+blobs = {}  # object id -> the paths it is a side of
+for meta, path in zip(f[0::2], f[1::2]):
+    if not meta.startswith(b":"):
+        continue
+    om, nm, oid, nid = meta[1:].split(b" ")[:4]
+    for mode, oid_ in ((om, oid), (nm, nid)):
+        if mode[:2] == b"10" and oid_.strip(b"0"):  # a file or a link, not a submodule or nothing
+            blobs.setdefault(oid_, []).append(path)
 notutf8 = []
-try:
-    diff = raw.decode("utf-8")
-except UnicodeDecodeError:
-    for n in kept:
+if blobs:
+    p = subprocess.run(["git", "cat-file", "--batch"], env=RENV, input=b"".join(o + b"\n" for o in blobs),
+                       stdout=subprocess.PIPE)
+    out, i, bad = p.stdout, 0, {}
+    for o in blobs:
+        j = out.index(b"\n", i)
+        head = out[i:j].split(b" ")
+        if p.returncode or len(head) != 3 or head[1] != b"blob":
+            say("git could not read a changed file (a partial clone whose remote is out of reach?)")
+        size = int(head[2])
+        data = out[j + 1:j + 1 + size]
+        i = j + 2 + size
+        if b"\0" in data[:8000]:
+            continue  # git writes "Binary files differ" for it: no bytes of it in the diff
         try:
-            git(["-p"], [lit(n)]).decode("utf-8")
+            data.decode("utf-8")
         except UnicodeDecodeError:
-            notutf8.append(n)
-            if len(notutf8) > 200:
-                say("more than 200 changed files are not UTF-8 text, too many to leave out one by one. Narrow the diff with --only")
-    specs = specs + [":(exclude,top,literal)" + n.decode("utf-8", "surrogateescape") for n in notutf8]
-    try:
-        diff = git(["-p"], specs).decode("utf-8")
-    except UnicodeDecodeError:
-        say("the diff is not UTF-8 text even with the files that are not left out")
+            for path in blobs[o]:
+                bad[path] = 1
+    notutf8 = [n for n in kept if n in bad]
+if len(notutf8) > 200:
+    say("more than 200 changed files are not UTF-8 text, too many to leave out. Narrow the diff with --only")
+specs = specs + [":(exclude,top,literal)" + n.decode("utf-8", "surrogateescape") for n in notutf8]
+try:
+    diff = git(["-p"], specs).decode("utf-8")
+except UnicodeDecodeError:
+    say("the diff is not UTF-8 text even with the non-UTF-8 files left out")
 if not diff.strip():
     say("the diff is empty, or nothing is left of it once secret-named and non-UTF-8 files are out, so there is nothing to hunt")
 final = names([], specs)
@@ -332,19 +371,25 @@ if args:
     for a in args:
         # Lexically below the top level, then opened part by part from it with
         # no symlink followed, and read from the fd that was checked.
-        full = os.path.normpath(a if os.path.isabs(a) else os.path.join(top, prefix, a))
         rel = None
         inside = lambda r: r != ".." and not r.startswith("../") and not os.path.isabs(r)
-        for t in (top, rtop):
-            if inside(os.path.relpath(full, t)):
-                rel = os.path.relpath(full, t)
-                break
+        if not os.path.isabs(a):
+            a2 = a
+            while a2.startswith("./"):
+                a2 = a2[2:]
+            rel = prefix + a2  # as given: read_listed refuses a "..", "." or empty part
         else:
-            # Reached through a link ABOVE the repository: its folder's real path.
-            # A link inside the repository is still refused by read_listed.
-            r = os.path.relpath(os.path.join(os.path.realpath(os.path.dirname(full)), os.path.basename(full)), rtop)
-            if inside(r):
-                rel = r
+            full = os.path.normpath(a)
+            for t in (top, rtop):
+                if inside(os.path.relpath(full, t)):
+                    rel = os.path.relpath(full, t)
+                    break
+            else:
+                # Reached through a link ABOVE the repository: its folder's real path.
+                # A link inside the repository is still refused by read_listed.
+                r = os.path.relpath(os.path.join(os.path.realpath(os.path.dirname(full)), os.path.basename(full)), rtop)
+                if inside(r):
+                    rel = r
         content = None
         if rel is not None:
             got, data = read_listed(rtop, listed, rel)
@@ -357,6 +402,7 @@ if args:
         if content is None:
             skipped.append(a)
         else:
+            rel = got.decode("utf-8")
             files.append({"path": rel, "content": content})
             sent.append(rel)
 clean = lambda xs: [clean1(x) for x in xs]
@@ -394,19 +440,23 @@ fi
 # pack), removed from the temporary index before write-tree; the tree id
 # kept in "$k/t"; and the archive is of a commit of that tree with a fixed
 # author, committer and date, not of the tree, so its bytes (mtimes, the pax
-# header) do not depend on the time it was packed. ${HOME:-} because this
-# script runs set -u. Called only as a
+# header) do not depend on the time it was packed. With --commits the tree
+# is HEAD's (the diff is commits only, so is the snapshot). Called only as a
 # plain statement (see run_pack): on the left of || or in an if, set -e inside
 # it would be off, and a failed step would pack a stale tree as a success.
 pack() (
   k=$1 drop=$2
   set -e; umask 077; unset CDPATH; r=$(git rev-parse --show-toplevel); cd "$r"
-  home_check
+  home_check pack
   o=$(cd "$(git rev-parse --git-path objects)" && pwd); rm -rf "$k"; mkdir "$k"
   cp -p "$(git rev-parse --git-path index)" "$k/i" 2>/dev/null || :; f=$(git rev-parse --show-object-format 2>/dev/null) || :; case $f in sha1|sha256) g=--object-format=$f;; *) g=;; esac; mkdir -p "$k/o/info"; printf '%s\n' "$o" > "$k/o/info/alternates"; export GIT_INDEX_FILE="$k/i" GIT_OBJECT_DIRECTORY="$k/o"; s='-c splitIndex.maxPercentChange=100'
-  git ls-files -z -t > "$k/l"; xargs -0 sh -c 'for e; do case $e in "S "*) printf "%s\0" "${e#S }";; esac; done' sh < "$k/l" > "$k/s"
-  git $s update-index -z --force-remove --stdin < "$k/s"
-  add_all $s
+  if [ "$scope" = commits ]; then
+    git $s read-tree HEAD
+  else
+    git ls-files -z -t > "$k/l"; xargs -0 sh -c 'for e; do case $e in "S "*) printf "%s\0" "${e#S }";; esac; done' sh < "$k/l" > "$k/s"
+    git $s update-index -z --force-remove --stdin < "$k/s"
+    add_all $s
+  fi
   git $s update-index -z --force-remove --stdin < "$drop"
   t=$(git $s write-tree); printf '%s\n' "$t" > "$k/t"
   c=$(GIT_AUTHOR_NAME=omb GIT_AUTHOR_EMAIL=omb GIT_AUTHOR_DATE='946684800 +0000' GIT_COMMITTER_NAME=omb GIT_COMMITTER_EMAIL=omb GIT_COMMITTER_DATE='946684800 +0000' git commit-tree --no-gpg-sign -m omb "$t")
@@ -451,7 +501,7 @@ snapshot() {
   esac
 }
 
-kb() { awk -v b="$1" 'BEGIN { if (b < 1048576) printf "%.0f KB", (b + 1023) / 1024; else printf "%.1f MB", b / 1048576 }'; }
+kb() { awk -v b="$1" 'BEGIN { if (b < 1048576) printf "%d KB", int((b + 1023) / 1024); else printf "%.1f MB", b / 1048576 }'; }
 files() { [ "$1" = 1 ] && printf '1 %sfile' "${2:+$2 }" || printf '%s %sfiles' "$1" "${2:+$2 }"; }
 npat=$(set -f; set -- $OMB_SECRETS; echo $#)
 manifest() { # $1: what the snapshot part says
@@ -460,7 +510,7 @@ manifest() { # $1: what the snapshot part says
   [ -n "$diff_dropped" ] && line="$line. Left out of the diff as secret-named: $diff_dropped"
   [ -n "$diff_notutf8" ] && line="$line. Left out of the diff as not UTF-8 text: $diff_notutf8"
   [ -n "$diff_new" ] && line="$line. The diff includes $diff_new"
-  [ -n "$ctx_skipped" ] && line="$line. Not sent (secret-named, not listed by git, not a regular file, through a symlink, or not UTF-8): $ctx_skipped"
+  [ -n "$ctx_skipped" ] && line="$line. Not sent (secret-named, not listed by git, outside the repository, not a regular file, through a symlink, or not UTF-8): $ctx_skipped"
   if [ "$scan_off" = 1 ]; then
     line="$line. Credential scan: off (OHMYBUG_SECRET_SCAN=0)."
   elif [ -n "$dropped" ]; then
@@ -471,15 +521,16 @@ manifest() { # $1: what the snapshot part says
   printf '%s\n' "$line"
 }
 snapline() {
+  snapof=; [ "$scope" = commits ] && snapof=" of HEAD"
   t=$(cat "$d/k/t")
   total=$(git --git-dir="$d/k/g" ls-tree -r "$t" | grep -c ' blob ' || :)
   size=$(kb "$(wc -c < "$d/k/s.tgz" | tr -d ' ')")
   # The file count is the scanner's (it read every member); with the scan off there is none.
   if [ "$scan_off" = 1 ]; then
-    printf ' + repository snapshot of %s, %s packed. Left out: git-ignored files, submodules, secret-named files' "$(files "$total")" "$size"
+    printf ' + repository snapshot%s of %s, %s packed. Left out: git-ignored files, submodules, secret-named files' "$snapof" "$(files "$total")" "$size"
   else
     packed=$(cat "$d/count")
-    printf ' + repository snapshot of %s, %s packed. Left out: git-ignored files, submodules, %s' "$(files "$packed")" "$size" "$(files "$((total - packed))" secret-named)"
+    printf ' + repository snapshot%s of %s, %s packed. Left out: git-ignored files, submodules, %s' "$snapof" "$(files "$packed")" "$size" "$(files "$((total - packed))" secret-named)"
   fi
   printf ' (.env*, *.pem, *.key and %s more patterns), LFS content (pointers only)' "$((npat - 3))"
   if [ "$nogit" = 1 ]; then printf '; folder without git: top-level dot-folders, node_modules, __pycache__ and build output also left out'; fi
@@ -511,7 +562,10 @@ body() { [ -s "$d/body" ] && { tr '\n' ' ' < "$d/body"; echo; }; :; }
 retry_after() { sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]:[[:space:]]*\([0-9]\{1,9\}\)[[:space:]]*$/\1/p' "$d/hdr" 2>/dev/null | tail -n 1; }
 rerun() { body; die "omb-upload: no final answer from the server. Call get_findings for this review: with awaiting_upload true, run the same command again${1:+ in about $1 seconds}; otherwise do what it says." 75; }
 GONE="the ticket is used or expired; the payload was not sent. Call get_findings for this review: if it is running, watch it; else submit again."
-slow() { die "omb-upload: the $1 did not reach the server in 5 minutes on this connection; the same command would take as long. Tell the user: diff mode at https://$HOST/me/policy, or push and hunt the pushed commit."; }
+slow() {
+  if [ -n "$snap" ]; then how="diff mode at https://$HOST/me/policy, or push and hunt the pushed commit"; else how="push and hunt the pushed commit"; fi
+  die "omb-upload: the $1 did not reach the server in 5 minutes on this connection; the same command would take as long. Tell the user: $how."
+}
 
 # The retire door, only on a digest mismatch: one DELETE, and the payload is never sent.
 retire() {

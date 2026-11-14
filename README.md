@@ -61,6 +61,9 @@ pi install npm:pi-mcp-adapter
 npx skills add OhMyX-AI/ohmybug-plugin --skill bughunter
 ```
 
+The skill alone has no upload script (it ships with the full plugin), so pi
+cannot hunt uncommitted work: push the branch and hunt the pushed commit.
+
 Add to `.mcp.json` in your project root (or `~/.config/mcp/mcp.json`):
 
 ```json

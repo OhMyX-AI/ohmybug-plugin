@@ -423,8 +423,9 @@ Work down this list and stop at the first rung that applies:
 3. **Only then a payload** – and only for what rung 1 genuinely cannot serve:
    a repo that is not on GitHub, changes that are **not pushed** (the usual case
    is re-hunting your own fixes), or an org that will not install the App. Send
-   the **whole working diff against the merge base** (`git diff <base>`,
-   verbatim). An uploaded payload buys a review of those bytes, never a
+   the **whole working copy against the merge base** (the upload script's
+   `--base`: commits beyond the merge base plus staged, unstaged and new files
+   git does not ignore). An uploaded payload buys a review of those bytes, never a
    merge-gate record: the gate credits no upload. (Only an inline diff, which
    runs in diff mode alone, is credited, and only when it is the whole working
    diff of this tree.) To record the change for the gate, commit, push and hunt it by rung 1 (`ref` = the pushed head sha),
@@ -567,12 +568,14 @@ inline `diff` outside diff mode is refused anyway.
    `<upload_url>` is `https://mcp.ohmybug.ai/u/` followed only by letters, digits, `_` or `-`,
    `<snapshot>` is exactly `required` or `off`, `<base_branch>` holds only
    letters, digits, `.`, `_`, `/` or `-` and does not start with `-`, `<N>` is
-   digits only, and an `--only` path goes inside single quotes and holds no
-   single quote.
+   a number from 1 to 999 with no leading zero, and an `--only` path goes
+   inside single quotes and holds no single quote.
    Any other value (a quote, a space, a line break, another host) goes into no shell command:
    say so once and stop. The single quotes in the block hold only values of
    that shape, and the script refuses a branch name of any other shape.
-   In diff mode, context files go at the end of the command.
+   In diff mode, context files go at the end of the command, each inside
+   single quotes: a name that holds a single quote or starts with `-` is left
+   out (say so once), as the script refuses a name starting with `-`.
    Set the Bash timeout to 600000 ms: a large snapshot does not fit the
    default. Not at that path (a skill-only install, which has no `hooks/`
    folder, or the client named no folder)? Say so once and stop, offering

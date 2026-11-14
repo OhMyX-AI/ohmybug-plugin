@@ -103,7 +103,10 @@ if str(d.get("tool_name") or "").endswith("__provide_files") and "paths" in ti a
         # context files with it too); a listed file is decoded here with
         # replacement, as before.
         rel, data = read_listed(top, listed, p)
-        return rel, (data.decode("utf-8", errors="replace") if data is not None else None)
+        if data is None:
+            return rel, None
+        # Universal newlines, as the text-mode read before it: CRLF and CR become LF.
+        return rel, data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
     files = list(ti.get("files") or [])
     sent, skipped, unlisted, read = [], [], [], []
