@@ -607,11 +607,12 @@ fresh; run "$BR" "$URL" off --base
 
 # A .git that git cannot read (a worktree or submodule whose git folder moved)
 # is a broken repository, never a folder without git: it would be packed
-# without its .gitignore.
+# without its .gitignore. Newer git names the broken gitfile itself; older git
+# says "not a git repository", and the script's own walk-up catches that.
 BW="$ROOT/brokenwt"; mkdir -p "$BW/sub"; printf 'gitdir: %s/gone\n' "$ROOT" > "$BW/.git"; printf 'x\n' > "$BW/sub/a.py"; printf 'secret.log\n' > "$BW/.gitignore"
 for at in "$BW" "$BW/sub"; do
   fresh; run "$at" "$URL" required "$P"
-  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q '.git is there but git cannot read it' && ok "a .git file whose folder is gone refuses ($(basename "$at")), nothing sent" || fail "broken .git ($at): rc $rc calls $(calls) $out"
+  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -qE '\.git is there but git cannot read it|git cannot read this repository' && ok "a .git file whose folder is gone refuses ($(basename "$at")), nothing sent" || fail "broken .git ($at): rc $rc calls $(calls) $out"
 done
 
 # ---- 7. URL and arguments ------------------------------------------------------
