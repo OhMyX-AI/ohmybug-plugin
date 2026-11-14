@@ -46,7 +46,9 @@ environment. From a CI secret:
 ```
 
 Never type the key itself on a command line. A key in the file takes the place
-of the browser sign-in; delete the file to go back to it. A file that holds no
+of the browser sign-in; delete the file to go back to it. A revoked or wrong
+key is refused and the browser sign-in stays off until you fix or delete the
+file. A file that holds no
 key is ignored with a one-line note. With the plugin installed, do not add a
 second OhMyBug server for the key (see below).
 

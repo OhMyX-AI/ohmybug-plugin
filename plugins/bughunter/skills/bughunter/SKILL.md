@@ -285,6 +285,11 @@ First use on a machine needs a one-time GitHub sign-in. Do not retry
 blindly and do not ask for an API key. Tell the user exactly this,
 depending on the surface:
 
+- If the file `~/.ohmybug/api-key` exists (Claude Code), the key in it is
+  the sign-in and the browser sign-in is switched off: tell the user the key
+  was refused, to put a valid key in that file or delete the file, then
+  restart the session. Do not send them to **Authenticate** while the file
+  is there.
 - Terminal Claude Code: type `/mcp`, pick **ohmybug** → **Authenticate**.
 - IDE / GUI surface (where `/mcp` only prints status): run this in any
   terminal, then reply `/mcp reconnect all` in the chat:
