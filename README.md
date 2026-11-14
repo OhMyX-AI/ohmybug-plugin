@@ -35,6 +35,18 @@ That's the whole setup. On first use Claude Code opens a GitHub sign-in in
 your browser; your account (with a free first review) is created
 automatically. No keys to copy, nothing lands in config files.
 
+Headless or CI, with no browser: put an operator-issued `omb_` key (write to
+[hi@ohmybug.ai](mailto:hi@ohmybug.ai) to get one) in `~/.ohmybug/api-key`,
+and the plugin signs in with it. Claude Code does not pass variables named
+like `*_KEY` to a plugin, so the key goes in this file, not in the
+environment. From a CI secret:
+
+```bash
+mkdir -p ~/.ohmybug && (umask 077; printf '%s\n' "$OHMYBUG_API_KEY" > ~/.ohmybug/api-key)
+```
+
+Never type the key itself on a command line.
+
 ## Install (pi)
 
 [pi](https://pi.dev) has no built-in MCP — add the adapter, then the server:
@@ -120,10 +132,19 @@ codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp \
   --bearer-token-env-var OHMYBUG_API_KEY
 ```
 
-(Claude Code users who prefer a key over OAuth can do the same with
+(Claude Code without the plugin can do the same with
 `claude mcp add --transport http ohmybug https://mcp.ohmybug.ai/mcp
---header "Authorization: Bearer $OHMYBUG_API_KEY"` — an explicit
-Authorization header disables the OAuth flow.)
+--header "Authorization: Bearer $OHMYBUG_API_KEY"`; an explicit
+Authorization header disables the OAuth flow. With the plugin installed, use
+the plugin's key file instead (see Install (Claude Code)). A second server at
+the same URL, added this way or from an `ohmybug` entry in a project
+`.mcp.json`, hides the plugin's own. The tools then carry that server's name
+(`mcp__ohmybug__*` for a server named `ohmybug`), and the plugin's permission
+advice and merge gate follow that name, as long as the name contains
+`ohmybug`. To go back to the plugin's own server: write the key file, remove
+the second server (`claude mcp remove ohmybug`, or its `.mcp.json` entry if
+only Claude Code reads that file), restart Claude Code, and move any
+`mcp__ohmybug__*` permission rule to `mcp__plugin_bughunter_ohmybug__*`.)
 
 Questions → [Discord](https://discord.gg/6d7g8J44C7).
 
