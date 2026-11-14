@@ -557,7 +557,7 @@ the out-of-band flow instead:
 ```bash
 (umask 077; d=$(mktemp -d) || exit 1; trap 'rm -rf "$d"' EXIT
 git diff --no-textconv --no-ext-diff "$BASE" > "$d/diff.patch"
-python3 - "$d" <<'PY'
+python3 -I - "$d" <<'PY'
 import json, sys
 d = sys.argv[1]
 files = []  # [dict(path=p, content=open(p).read()) for p in <your context list>]

@@ -3294,6 +3294,10 @@ plrow "first-run.sh still gives its notice" yes "$(cd "$PL" && OMB_STATE_DIR="$P
 plrow "scan-hint.sh still names the commands" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s2" HOME="$PLD/h2" PLUGIN_DATA= bash "$G/scan-hint.sh" 2>/dev/null | grep -q '/bughunter:scan' && echo yes)"
 plrow "tools-check.sh still asks for the tools check" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s3" HOME="$PLD/h3" PLUGIN_DATA= bash "$G/tools-check.sh" 2>/dev/null | grep -q 'additionalContext' && echo yes)"
 rm -rf "$(cd "$PL" && ohmybug_hunt_dir)" "$(cd "$PL" && ohmybug_hunt_dir).pending" "$PLD"
+# The skill's own recipes run in the user's repository too: every python3 an
+# agent is told to run starts isolated, so a planted json.py never runs there.
+NOI=$(grep -nE '(^|[^-])\bpython3( |$)' "$G/../skills/bughunter/SKILL.md" | grep -vE 'python3 -I|command -v python3|`python3`' || true)
+[ -z "$NOI" ] || { printf 'FAIL planted modules: SKILL.md runs python3 without -I:\n%s\n' "$NOI"; fails=$((fails + 1)); }
 
 # THE DETECTOR IS CODE. The gate's sig: id leaves prose out, and skills/ is
 # prose: a detector kept there could be edited after the hunt without
