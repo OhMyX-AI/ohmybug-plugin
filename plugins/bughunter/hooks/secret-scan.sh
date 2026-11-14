@@ -1,5 +1,6 @@
 #!/bin/bash
-# Refuse a submit_review whose inline payload carries a credential.
+# Refuse a submit_review whose inline payload carries a credential, and scan
+# the two files the upload script (omb-upload.sh) sends, before it sends them.
 #
 # Why a shell hook and not the Claude Code mod: a check that only some clients
 # run is a check the others silently lack. This one fires wherever hooks.json
@@ -26,7 +27,12 @@
 # reads are scanned below like any other payload. Not under Codex (it sets
 # PLUGIN_DATA): there the paths reach the server, which refuses them and points
 # at its own door.
-# ponytail: the out-of-band upload (upload=true, bytes POSTed by a script later) is not scanned here.
+# File mode, for omb-upload.sh, before any POST: `--payload <payload.json>` scans
+# {diff, files} the same way as an inline payload; `--snapshot <s.tgz> [hits]`
+# scans every regular member of the snapshot and writes the names of the
+# members that hit, NUL-separated, to [hits], so the script can leave them out.
+# Exit 0 clean, 3 hits (masked, on stderr), 4 no python3, anything else could
+# not scan. No hook JSON, no stamp. OHMYBUG_SECRET_SCAN=0: exit 0 unread.
 #
 # It is the ONE PreToolUse hook on submit_review, and it hands the call on to
 # stamp-hunt.sh only when it lets the call through. Two hooks in parallel would
@@ -36,7 +42,15 @@
 set -u
 
 STAMP=${OHMYBUG_TEST_STAMP:-$(dirname "$0")/stamp-hunt.sh}
-INPUT=$(cat 2>/dev/null) || INPUT=
+MODE= FILE= HITS=
+case "${1:-}" in
+  --payload|--snapshot)
+    MODE=${1#--} FILE=${2:-} HITS=${3:-}
+    # Before the hook-mode switches below: a skipped scan here would read as clean.
+    command -v python3 >/dev/null 2>&1 || exit 4
+    ;;
+esac
+if [ -n "$MODE" ]; then INPUT='{}'; else INPUT=$(cat 2>/dev/null) || INPUT=; fi
 pass() { # the call goes on: a submit is recorded exactly as before
   case "$INPUT" in *'__submit_review"'*) printf '%s' "$INPUT" | exec bash "$STAMP" ;; esac
   exit 0
@@ -57,11 +71,15 @@ command -v python3 >/dev/null 2>&1 || {
 # here — is "could not scan", and that refuses too. Passing on its own failure
 # is how a check turns into a hole for every input it did not foresee.
 # Bytes in, bytes out, UTF-8 both ways: nothing below depends on the locale.
-OUT=$(printf '%s' "$INPUT" | python3 -c '
+OUT=$(printf '%s' "$INPUT" | OMB_SCAN_MODE=$MODE OMB_SCAN_FILE=$FILE OMB_SCAN_HITS=$HITS python3 -c '
 import json, os, re, sys
 d = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
 if os.environ.get("OHMYBUG_TEST_SCAN_RAISE"):
     raise RuntimeError("forced by the test")
+MODE = os.environ.get("OMB_SCAN_MODE")
+if MODE == "payload":
+    with open(os.environ["OMB_SCAN_FILE"], "rb") as f:
+        d = {"tool_input": json.loads(f.read().decode("utf-8", "replace"))}
 ti = d.get("tool_input")
 if ti is None:
     ti = {}
@@ -243,6 +261,25 @@ def scan_diff(diff):
                 if not PLACEHOLDER.search(m.group(0)):
                     hits.append("%s %s (%s)" % (where, kind, mask(m.group(0))))
 
+# The snapshot, one member at a time: what curl sends is this file, so this is
+# what gets read. A member that hits is named for the upload script to drop.
+if MODE == "snapshot":
+    import tarfile
+    hit_members = []
+    with tarfile.open(os.environ["OMB_SCAN_FILE"], "r|gz", encoding="utf-8", errors="surrogateescape") as tf:
+        for m in tf:
+            if not m.isreg():
+                continue
+            before = len(hits)
+            if KEY_FILE.search(m.name) or ENV_FILE.search(m.name):
+                hits.append("%s is a file that holds keys" % m.name)
+            scan(m.name, tf.extractfile(m).read().decode("utf-8", "replace"))
+            if len(hits) > before:
+                hit_members.append(m.name)
+    if hit_members and os.environ.get("OMB_SCAN_HITS"):
+        with open(os.environ["OMB_SCAN_HITS"], "wb") as f:
+            f.write(b"".join(n.encode("utf-8", "surrogateescape") + b"\0" for n in hit_members))
+
 diff = ti.get("diff")
 if diff is not None and not isinstance(diff, str):
     raise TypeError("diff")
@@ -272,6 +309,14 @@ if filled is not None:
     stop(0, json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": filled, "additionalContext": note}}))
 ' 2>/dev/null)
 rc=$?
+if [ -n "$MODE" ]; then
+  [ "$rc" = 0 ] && [ -z "$OUT" ] && exit 0
+  if [ "$rc" = 3 ] && [ -n "$OUT" ]; then
+    printf '%s\n' "$OUT" | LC_ALL=C sed 's/^/  - /' >&2
+    exit 3
+  fi
+  exit 2
+fi
 if [ "$rc" = 0 ]; then
   [ -n "$OUT" ] && printf '%s\n' "$OUT"
   pass

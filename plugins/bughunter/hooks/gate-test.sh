@@ -1671,46 +1671,56 @@ rc=$(mk "$V" "$SREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
 [ "$rc" = 2 ] || { printf 'FAIL code after a ref-keyed hunt did not re-arm the gate (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
 rm -rf "$(dirname "$SREPO")"
 
-# An out-of-band upload (upload:true, empty diff) never passes through this
-# hook, so it can prove nothing about the tree: no tree ids, and with
-# uncommitted work the ref: line is never honoured either. The gate blocking
-# is the documented boundary; the defect was crossing it SILENTLY, at merge
-# time, after the review had been paid for — the submit must say so.
+# An upload TICKET (upload:true answered awaiting_upload) is hunted from bytes
+# this hook never sees, so the gate never credits it: no tree ids and no ref:
+# line, from a dirty tree or a clean one. Crediting the ref let one junk upload
+# plus meta.ref=HEAD bless a clean checkout. The submit must say so at submit
+# time, not leave it to surface at merge time after the review was paid for.
+usub() { # repo, review id, answer status, [extra answer JSON]
+  python3 -c "import json,sys;print(json.dumps({
+  'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
+  'tool_input':{'diff':'','upload':True,'meta':{'repo':'x/y','ref':sys.argv[1]}},
+  'tool_response':{'content':[{'type':'text','text':json.dumps(dict(
+     {'review_id':sys.argv[3],'status':sys.argv[4]}, **json.loads(sys.argv[5] or '{}')))}]},
+  'cwd':sys.argv[2]}))" "$(git -C "$1" rev-parse HEAD)" "$1" "$2" "$3" "${4-}" | bash "$G/stamp-hunt.sh" 2>/dev/null
+}
+UNREC="an uploaded hunt is not recorded for the merge gate. To record this change: commit, push, and submit with meta.repo + meta.ref = the pushed head sha + meta.base_branch and no payload."
 UREPO=$(mktemp -d)/repo
 mkrepo "$UREPO"
 printf 'big unpushed work\n' >> "$UREPO/a.ts"
-python3 -c "import json,sys;print(json.dumps({
-  'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
-  'tool_input':{'review_id':'rev_up','diff':'','upload':True,
-    'meta':{'repo':'x/y','ref':sys.argv[1]}},
-  'tool_response':{'content':[{'type':'text','text':json.dumps(
-     {'review_id':'rev_up','status':'running'})}]},
-  'cwd':sys.argv[2]}))" "$(git -C "$UREPO" rev-parse HEAD)" "$UREPO" | bash "$G/stamp-hunt.sh" 2>/dev/null >"$HOME/hook.out"; rc=$?; out=$(ctx <"$HOME/hook.out")
+usub "$UREPO" rev_up awaiting_upload >"$HOME/hook.out"; rc=$?; out=$(ctx <"$HOME/hook.out")
 case "$out" in
-  *"cannot verify them against this tree"*) ;;
-  *) printf 'FAIL an out-of-band upload from a dirty tree was filed silently: %s\n' "$out"; fails=$((fails + 1)) ;;
+  *"$UNREC"*) ;;
+  *) printf 'FAIL an upload ticket from a dirty tree was filed silently: %s\n' "$out"; fails=$((fails + 1)) ;;
 esac
-[ "$rc" = 0 ] || { printf 'FAIL the out-of-band warning blocked or replaced the result (rc=%s)\n' "$rc"
+[ "$rc" = 0 ] || { printf 'FAIL the upload note blocked or replaced the result (rc=%s)\n' "$rc"
                    fails=$((fails + 1)); }
 ppost get_findings done "$UREPO" "" rev_up
 rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
 [ "$rc" = 2 ] || { printf 'FAIL out-of-band bytes credited the dirty tree (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
-# ...and a CLEAN checkout does not launder the upload into tree ids either:
-# the sig: allowance belongs only to hunts whose bytes the server provably
-# saw (its own fetch of repo@ref), so prose after an uploaded hunt re-arms
-# the gate where the rung-1 row above stays allowed.
+# ...and a CLEAN checkout at meta.ref does not launder an upload ticket either.
 git -C "$UREPO" add a.ts 2>/dev/null
 git -C "$UREPO" -c user.email=t@t -c user.name=t commit -qm work 2>/dev/null
-python3 -c "import json,sys;print(json.dumps({
-  'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
-  'tool_input':{'review_id':'rev_up2','diff':'','upload':True,
-    'meta':{'repo':'x/y','ref':sys.argv[1]}},
-  'tool_response':{'content':[{'type':'text','text':json.dumps(
-     {'review_id':'rev_up2','status':'running'})}]},
-  'cwd':sys.argv[2]}))" "$(git -C "$UREPO" rev-parse HEAD)" "$UREPO" | bash "$G/stamp-hunt.sh" >/dev/null 2>&1
+usub "$UREPO" rev_up2 awaiting_upload >"$HOME/hook.out"; out=$(ctx <"$HOME/hook.out")
+case "$out" in *"$UNREC"*) ;; *) printf 'FAIL a clean-tree upload ticket was filed silently: %s\n' "$out"; fails=$((fails + 1)) ;; esac
 ppost get_findings done "$UREPO" "" rev_up2
 rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
-[ "$rc" = 0 ] || { printf 'FAIL a clean-tree uploaded hunt was not honoured through its ref (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+[ "$rc" = 2 ] || { printf 'FAIL a clean-tree upload ticket was credited through its ref (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+# An answer that does not read as "no ticket" errs shut: a duplicate (it may be
+# a running upload of the same ref) and an answer with no status.
+usub "$UREPO" rev_dup running '{"already_running":true}' >/dev/null
+ppost get_findings done "$UREPO" "" rev_dup
+usub "$UREPO" rev_nost '' >/dev/null
+ppost get_findings done "$UREPO" "" rev_nost
+rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
+[ "$rc" = 2 ] || { printf 'FAIL a duplicate or status-less upload answer was credited through its ref (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+# A deep submit the server fetched itself answers `running`, not a ticket: it
+# hunted repo@ref, so the ref keeps its credit on a clean checkout...
+usub "$UREPO" rev_up3 running >/dev/null
+ppost get_findings done "$UREPO" "" rev_up3
+rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
+[ "$rc" = 0 ] || { printf 'FAIL a deep upload the server fetched itself lost its ref credit (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+# ...but no tree ids: prose after it re-arms the gate where a rung-1 hunt stays allowed.
 printf 'a README edit after the uploaded hunt\n' > "$UREPO/README.md"
 git -C "$UREPO" add -N README.md 2>/dev/null
 rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
@@ -2712,60 +2722,73 @@ if not all(t in m for t in ("submit_review", "confirm_findings", "get_balance"))
     sys.exit(1)
 PY2
 
-# THE UPLOAD RECIPE, RUN — not read. It used to write the diff and the payload
-# to fixed names in /tmp: on a shared machine any other user could read them
-# (the file mode follows the umask, usually 0644), and two reviews at once
-# overwrote each other. The block in SKILL.md is executed here with a curl stub
-# that reports the payload's path and modes; it must be a private 0700
-# directory of its own, a file nobody else can read, gone after the run, and a
-# different directory each time.
+# THE UPLOAD BLOCK, RUN – not read. SKILL.md's block is executed with the
+# script it calls replaced by a stub that reports its arguments and the diff
+# file's path and modes. The diff must sit in a private 0700 directory of its
+# own, in a file nobody else can read, gone after the run, a different
+# directory each time (a fixed name in /tmp was readable by every user and
+# shared by two reviews at once); and a failed `git diff` must stop the block
+# before the script runs, so an empty or partial diff is never sent.
 UP=$(mktemp -d)
-mkdir -p "$UP/bin" "$UP/repo"
-cat > "$UP/bin/curl" <<'SH'
-#!/bin/sh
-for a; do case $a in @*) f=${a#@} ;; esac; done
-python3 - "$f" >> "$UPLOG" <<'PY'
+mkdir -p "$UP/skills/bughunter" "$UP/hooks" "$UP/bin" "$UP/repo"
+cat > "$UP/hooks/omb-upload.sh" <<'SH'
+python3 - "$@" >> "$UPLOG" <<'PY'
 import os, stat, sys
-f = sys.argv[1]
-print(f"{oct(stat.S_IMODE(os.stat(os.path.dirname(f)).st_mode))} {oct(stat.S_IMODE(os.stat(f).st_mode))} {os.path.dirname(f)}")
+url, mode, f = sys.argv[1:4]
+print(oct(stat.S_IMODE(os.stat(os.path.dirname(f)).st_mode)), oct(stat.S_IMODE(os.stat(f).st_mode)), url, mode, os.path.dirname(f))
 PY
-cp "$f" "$UPLOG.payload"
-echo '{"ok":true}'
+cp "$3" "$UPLOG.diff"
 SH
-chmod +x "$UP/bin/curl"
+printf '#!/bin/sh\n[ "$1" = diff ] && exit 1\nexec %s "$@"\n' "$(command -v git)" > "$UP/bin/git"
+chmod +x "$UP/bin/git"
 git -C "$UP/repo" init -q && printf 'a\n' > "$UP/repo/a.txt" && git -C "$UP/repo" add a.txt \
-  && git -C "$UP/repo" -c user.email=t@t -c user.name=t commit -qm base && printf 'b\n' >> "$UP/repo/a.txt"
-RECIPE=$(python3 - plugins/bughunter/skills/bughunter/SKILL.md <<'PY'
+  && git -C "$UP/repo" -c user.email=t@t -c user.name=t commit -qm base \
+  && git -C "$UP/repo" update-ref refs/remotes/origin/main HEAD && printf 'b\n' >> "$UP/repo/a.txt"
+upload_block() { # SKILL.md's upload block, its placeholders filled
+  python3 - plugins/bughunter/skills/bughunter/SKILL.md "$1" <<'PY'
 import re, sys
 s = open(sys.argv[1]).read()
-m = re.search(r"Build the payload with a script.*?```bash\n(.*?)```", s, re.S)
-print(m.group(1).replace("<upload_url>", "http://upload.invalid/u/tok") if m else "")
+m = re.search(r"```bash\n(\([^`]*?omb-upload\.sh[^`]*?)```", s, re.S)
+print(m.group(1).replace("<skill_dir>", sys.argv[2] + "/skills/bughunter").replace("<upload_url>", "https://mcp.ohmybug.ai/u/tok")
+      .replace("<snapshot>", "required").replace("<base_branch>", "main") if m else "")
 PY
-)
+}
+RECIPE=$(upload_block "$UP")
 if [ -z "$RECIPE" ]; then
-  echo "FAIL upload recipe: the bash block after 'Build the payload with a script' is gone from SKILL.md"; fails=$((fails + 1))
+  echo "FAIL upload block: the bash block that runs omb-upload.sh is gone from SKILL.md"; fails=$((fails + 1))
 else
-  for run in 1 2; do
-    (cd "$UP/repo" && BASE=HEAD UPLOG="$UP/log" PATH="$UP/bin:$PATH" bash -c "$RECIPE") > /dev/null 2>&1 \
-      || { echo "FAIL upload recipe: run $run exited non-zero"; fails=$((fails + 1)); }
-  done
-  python3 - "$UP/log" <<'PY' || fails=$((fails + 1))
-import json, os, sys
-log = sys.argv[1]
-rows = [l.split(" ", 2) for l in open(log).read().splitlines()] if os.path.exists(log) else []
+  for sh in bash zsh; do
+    command -v "$sh" >/dev/null 2>&1 || continue
+    rm -f "$UP/log" "$UP/log.diff"
+    for run in 1 2; do
+      (cd "$UP/repo" && UPLOG="$UP/log" "$sh" -c "$RECIPE") > /dev/null 2>&1 \
+        || { echo "FAIL upload block ($sh): run $run exited non-zero"; fails=$((fails + 1)); }
+    done
+    python3 - "$UP/log" "$sh" <<'PY' || fails=$((fails + 1))
+import os, sys
+log, sh = sys.argv[1], sys.argv[2]
+rows = [l.split(" ", 4) for l in open(log).read().splitlines()] if os.path.exists(log) else []
 bad = []
-if len(rows) != 2: bad.append(f"curl saw {len(rows)} uploads, want 2")
-for dmode, fmode, d in rows:
-    if dmode != "0o700": bad.append(f"payload directory mode {dmode}, want 0o700")
-    if int(fmode, 8) & 0o077: bad.append(f"payload file mode {fmode} is readable by others")
-    if os.path.exists(d): bad.append(f"payload directory {d} left behind")
-if len(rows) == 2 and rows[0][2] == rows[1][2]: bad.append("two runs shared one payload directory")
-p = json.load(open(log + ".payload")) if os.path.exists(log + ".payload") else {}
-if "+b" not in p.get("diff", ""): bad.append("the payload does not carry the working diff")
-for b in bad: print("FAIL upload recipe: " + b)
+if len(rows) != 2: bad.append(f"the script ran {len(rows)} times, want 2")
+for dmode, fmode, url, mode, d in rows:
+    if dmode != "0o700": bad.append(f"diff directory mode {dmode}, want 0o700")
+    if int(fmode, 8) & 0o077: bad.append(f"diff file mode {fmode} is readable by others")
+    if os.path.exists(d): bad.append(f"diff directory {d} left behind")
+    if (url, mode) != ("https://mcp.ohmybug.ai/u/tok", "required"): bad.append(f"the script got {url} {mode}")
+if len(rows) == 2 and rows[0][4] == rows[1][4]: bad.append("two runs shared one directory")
+if "+b" not in (open(log + ".diff").read() if os.path.exists(log + ".diff") else ""): bad.append("the script did not get the working diff")
+for b in bad: print(f"FAIL upload block ({sh}): " + b)
 sys.exit(1 if bad else 0)
 PY
+  done
+  rm -f "$UP/log"
+  (cd "$UP/repo" && UPLOG="$UP/log" PATH="$UP/bin:$PATH" bash -c "$RECIPE") > /dev/null 2>&1 \
+    && { echo "FAIL upload block: a failed git diff did not fail the block"; fails=$((fails + 1)); }
+  [ -e "$UP/log" ] && { echo "FAIL upload block: the script ran after git diff failed"; fails=$((fails + 1)); }
 fi
+for gone in "instruction gives" "as it stands, before the payload"; do
+  grep -qF "$gone" plugins/bughunter/skills/bughunter/SKILL.md && { echo "FAIL SKILL.md still says [$gone]: the skill runs no command a tool answer hands it"; fails=$((fails + 1)); }
+done
 rm -rf "$UP"
 
 # THE NO-BRANCH LADDER, RUN — not read. Its rungs reach files no branch diff
@@ -2836,6 +2859,51 @@ else
   printf '%s\n' "$OUT" | grep -q 'left .git' && { echo "FAIL ladder: omb_nogit left a .git behind"; fails=$((fails + 1)); }
 fi
 rm -rf "$LD"
+
+# DIFF DRIVERS NEVER RUN. A repository's own .gitattributes can name a diff
+# driver, and its config a textconv or an external diff: any of them would run
+# a program of the repository's choosing inside the hunt, and change the bytes
+# that are hashed and sent. Every diff the gate hashes and the skill sends
+# passes --no-textconv --no-ext-diff. Here a repository carries all three
+# drivers, each touching a marker; a copy without the drivers is the yardstick.
+DD=$(mktemp -d)
+mkrepo "$DD/a"
+printf '*.ts diff=evil\n' > "$DD/a/.gitattributes"
+git -C "$DD/a" add .gitattributes && git -C "$DD/a" commit -qm attrs
+git -C "$DD/a" update-ref refs/remotes/origin/main HEAD
+# notes.md has no driver of its own: diff.external is the one that would run on it.
+printf 'more\n' >> "$DD/a/a.ts"; printf 'notes\n' > "$DD/a/notes.md"; git -C "$DD/a" add a.ts notes.md && git -C "$DD/a" commit -qm two
+printf 'dirty\n' >> "$DD/a/b.ts"; printf 'new\n' > "$DD/a/n.ts"
+cp -R "$DD/a" "$DD/b"
+# textconv prints the file it is given; the two external programs print nothing.
+git -C "$DD/a" config diff.evil.textconv "touch '$DD/marker-diff.evil.textconv'; cat"
+for k in diff.evil.command diff.external; do git -C "$DD/a" config "$k" "touch '$DD/marker-$k'; true"; done
+# The yardstick only means something if the drivers do fire without the flags.
+git -C "$DD/a" diff HEAD~1 >/dev/null 2>&1; git -C "$DD/a" -c diff.evil.command= -c diff.evil.textconv= diff HEAD~1 >/dev/null 2>&1
+git -C "$DD/a" -c diff.evil.command= diff --no-ext-diff --textconv HEAD~1 >/dev/null 2>&1
+if [ ! -e "$DD/marker-diff.evil.command" ] || [ ! -e "$DD/marker-diff.external" ] || [ ! -e "$DD/marker-diff.evil.textconv" ]; then
+  echo "FAIL diff drivers: the planted drivers did not fire without the flags ($(ls "$DD" | tr '\n' ' ')), so this row proves nothing"; fails=$((fails + 1))
+fi
+rm -f "$DD"/marker-*
+printf '%s\n' "${LADDER:-}" > "$DD/ladder.sh"
+mkdir -p "$DD/up/skills/bughunter" "$DD/up/hooks"
+printf '#!/bin/sh\ncp "$3" "$UPLOG"\n' > "$DD/up/hooks/omb-upload.sh"
+DRECIPE=$(upload_block "$DD/up")
+dd_run() { # repo -> each spelling's bytes, one file per spelling, under $DD/out-<repo>
+  local r=$1 o="$DD/out-$(basename "$1")"
+  mkdir -p "$o"
+  ( cd "$r" && . "$G/diff-id.sh" && ohmybug_diff_raw > "$o/raw" && ohmybug_sig_id > "$o/sig" )
+  ( cd "$r" && export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t && . "$DD/ladder.sh" \
+      && omb_diff HEAD > "$o/omb_diff" && omb_commits 2 > "$o/omb_commits" )
+  ( cd "$r" && UPLOG="$o/default" bash -c "$DRECIPE" ) >/dev/null 2>&1
+}
+dd_run "$DD/a"; dd_run "$DD/b"
+for f in raw sig omb_diff omb_commits default; do
+  if [ ! -s "$DD/out-b/$f" ]; then echo "FAIL diff drivers: the driver-free $f is empty, so the row proves nothing"; fails=$((fails + 1))
+  elif ! cmp -s "$DD/out-a/$f" "$DD/out-b/$f"; then echo "FAIL diff drivers: $f differs from a driver-free run"; fails=$((fails + 1)); fi
+done
+ls "$DD"/marker-* >/dev/null 2>&1 && { echo "FAIL diff drivers: a driver ran: $(ls "$DD" | grep marker | tr '\n' ' ')"; fails=$((fails + 1)); }
+rm -rf "$DD"
 
 # The skill's per-call route opt-in. Sent only on a no-mode rung-1 submit, and only when the background-Bash
 # watch loop (which follows route_state to continued_by) watches it; the CronCreate fallback and other runtimes omit it.

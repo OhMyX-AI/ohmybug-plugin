@@ -151,8 +151,9 @@ repository per week, and is not a merge gate.
   local review. Before every `gh pr merge`, a gate is the safety net: it checks
   the final diff was hunted (skip once with `SKIP_BUGHUNT=1`; review fixes
   change the diff and re-arm the gate).
-- `/bughunter:review` (or just ask to "hunt bugs") sends your diff + selected
-  context to OhMyBug's cloud. You see the exact file manifest before upload.
+- `/bughunter:review` (or just ask to "hunt bugs") hunts the pushed commit
+  with nothing uploaded, or sends the diff with a snapshot of the working
+  copy; one line says what leaves the machine and what is left out.
 - An orchestrated fleet of adversarial reviewers hunts on OhMyBug's models.
   Only findings that survive triage come back.
 - Your own agent verifies each finding against your codebase and reports
@@ -162,14 +163,19 @@ repository per week, and is not a merge gate.
   and so is a real medium you already deferred or accepted in your own ticket, once your agent marks it known
   (a hunt billed on CI, or one already billed at its deadline, stays charged).
 - `/bughunter:stats` shows your record: bugs found, reviews run, balance.
-- Before a diff or file contents leave your machine (`submit_review`,
-  `provide_files`), a secret scan refuses a payload that carries a credential
-  (vendor-prefixed tokens, private keys, key files) and says which file and
-  line, with the value masked. A payload it cannot read is refused too. It
-  lets a payload through unscanned in four cases only: submits that send no
-  payload (repo + ref) have nothing to scan; without `python3` it cannot run,
-  and says so in a system message; it does not run on Windows; the out-of-band
-  upload for very large diffs is not scanned. Set
+- Before a diff or file contents leave your machine, a secret scan looks for
+  credentials (vendor-prefixed tokens, private keys, key files) and names the
+  file and line, with the value masked. A payload hunt sends the diff and a
+  snapshot of the working copy (without ignored files, secret-named files such
+  as `.env*`, `*.pem`, `.npmrc` or `.ssh/`, and submodules); the upload script
+  scans both before anything is sent. A credential in the diff refuses the
+  upload; a snapshot file that carries one is left out and named. A payload it
+  cannot read is refused too, and without `python3` nothing is uploaded. The
+  same scan refuses a `submit_review` or `provide_files` that carries a
+  credential. Not scanned: submits that send no payload (repo + ref) have
+  nothing to scan; it does not run on Windows; and a key the patterns miss,
+  under a name off the list, is sent. The account's diff mode on
+  `/me/policy` sends the diff without the snapshot. Set
   `OHMYBUG_SECRET_SCAN=0` (in the `env` block of `settings.json`) to turn the
   scan off.
 
