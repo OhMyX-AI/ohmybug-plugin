@@ -442,7 +442,8 @@ Work down this list and stop at the first rung that applies:
    **Claude Code in auto mode, and no rule covers `provide_files`** (none of
    `~/.claude/settings.json`, `~/.claude/settings.local.json`,
    `.claude/settings.json`, `.claude/settings.local.json` lists
-   `mcp__plugin_bughunter_ohmybug__*` or `…__provide_files`): a payload hunt loses every file the reviewers ask
+   a rule for the server your OhMyBug tools come from – the tool name up to its
+   last `__`, then `__*` or `__provide_files`): a payload hunt loses every file the reviewers ask
    about the change itself – the server asks you for those, and auto mode
    refuses that answer at any size. If the repo is on GitHub and readable by
    the server (App installed, or public), offer the user, in one line, to
@@ -507,7 +508,9 @@ the same call with an empty `diff` changes nothing. Measured twice.
 
 1. **Say it once**, in one line: the hunt tools are refused in this environment,
    and what would change that is the user's own step – in Claude Code the rule
-   `/permissions` → `mcp__plugin_bughunter_ohmybug__*`; in Codex, approving
+   `/permissions` → the name of the OhMyBug tool you called with its last part
+   replaced by `*` (`mcp__plugin_bughunter_ohmybug__*` for the plugin's own
+   server); in Codex, approving
    `mcp__ohmybug__*` at the tool-approval prompt or in their Codex MCP config.
    It is the user's own click in their own settings – never add it yourself,
    never ask for it to be widened
@@ -964,7 +967,9 @@ Within that window:
    alone, and the file answer is a second send nothing allows – this is NOT
    the "say it once and stop" of a refused hunt: the hunt is running and the
    request closes in minutes. Tell the user now, in one line, the exact rule:
-   `/permissions` → Add rule → `mcp__plugin_bughunter_ohmybug__provide_files`
+   `/permissions` → Add rule → the `provide_files` tool's full name as you
+   called it (`mcp__plugin_bughunter_ohmybug__provide_files` on the plugin's own
+   server)
    (or approve the call under `/permissions` → Recently denied). Only they can;
    never add or widen it yourself. When they say it is done, call
    `provide_files` again for the same review. Without the rule the classifier

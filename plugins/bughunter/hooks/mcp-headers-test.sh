@@ -23,4 +23,25 @@ for bad in '{"version":"0.150.0-beta"}' '{"version":"v1.2.3"}' '{"version":"1.2"
 done
 rm "$TMP/.claude-plugin/plugin.json"
 [ "$(CLAUDE_PLUGIN_ROOT="$TMP" sh "$ROOT/hooks/mcp-headers.sh")" = '{"X-OhMyBug-Follows":"continued_by"}' ] || { echo "missing manifest"; exit 1; }
+# The API key: from the file (Claude Code strips credential-named variables
+# from a plugin helper), else the variable; only a key's shape is sent, and a
+# value of any other shape is neither sent nor echoed.
+K=omb_0123456789abcdef0123456789abcdef0123456789abcdef
+mkdir -p "$TMP/st"
+hd() { env -u OHMYBUG_API_KEY CLAUDE_PLUGIN_ROOT="$ROOT" OMB_STATE_DIR="$TMP/st" "$@" sh "$ROOT/hooks/mcp-headers.sh" 2>"$TMP/err"; }
+[ "$(hd)" = "$got" ] || { echo "no key: output changed"; exit 1; }
+printf '%s\n' "$K" > "$TMP/st/api-key"
+[ "$(hd)" = "${got%\}},\"Authorization\":\"Bearer $K\"}" ] || { echo "key file: got $(hd | sed "s/$K/<key>/")"; exit 1; }
+[ ! -s "$TMP/err" ] || { echo "key file: stderr not empty"; exit 1; }
+python3 -c 'import json,sys; json.loads(sys.argv[1])' "$(hd)" || { echo "key file: not JSON"; exit 1; }
+rm "$TMP/st/api-key"
+[ "$(hd OHMYBUG_API_KEY="$K")" = "${got%\}},\"Authorization\":\"Bearer $K\"}" ] || { echo "env key: no header"; exit 1; }
+for bad in 'omb_a"b0123456789abcdef' 'sk-0123456789abcdef0123456789' 'omb_short' 'omb_0123456789abcdef","X":"y'; do
+  printf '%s\n' "$bad" > "$TMP/st/api-key"
+  out=$(hd)
+  [ "$out" = "$got" ] || { echo "bad key [$bad]: sent something"; exit 1; }
+  ! grep -qF -- "$bad" "$TMP/err" || { echo "bad key [$bad]: echoed on stderr"; exit 1; }
+done
+: > "$TMP/st/api-key"
+[ "$(hd)" = "$got" ] || { echo "empty key file: sent something"; exit 1; }
 echo "mcp-headers-test: ok"

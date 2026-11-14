@@ -28,6 +28,9 @@ try:
 except Exception:
     sys.exit(0)
 tool = (d.get("tool_name") or "").split("__")[-1]
+# The server name this call went through, for the attempt record (diff-id.sh).
+prefix = (d.get("tool_name") or "").rpartition("__")[0]
+prefix = prefix if re.fullmatch(r"mcp__[A-Za-z0-9_-]{1,120}", prefix) else ""
 # Which event fired. The explicit field when the client sends it; the absence of
 # a response as the fallback, since only PostToolUse carries one. Deriving it
 # here rather than from an argument means the wiring in hooks.json is the same
@@ -201,7 +204,7 @@ print(tool, done, one_line(d.get("cwd")), sent, one_line(ref), one_line(review),
       errored, one_line(body.get("gate_note")), one_line(live), scan,
       # A route_state that is present but not a word still holds the gate: "invalid".
       word("route_state") or ("invalid" if body.get("route_state") not in (None, "") else ""),
-      word("continued_by"), word("continues"), sep="\n")
+      word("continued_by"), word("continues"), prefix, sep="\n")
 ' 2>/dev/null) || exit 0
 
 TOOL=$(printf '%s' "$FIELDS" | sed -n 1p)
@@ -230,6 +233,7 @@ SCAN=$(printf '%s' "$FIELDS" | sed -n 16p)
 ROUTE_STATE=$(printf '%s' "$FIELDS" | sed -n 17p)
 CONT_BY=$(printf '%s' "$FIELDS" | sed -n 18p)
 CONTINUES=$(printf '%s' "$FIELDS" | sed -n 19p)
+PREFIX=$(printf '%s' "$FIELDS" | sed -n 20p)
 
 [ -n "${TOOL:-}" ] || exit 0
 [ -n "${CWD:-}" ] && [ -d "$CWD" ] && cd "$CWD" 2>/dev/null
@@ -376,7 +380,7 @@ TOMB="$REPO_HUNTS.promoted/${REVIEW:-unknown}"
 #     be checked out — including fixes written after the offer.
 if [ "${PRE:-0}" = "1" ]; then
   [ "$TOOL" = submit_review ] || exit 0
-  [ -n "$SENT" ] && ohmybug_record_attempt "$SENT"
+  [ -n "$SENT" ] && ohmybug_record_attempt "$SENT" "$PREFIX"
   # One rule for which ref may key a record, shared with the promote path
   # below: ohmybug_ref_here — a sha-spelled ref (the spelling that pins the
   # same commit everywhere) naming the HEAD of one of this repository's
@@ -385,7 +389,7 @@ if [ "${PRE:-0}" = "1" ]; then
   # and the offer is filed under the RESOLVED sha, the key the gate looks up.
   if [ -n "$REF" ]; then
     RESOLVED=$(ohmybug_ref_here "$REF") && [ -n "$RESOLVED" ] &&
-      ohmybug_record_attempt "ref:$RESOLVED"
+      ohmybug_record_attempt "ref:$RESOLVED" "$PREFIX"
   fi
   exit 0
 fi

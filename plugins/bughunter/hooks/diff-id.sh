@@ -267,9 +267,25 @@ ohmybug_hunted() {
 # The empty guard is repeated rather than inherited: `attempt:` prepended to
 # nothing is a non-empty string, so the guard inside ohmybug_record_hunt can no
 # longer fire — and an id-less record would be a file that answers every lookup.
+#
+# The file holds the live tool prefix: the tool_name the client handed the
+# recorder, minus its last `__<tool>`. The client alone knows which server the
+# session hunts through (the plugin server, or a second server at the same URL
+# that hides it), so the gate reads that name here instead of guessing.
 ohmybug_record_attempt() {
+  local dir
   [ -n "${1:-}" ] || return 1
-  ohmybug_record_hunt "attempt:$1"
+  dir=$(ohmybug_hunt_dir) || return 1
+  mkdir -p "$dir" && printf '%s' "${2:-}" > "$dir/attempt:$1"
+}
+
+# The prefix an attempt was made through; the plugin server for a record from
+# before the prefix was stored, or for anything not of a prefix's shape.
+ohmybug_attempt_prefix() {
+  local dir p=
+  dir=$(ohmybug_hunt_dir) && [ -n "${1:-}" ] && p=$(head -c 200 "$dir/attempt:$1" 2>/dev/null)
+  printf '%s' "$p" | grep -Eqx 'mcp__[A-Za-z0-9_-]+' || p=mcp__plugin_bughunter_ohmybug
+  printf '%s' "$p"
 }
 
 # Attempts EXPIRE. A refusal is a statement about the environment right now; a
@@ -331,17 +347,20 @@ ohmybug_tools_allowed() {
   # permission surface Codex does not have. So Codex answers "allowed": the
   # tools work there, and an unfinished hunt is the thing to finish.
   [ -n "${PLUGIN_DATA:-}" ] && return 0
-  python3 -I - "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json" \
+  python3 -I - "${1:-mcp__plugin_bughunter_ohmybug}" "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json" \
     "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/settings.json" \
     "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/settings.local.json" <<'PY' 2>/dev/null
 import json, sys
-for path in sys.argv[1:]:
+# A rule for the server the attempt went through: the bare prefix, or any of
+# its tools. A rule for the other name says nothing about this one.
+p = sys.argv[1]
+for path in sys.argv[2:]:
     try:
         data = json.load(open(path))
     except Exception:
         continue
     rules = (data.get("permissions") or {}).get("allow") or []
-    if any("bughunter_ohmybug" in str(r) for r in rules):
+    if any(str(r) == p or str(r).startswith(p + "__") for r in rules):
         sys.exit(0)
 sys.exit(1)
 PY

@@ -11,4 +11,13 @@
 root=${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 v=$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([0-9]\{1,4\}\.[0-9]\{1,4\}\.[0-9]\{1,4\}\)".*/\1/p' \
   "$root/.claude-plugin/plugin.json" 2>/dev/null | head -n 1)
-if [ -n "$v" ]; then printf '{"X-OhMyBug-Plugin":"%s","X-OhMyBug-Follows":"continued_by"}\n' "$v"; else printf '{"X-OhMyBug-Follows":"continued_by"}\n'; fi
+# An API key signs the plugin in without a browser (headless, CI). Claude Code
+# strips credential-named variables (KEY, TOKEN, AUTH...) from a plugin helper,
+# so the key is read from a file; the variable is a fallback for a client that
+# passes it. Only a value of the key's shape is sent: anything else is no key
+# (the OAuth sign-in), is never echoed, and cannot break the JSON or the header.
+k=${OHMYBUG_API_KEY:-}
+[ -n "$k" ] || k=$(head -n 1 "${OMB_STATE_DIR:-$HOME/.ohmybug}/api-key" 2>/dev/null | tr -d ' \r\t')
+printf '%s' "$k" | grep -Eqx 'omb_[A-Za-z0-9_-]{16,200}' 2>/dev/null || k=
+a=; [ -z "$k" ] || a=$(printf ',"Authorization":"Bearer %s"' "$k")
+if [ -n "$v" ]; then printf '{"X-OhMyBug-Plugin":"%s","X-OhMyBug-Follows":"continued_by"%s}\n' "$v" "$a"; else printf '{"X-OhMyBug-Follows":"continued_by"%s}\n' "$a"; fi
