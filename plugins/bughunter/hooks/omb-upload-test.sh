@@ -39,8 +39,9 @@ f = sys.argv[1]
 print(oct(stat.S_IMODE(os.stat(os.path.dirname(f)).st_mode)), oct(stat.S_IMODE(os.stat(f).st_mode)), os.path.dirname(f))
 PY
 cp "$f" "$STUB/$door.$n.sent"
-# A connection that never answered writes no body and no headers.
-if [ "$code" = 000 ]; then rm -f "$o" "$h"; printf 000; exit 7; fi
+# A connection that never answered writes no body and no headers, and leaves
+# whatever files were there before, as curl does.
+if [ "$code" = 000 ]; then printf 000; exit 7; fi
 printf '%s' "$body" > "$o"
 { printf 'HTTP/1.1 %s X\r\n' "$code"; [ -n "$ra" ] && printf 'Retry-After: %s\r\n' "$ra"; } > "$h"
 printf '%s' "$code"
@@ -376,6 +377,8 @@ st "no Retry-After: 30" 0 '502|{}|' '' required "repo repo payload "
 [ "$(cat "$STUB/sleeps")" = 30 ] && ok "default wait 30" || fail "default wait: slept $(cat "$STUB/sleeps")"
 st "curl failure: retried" 0 '000|x|' '' required "repo repo payload "
 st "no answer five times: 75, said cleanly" 75 "$(printf '000|x|\n%.0s' 1 2 3 4 5)" '' required "repo repo repo repo repo " "run the same command again"
+st "a failed attempt does not reread the last one's Retry-After" 75 "$(printf '429|{}|7\n000|x|\n000|x|\n000|x|\n000|x|\n')" '' required "repo repo repo repo repo "
+[ "$(tr '\n' ' ' < "$STUB/sleeps")" = "7 30 30 30 " ] && ok "...each attempt reads its own answer" || fail "stale answer: slept $(tr '\n' ' ' < "$STUB/sleeps")"
 st "the last Retry-After is passed on" 75 "$(printf '429|{}|7\n%.0s' 1 2 3 4 5)" '' required "repo repo repo repo repo " "in about 7 seconds"
 grep -q -- '--connect-timeout 10 --speed-limit 1024 --speed-time 30' "$STUB/args" && ok "curl has a connect timeout and a stall limit" || fail "curl limits: $(head -n 1 "$STUB/args")"
 # The retries stop at the time budget, inside the skill's 600 s Bash call: a

@@ -199,7 +199,7 @@ if not diff.strip():
     sys.exit(1)
 
 files, sent, skipped = [], [], []
-if mode == "off" and args:
+if args:  # "$d/listed" is filled in diff mode only, so with a snapshot nothing is listed
     listed = set(open(d + "/listed", "rb").read().split(b"\0"))
     top = os.path.realpath(top)
     for a in args:
@@ -213,14 +213,9 @@ if mode == "off" and args:
                 rel = "/".join(parts[i:])
                 break
         try:
-            ok = bool(rel) and not secret(rel) and os.fsencode(rel) in listed
-            p = top
-            for c in (rel.split("/") if ok else []):
-                p = os.path.join(p, c)
-                if c in ("", ".", "..") or stat.S_ISLNK(os.lstat(p).st_mode):
-                    ok = False
-                    break
-            if ok and stat.S_ISREG(os.lstat(p).st_mode):
+            # git lists no path through a symlinked folder, and lstat refuses a symlink itself.
+            p = os.path.join(top, rel or "")
+            if rel and not secret(rel) and os.fsencode(rel) in listed and stat.S_ISREG(os.lstat(p).st_mode):
                 files.append({"path": rel, "content": open(p, "rb").read().decode("utf-8")})
                 sent.append(rel)
                 continue
@@ -309,7 +304,7 @@ snapline() {
 # and never past BUDGET_S. A stalled transfer is cut by curl's own limits. The
 # body and header files are new for every attempt, so a failed one reads empty.
 ra=
-retry_after() { [ -f "$d/hdr" ] || return 0; sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$d/hdr" | tail -n 1; }
+retry_after() { sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$d/hdr" 2>/dev/null | tail -n 1; }
 post() { # door-name url file content-type -> $code, body in $d/body
   n=0
   while :; do
@@ -334,7 +329,7 @@ post() { # door-name url file content-type -> $code, body in $d/body
 answer_code() { python3 -c 'import json,sys
 try: print(json.load(open(sys.argv[1])).get("code") or "")
 except Exception: print("")' "$d/body"; }
-body() { if [ -s "$d/body" ]; then tr '\n' ' ' < "$d/body"; echo; fi; }
+body() { tr '\n' ' ' < "$d/body"; echo; }
 busy() { body; die "omb-upload: the server is busy or unreachable; the ticket stays valid: run the same command again${1:+ in about $1 seconds}." 75; }
 
 send_snapshot() {

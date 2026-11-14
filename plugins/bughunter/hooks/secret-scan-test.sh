@@ -225,8 +225,8 @@ fm() { # name, want exit, mode, file, (unused), [text in stderr]
   rm -f "$FM/hits"
   if [ "$3" = payload ]; then err=$(python3 "$CORE" --payload "$4" 2>&1 >/dev/null); rc=$?
   else err=$(python3 "$CORE" "--$3" "$4" "$FM/hits" 2>&1 >/dev/null); rc=$?; fi
-  if [ "$rc" != "$2" ]; then echo "FAIL $1: exit $rc, want $2 — $err"; fails=$((fails + 1)); return; fi
-  if [ -n "${6:-}" ] && ! printf '%s' "$err" | LC_ALL=C grep -qF -- "$6"; then echo "FAIL $1: message lacks '$6' — $err"; fails=$((fails + 1)); return; fi
+  if [ "$rc" != "$2" ]; then echo "FAIL $1: exit $rc, want $2: $err"; fails=$((fails + 1)); return; fi
+  if [ -n "${6:-}" ] && ! printf '%s' "$err" | LC_ALL=C grep -qF -- "$6"; then echo "FAIL $1: message lacks '$6': $err"; fails=$((fails + 1)); return; fi
   echo "ok   $1"
 }
 tgz() { # out, then name=content pairs
@@ -272,7 +272,8 @@ python3 - "$FM/big.tgz" "$AWS" <<'PY2'
 import io, sys, tarfile
 out, key = sys.argv[1], sys.argv[2]
 members = {"big/lines.txt": ("x = 1\n" * 400000 + "k = " + key + "\n").encode(),
-           "big/oneline.min.js": ("a" * 3000000 + " " + key + " " + "b" * 10).encode()}
+           # The key straddles the second chunk edge: only the kept tail joins its halves.
+           "big/oneline.min.js": ("a" * (2 * 1048576 - 11) + " " + key + " " + "b" * 10).encode()}
 with tarfile.open(out, "w:gz") as t:
     for n, b in members.items():
         i = tarfile.TarInfo(n); i.size = len(b); t.addfile(i, io.BytesIO(b))
