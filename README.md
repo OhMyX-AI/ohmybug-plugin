@@ -42,7 +42,7 @@ like `*_KEY` to a plugin, so the key goes in this file, not in the
 environment. From a CI secret:
 
 ```bash
-mkdir -p ~/.ohmybug && (umask 077; printf '%s\n' "$OHMYBUG_API_KEY" > ~/.ohmybug/api-key)
+(umask 077; mkdir -p ~/.ohmybug && printf '%s\n' "$OHMYBUG_API_KEY" > ~/.ohmybug/api-key && chmod 600 ~/.ohmybug/api-key)
 ```
 
 Never type the key itself on a command line.

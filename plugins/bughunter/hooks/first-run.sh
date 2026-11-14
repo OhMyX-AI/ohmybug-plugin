@@ -21,10 +21,9 @@
 # Printed ONCE per machine, and only while no rule mentions our tools — a plugin
 # that reminds you of something you already did is a plugin you turn off.
 #
-# It runs at SessionStart AND before every call to an OhMyBug tool (PreToolUse,
-# print-only, beside secret-scan.sh): a plugin installed inside an open session
-# and loaded with /reload-plugins never sees a SessionStart, so the first tool
-# call is the first moment it can speak. Two more things it says there:
+# It runs before every call to an OhMyBug tool (PreToolUse, print-only, beside
+# secret-scan.sh), not at SessionStart: the rule is named after the server the
+# call goes through, and a session start has no tool name to give. Two more things it says there:
 # - in auto mode, a submit_review while nothing decides provide_files: the
 #   reviewers' mid-run file request is a second send nobody allowed, so say so
 #   before the hunt (once per session).
@@ -56,7 +55,8 @@ try:
     d = json.loads(sys.stdin.read() or "{}")
 except ValueError:
     d = {}
-event = d.get("hook_event_name") or "SessionStart"
+# A client that names no event: a tool call with no response is a PreToolUse.
+event = d.get("hook_event_name") or ("PreToolUse" if d.get("tool_name") and "tool_response" not in d else "SessionStart")
 tool = str(d.get("tool_name") or "")
 
 # Every rule in the four files a user edits. Allow, ask and deny are all
@@ -94,8 +94,11 @@ def once(mark):
 
 auto = d.get("permission_mode") == "auto"
 say, ctx = None, None
+# One mark per server name: the plugin's keeps the old name, so a machine that
+# heard it once is not told again; a second server's rule is told once of its own.
+mark = "permission-notice-v1" + ("" if P == "mcp__plugin_bughunter_ohmybug" else "-" + P)
 if not mentioned:
-    if once("permission-notice-v1"):
+    if once(mark):
         say = ("OhMyBug: the hunt runs in our cloud, so its tools send code off this machine.\n"
                "In auto mode the permission classifier reviews each of those calls, and it\n"
                "refuses the files the reviewers ask for mid-run, at any size; the hunt then\n"
@@ -106,7 +109,7 @@ if not mentioned:
                + "Nothing will add them for you. With the rule, the files go through the plugin,\n"
                "read from disk; no shell command uploads them.")
 else:
-    once("permission-notice-v1")
+    once(mark)
 # The careful user allows one tool at a time — a rule, or an approval under
 # /permissions -> Recently denied, which lives in the session and in no file
 # this hook can read. Either way a submit that goes ahead while nothing decides

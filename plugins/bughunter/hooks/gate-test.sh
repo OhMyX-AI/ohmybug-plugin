@@ -741,6 +741,10 @@ if [ -n "$ID" ]; then
   krow "key server, its bare server rule: block" '{"permissions":{"allow":["mcp__ohmybug"]}}' 2
   krow "key server, a lookalike name: warn" '{"permissions":{"allow":["mcp__ohmybugx__*"]}}' 0
   krow "key server, no rule: warn" '' 0
+  krow "key server, a provide_files-only rule: warn" '{"permissions":{"allow":["mcp__ohmybug__provide_files"]}}' 0
+  # The commit-keyed attempt keeps the server name too.
+  python3 -c "import json,sys;print(json.dumps({'tool_name':'mcp__ohmybug__submit_review','tool_input':{'meta':{'ref':sys.argv[1]}},'cwd':sys.argv[2]}))" "$(git rev-parse HEAD)" "$PWD" | bash "$G/stamp-hunt.sh"
+  [ "$(ohmybug_attempt_prefix "ref:$(git rev-parse HEAD)")" = mcp__ohmybug ] || { printf 'FAIL live name: the ref attempt did not keep its server name\n'; fails=$((fails + 1)); }
   pre submit_review
   krow "plugin server, only the key rule: warn" '{"permissions":{"allow":["mcp__ohmybug__*"]}}' 0
   out=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" 2>&1 >/dev/null)
@@ -748,6 +752,9 @@ if [ -n "$ID" ]; then
   # A record from before the name was stored is the plugin server's.
   : > "$(ohmybug_hunt_dir)/attempt:$ID"
   krow "an old empty record, the plugin rule: block" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}' 2
+  rm -f "$HOME/.claude/settings.json"
+  out=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" 2>&1 >/dev/null)
+  case "$out" in *"/permissions -> mcp__plugin_bughunter_ohmybug__*"*) ;; *) printf 'FAIL live name: an old record named another rule: %s\n' "$out"; fails=$((fails + 1)) ;; esac
   printf 'mcp__../x' > "$(ohmybug_hunt_dir)/attempt:$ID"
   krow "a record of no prefix shape reads as the plugin server" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}' 2
   rm -f "$HOME/.claude/settings.json"
@@ -2213,12 +2220,16 @@ rm -rf "$FR/state" "$FR/.claude" "$FR/p/.claude"; mkdir -p "$FR/.claude"
 kpre() { printf '{"hook_event_name":"PreToolUse","tool_name":"mcp__ohmybug__%s","permission_mode":"auto","session_id":"%s"}' "$1" "$2" \
   | OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh"; }
 printf '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}\n' > "$FR/.claude/settings.json"
+# The plugin server's call consumed its own mark; the second server's notice is its own.
+pre get_balance default p0 >/dev/null
 fr_row "key server beside a plugin rule: the notice names the key server" "$(kpre get_balance k1)" 'Add rule ->\\nmcp__ohmybug__\* \. One tool'
 fr_row "key server beside a plugin rule: the provide_files hint names its tool" "$(kpre provide_files k1)" 'Add rule -> mcp__ohmybug__provide_files'
 rm -rf "$FR/state"
 printf '{"permissions":{"allow":["mcp__ohmybug__*"]}}\n' > "$FR/.claude/settings.json"
 fr_row "key server with its own rule: no notice on a fresh machine" "$(kpre get_balance k2)" ''
 fr_row "key server with its own rule: no provide_files hint" "$(kpre provide_files k2)" ''
+rm -rf "$FR/state" "$FR/.claude"
+fr_row "a call that names no event still carries the notice" "$(printf '{"tool_name":"mcp__plugin_bughunter_ohmybug__get_balance"}' | OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh")" 'Add rule ->'
 rm -rf "$FR/state" "$FR/.claude"
 
 # --- the scan hint: once per machine, Claude Code only, a suggestion ----------
@@ -2273,7 +2284,7 @@ for turn in 1 2; do
 import json, sys
 d = json.loads(sys.argv[1])
 ctx = d.get('hookSpecificOutput', {}).get('additionalContext', '')
-ok = ('confirm the OhMyBug MCP tools (submit_review, get_findings, confirm_findings, from a server named ohmybug) are present' in ctx
+ok = ('confirm the OhMyBug MCP tools (submit_review, get_findings, confirm_findings, from a server whose name contains ohmybug' in ctx
       and 'mcp__' not in ctx
       and 'tell the user once' in ctx and 'go on with what they asked' in ctx
       and 'do not start' not in ctx and 'systemMessage' not in d)

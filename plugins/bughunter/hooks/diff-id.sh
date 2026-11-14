@@ -268,8 +268,8 @@ ohmybug_hunted() {
 # nothing is a non-empty string, so the guard inside ohmybug_record_hunt can no
 # longer fire — and an id-less record would be a file that answers every lookup.
 #
-# The file holds the live tool prefix: the tool_name the client handed the
-# recorder, minus its last `__<tool>`. The client alone knows which server the
+# Written here, not through ohmybug_record_hunt: the file holds the live tool
+# prefix, the tool_name the client handed the recorder minus its last `__<tool>`. The client alone knows which server the
 # session hunts through (the plugin server, or a second server at the same URL
 # that hides it), so the gate reads that name here instead of guessing.
 ohmybug_record_attempt() {
@@ -351,8 +351,9 @@ ohmybug_tools_allowed() {
     "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/settings.json" \
     "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/settings.local.json" <<'PY' 2>/dev/null
 import json, sys
-# A rule for the server the attempt went through: the bare prefix, or any of
-# its tools. A rule for the other name says nothing about this one.
+# A rule that lets submit_review run on the server the attempt went through:
+# the bare prefix, all its tools, or that tool. A rule for another tool of it
+# (provide_files alone) does not, and a rule for the other name says nothing.
 p = sys.argv[1]
 for path in sys.argv[2:]:
     try:
@@ -360,7 +361,7 @@ for path in sys.argv[2:]:
     except Exception:
         continue
     rules = (data.get("permissions") or {}).get("allow") or []
-    if any(str(r) == p or str(r).startswith(p + "__") for r in rules):
+    if any(str(r) in (p, p + "__*", p + "__submit_review") for r in rules):
         sys.exit(0)
 sys.exit(1)
 PY
