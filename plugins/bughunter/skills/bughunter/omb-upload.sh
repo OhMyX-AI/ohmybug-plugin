@@ -15,11 +15,21 @@
 # the manifest. Secret-named files are left out of the diff as they are out of
 # the snapshot, and named. What could not be scanned is not sent.
 #
+# Boundary: POSIX sh (dash, bash 3.2+, busybox ash), git >= 2.25, python3 >=
+# 3.7, curl, gzip, on macOS or Linux. Anything else is unsupported; where the
+# script can tell (python3 older than 3.7, no python3, no curl) it refuses with
+# one sentence, and nothing unscanned is sent unless the scan is off. The
+# secret-name list is best effort. Assumptions, not code: a hard kill (SIGKILL) leaves the
+# temporary 0700 folder behind; a full TMPDIR fails a write and nothing is sent;
+# a working copy near the server's 1 GiB ceiling may not pack and scan inside the
+# skill's 600 s call on a slow machine (the remedy is the same as for
+# snapshot_too_large).
+#
 # env: OMB_SNAPSHOT_PATHS=<file>  one repo-relative path per line: pack only these
 #      OMB_SNAPSHOT_HOME_OK=1     the project is the home folder (a container)
 #      OHMYBUG_SECRET_SCAN=0      no credential scan (the manifest says so)
 # exit: 0 payload accepted | 1 refused, the last line says why | 3 credential in
-#       the payload | 4 python3 or curl missing | 75 busy or unreachable: run the
+#       the payload | 4 python3 (3.7+) or curl missing | 75 busy or unreachable: run the
 #       same command again
 set -eu
 umask 077
@@ -40,20 +50,16 @@ shift 3
 case $mode in required|off) ;; *) die "omb-upload: the second argument is required or off, got '$mode'; nothing was sent" ;; esac
 case $url in "https://$HOST/u/"*) tok=${url#"https://$HOST/u/"} ;; *) die "omb-upload: not an upload URL of $HOST; nothing was sent" ;; esac
 case $tok in ''|*[!A-Za-z0-9_-]*) die "omb-upload: not an upload URL of $HOST; nothing was sent" ;; esac
-case $patch in /*) ;; *) patch=$PWD/$patch ;; esac
 [ -f "$patch" ] && [ -r "$patch" ] || die "omb-upload: cannot read the diff file $patch; nothing was sent"
 paths=${OMB_SNAPSHOT_PATHS:-}
 if [ -n "$paths" ]; then
+  # Absolute: the pack reads it after its cd to the top level.
   case $paths in /*) ;; *) paths=$PWD/$paths ;; esac
-  # An empty list would be no pathspec at all: the whole repository.
-  grep -q '[^[:space:]]' "$paths" 2>/dev/null || die "omb-upload: OMB_SNAPSHOT_PATHS names no readable, non-empty path list; nothing was sent"
 fi
 command -v python3 >/dev/null 2>&1 || die "omb-upload: python3 not found, so nothing could be scanned and nothing was sent" 4
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 7))' || die "omb-upload: python3 3.7 or newer is needed; nothing was sent" 4
 command -v curl >/dev/null 2>&1 || die "omb-upload: curl not found, so nothing could be sent" 4
-HERE=$(cd "$(dirname "$0")" && pwd)
-CORE=$HERE/omb_scan.py
-[ -f "$CORE" ] || die "omb-upload: omb_scan.py is missing beside this script; nothing was sent"
-export PYTHONDONTWRITEBYTECODE=1
+CORE=$(cd "$(dirname "$0")" && pwd)/omb_scan.py
 START=$(date +%s)
 cr=$(printf '\r')
 
@@ -81,8 +87,7 @@ fi
 # NUL-separated list of paths to leave out (the credential hits of a first
 # pack), removed from the temporary index before write-tree; the path list
 # checked against that index (a path that matches nothing is named, not passed
-# to archive, where it would fail the pack); and the tree id kept in "$k/t" for
-# the manifest. ${HOME:-} because this script runs set -u. Called only as a
+# to archive, where it would fail the pack); and the tree id kept in "$k/t". ${HOME:-} because this script runs set -u. Called only as a
 # plain statement (see run_pack): on the left of || or in an if, set -e inside
 # it would be off, and a failed step would pack a stale tree as a success.
 pack() (
@@ -97,18 +102,27 @@ pack() (
   git ls-files -z -t > "$k/l"; xargs -0 sh -c 'for e; do case $e in "S "*) printf "%s\0" "${e#S }";; esac; done' sh < "$k/l" > "$k/s"
   git $s update-index -z --force-remove --stdin < "$k/s"
   if git add -h 2>&1 | grep -q -E -e '--(\[no-\])?sparse'; then git $s add -A --sparse; else git $s add -A; fi
-  if [ -s "$drop" ]; then git $s update-index -z --force-remove --stdin < "$drop"; fi
-  t=$(git $s write-tree); printf '%s\n' "$t" > "$k/t"
-  : > "$k/unmatched"
+  # The path list, checked against the working copy BEFORE the credential drop,
+  # then again after it: "not in the working copy" and "left out for a
+  # credential match" are two facts. An empty result refuses: a pathspec of
+  # excludes alone would pack the whole repository.
+  : > "$k/unmatched"; : > "$k/p"; : > "$k/p0"
   if [ -n "$paths" ]; then
-    : > "$k/p"
     while IFS= read -r q || [ -n "$q" ]; do
       q=${q%"$cr"}
       [ -n "$q" ] || continue
-      if git ls-files --error-unmatch -- ":(top,literal)$q" >/dev/null 2>&1; then printf '%s\n' "$q" >> "$k/p"; else printf '%s\n' "$q" >> "$k/unmatched"; fi
+      if git ls-files --error-unmatch -- ":(top,literal)$q" >/dev/null 2>&1; then printf '%s\n' "$q" >> "$k/p0"; else printf '%s\n' "$q" >> "$k/unmatched"; fi
     done < "$paths"
-    [ -s "$k/p" ] || { echo "none of the paths in OMB_SNAPSHOT_PATHS is in the working copy" >&2; exit 1; }
+    [ -s "$k/p0" ] || { echo "none of the paths in OMB_SNAPSHOT_PATHS is in the working copy" >&2; exit 1; }
   fi
+  git $s update-index -z --force-remove --stdin < "$drop"
+  if [ -n "$paths" ]; then
+    while IFS= read -r q; do
+      if git ls-files --error-unmatch -- ":(top,literal)$q" >/dev/null 2>&1; then printf '%s\n' "$q" >> "$k/p"; fi
+    done < "$k/p0"
+    [ -s "$k/p" ] || { echo "every path in OMB_SNAPSHOT_PATHS was left out for a credential match" >&2; exit 1; }
+  fi
+  t=$(git $s write-tree); printf '%s\n' "$t" > "$k/t"
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
   { git init -q --bare $g "$k/g" 2>/dev/null || git init -q --bare "$k/g"; }; mkdir -p "$k/g/info"; printf '%s\n%s\n' "$o" "$k/o" > "$k/g/objects/info/alternates"
   echo '* -filter -text -ident -working-tree-encoding -export-ignore -export-subst' > "$k/g/info/attributes"
@@ -133,7 +147,6 @@ run_pack() {
 }
 
 # The payload: the diff, and context files only in diff mode (a snapshot holds them).
-[ -s "$patch" ] || die "omb-upload: the diff is empty, so there is nothing to hunt; nothing was sent"
 : > "$d/listed"
 top=
 if [ "$mode" = off ] && [ $# -gt 0 ]; then
@@ -160,7 +173,10 @@ def unq(p):
     return p[2:] if p[:2] in ("a/", "b/") else p
 
 def names(sec):
-    first = sec.split("\n", 1)[0]
+    # Header lines only, before the first hunk: inside one, "--- x" is a removed
+    # "-- x" line and "+++ x" an added "++ x", never a file name.
+    head = sec.split("\n@@", 1)[0].split("\n")
+    first = head[0]
     out = []
     m = re.match(r"diff --git (.*)$", first)
     if m:
@@ -170,11 +186,11 @@ def names(sec):
         else:
             i = h.rfind(" b/")
             out += [unq(h[:i]), unq(h[i + 1:])] if i > 0 else [unq(h)]
-    for line in sec.split("\n"):
-        for pre in ("--- ", "+++ ", "rename from ", "rename to ", "copy from ", "copy to "):
+    for line in head[1:]:
+        for pre in ("--- ", "+++ "):
             if line.startswith(pre):
                 out.append(unq(line[len(pre):]))
-    return [n for n in out if n and n != "/dev/null" and n != "dev/null"]
+    return [n for n in out if n and n != "/dev/null"]
 
 raw = open(patch, "rb").read()
 secs = re.split(rb"(?m)^(?=diff --git )", raw)
@@ -195,7 +211,7 @@ for sec in secs:
     kept.append(text)
 diff = "".join(kept)
 if not diff.strip():
-    sys.stderr.write("omb-upload: nothing is left of the diff once secret-named files are out; nothing was sent\n")
+    sys.stderr.write("omb-upload: the diff is empty, or nothing is left of it once secret-named files are out, so there is nothing to hunt; nothing was sent\n")
     sys.exit(1)
 
 files, sent, skipped = [], [], []
@@ -203,25 +219,23 @@ if args:  # "$d/listed" is filled in diff mode only, so with a snapshot nothing 
     listed = set(open(d + "/listed", "rb").read().split(b"\0"))
     top = os.path.realpath(top)
     for a in args:
+        # The folder by its real path, the file by its own name: lstat below refuses
+        # a symlink, and a path through a linked folder is the listed file it names.
         full = os.path.abspath(a)
-        parts = full.split(os.sep)
-        rel = None
-        # The prefix that is the top level, compared by real path: a symlinked
-        # folder ABOVE the repository is fine, a symlink inside it is not.
-        for i in range(len(parts), 0, -1):
-            if os.path.realpath(os.sep.join(parts[:i]) or os.sep) == top:
-                rel = "/".join(parts[i:])
-                break
+        rel = os.path.relpath(os.path.join(os.path.realpath(os.path.dirname(full)), os.path.basename(full)), top)
         try:
-            # git lists no path through a symlinked folder, and lstat refuses a symlink itself.
-            p = os.path.join(top, rel or "")
-            if rel and not secret(rel) and os.fsencode(rel) in listed and stat.S_ISREG(os.lstat(p).st_mode):
+            p = os.path.join(top, rel)
+            # A path outside the repository ("../x") is never in git's listing.
+            if not secret(rel) and os.fsencode(rel) in listed and stat.S_ISREG(os.lstat(p).st_mode):
                 files.append({"path": rel, "content": open(p, "rb").read().decode("utf-8")})
                 sent.append(rel)
                 continue
         except (OSError, UnicodeDecodeError):
             pass
         skipped.append(a)
+# A quoted git name can decode to control bytes: one line per field below, and one line to the user.
+clean = lambda xs: [re.sub(r"[\x00-\x1f\x7f]", "?", x) for x in xs]
+sent, skipped, dropped = clean(sent), clean(skipped), clean(dropped)
 json.dump({"diff": diff, "files": files}, open(d + "/payload.json", "w", encoding="utf-8"), ensure_ascii=False)
 with open(d + "/meta", "w", encoding="utf-8") as f:
     f.write("\n".join([str(nfiles), ", ".join(sent), ", ".join(skipped), ", ".join(dropped), str(len(diff.encode("utf-8")))]) + "\n")
@@ -248,17 +262,15 @@ snapshot() {
   : > "$d/drop"
   run_pack
   [ "$scan_off" = 1 ] && return 0
-  rm -f "$d/hits"
   set +e
-  python3 "$CORE" --snapshot "$d/k/s.tgz" "$d/hits"; rc=$?
+  python3 "$CORE" --snapshot "$d/k/s.tgz" "$d/hits" > "$d/count"; rc=$?
   set -e
   if [ "$rc" = 3 ] && [ -s "$d/hits" ]; then
     cp "$d/hits" "$d/drop"
     run_pack
-    dropped=$(tr '\0' '\n' < "$d/drop" | sed '/^$/d' | paste -sd, - | sed 's/,/, /g')
-    rm -f "$d/hits"
+    dropped=$(tr '\0' '\n' < "$d/drop" | tr -d '\001-\037\177' | sed '/^$/d' | paste -sd, - | sed 's/,/, /g')
     set +e
-    python3 "$CORE" --snapshot "$d/k/s.tgz" "$d/hits"; rc=$?
+    python3 "$CORE" --snapshot "$d/k/s.tgz" "$d/hits" > "$d/count"; rc=$?
     set -e
   fi
   case $rc in
@@ -287,11 +299,14 @@ manifest() { # $1: what the snapshot part says
 snapline() {
   t=$(cat "$d/k/t")
   total=$(git --git-dir="$d/k/g" ls-tree -r "$t" | grep -c ' blob ' || :)
-  packed=$(tar -tzf "$d/k/s.tgz" | grep -vc '/$' || :)
   size=$(kb "$(wc -c < "$d/k/s.tgz" | tr -d ' ')")
-  if [ -n "$paths" ]; then
-    printf ' + repository snapshot %s of %s (path list), %s packed. Left out: git-ignored files, submodules, secret-named files' "$packed" "$(files "$total")" "$size"
+  # The file count is the scanner's (it read every member); with the scan off there is none.
+  if [ "$scan_off" = 1 ]; then
+    printf ' + repository snapshot of %s, %s packed. Left out: git-ignored files, submodules, secret-named files' "$(files "$total")" "$size"
+  elif [ -n "$paths" ]; then
+    printf ' + repository snapshot %s of %s (path list), %s packed. Left out: git-ignored files, submodules, secret-named files' "$(cat "$d/count")" "$(files "$total")" "$size"
   else
+    packed=$(cat "$d/count")
     printf ' + repository snapshot %s, %s packed. Left out: git-ignored files, submodules, %s' "$(files "$packed")" "$size" "$(files "$((total - packed))" secret-named)"
   fi
   printf ' (.env*, *.pem, *.key and %s more patterns), LFS content (pointers only)' "$((npat - 3))"
@@ -301,15 +316,19 @@ snapline() {
 
 # One POST with the retry rule: 429, a 5xx other than the payload's 503, or no
 # answer at all is retried up to 4 times, waiting Retry-After clamped to 1-30 s,
-# and never past BUDGET_S. A stalled transfer is cut by curl's own limits. The
-# body and header files are new for every attempt, so a failed one reads empty.
+# and never past BUDGET_S. Each attempt may run until the budget is spent
+# (--max-time), never a stall limit: that one also runs while the server reads a
+# large snapshot before it answers, and would send the snapshot again. The body
+# and header files are new for every attempt, so a failed one reads empty.
 ra=
 retry_after() { sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$d/hdr" 2>/dev/null | tail -n 1; }
 post() { # door-name url file content-type -> $code, body in $d/body
   n=0
   while :; do
     : > "$d/body"; : > "$d/hdr"
-    code=$(curl -sS --connect-timeout 10 --speed-limit 1024 --speed-time 30 -o "$d/body" -D "$d/hdr" -w '%{http_code}' \
+    left=$((BUDGET_S - $(date +%s) + START))
+    [ "$left" -ge 30 ] || { code=000; return 0; }
+    code=$(curl -sS --connect-timeout 10 --max-time "$left" -o "$d/body" -D "$d/hdr" -w '%{http_code}' \
       -X POST -H "content-type: $4" --data-binary @"$3" "$2") || code=000
     case $code in
       503) [ "$1" = payload ] && return 0 ;;
@@ -339,7 +358,6 @@ send_snapshot() {
     409) [ "$(answer_code)" = snapshot_taken ] || { body; die "omb-upload: the snapshot was refused (above); the payload was not sent."; } ;;
     404|410) body; die "omb-upload: the ticket is used or expired, and the payload was not sent. Call get_findings for this review: if it is running, watch it; else submit again." ;;
     429|5??|000) busy "$ra" ;;
-    413) body; die "omb-upload: the repository is too large to send (above). Diff mode is the user's own switch, on the link above; or commit, push and hunt the pushed commit with no upload." ;;
     *) body; die "omb-upload: the snapshot was refused (above); the payload was not sent." ;;
   esac
 }

@@ -1746,6 +1746,19 @@ git -C "$UREPO" add -N README.md 2>/dev/null
 rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
 [ "$rc" = 2 ] || { printf 'FAIL an upload laundered tree ids through a clean checkout (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
 rm -rf "$(dirname "$UREPO")"
+# A duplicate upload answer (already_running) names a review that may hold a
+# live record here: a rung-1 hunt of this very commit. The ticket branch must
+# not bury that record under a tombstone; its finished poll still promotes it.
+DREPO=$(mktemp -d)/repo
+mkrepo "$DREPO"
+( cd "$DREPO" && printf 'committed work\n' >> a.ts && git add a.ts && git commit -qm work )
+DHEAD=$(git -C "$DREPO" rev-parse HEAD)
+ppost submit_review running "$DREPO" "" rev_dupx "$DHEAD"
+usub "$DREPO" rev_dupx running '{"already_running":true}' >/dev/null
+ppost get_findings done "$DREPO" "" rev_dupx "$DHEAD"
+rc=$(mk "$V" "$DREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
+[ "$rc" = 0 ] || { printf 'FAIL a duplicate upload answer buried the live record of a hunted commit (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+rm -rf "$(dirname "$DREPO")"
 
 # A promotion that finds no pending record is TWO different facts, and the hook
 # cannot tell them apart: another session owns the submit (fine, it will record

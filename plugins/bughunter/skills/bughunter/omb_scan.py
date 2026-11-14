@@ -14,6 +14,7 @@ a message is masked: printing the secret to say we did not send it would leak it
 
 Exit 0 clean, 3 hits (masked list on stderr; for a snapshot the members that
 hit are written to <hits-out>, NUL-separated), anything else could not scan.
+A snapshot scan prints the number of files it read (every member but folders).
 """
 import json
 import os
@@ -147,20 +148,21 @@ def scan_stream(hits, where, f):
 
 
 def scan_snapshot(hits, path):
-    """Every regular member of the tar.gz, one at a time; returns the members that hit."""
+    """Every regular member of the tar.gz, one at a time; returns the members that
+    hit and the number of files. Key-file names need no check here: the packer's
+    excludes keep every one of them out of the archive."""
     import tarfile
-    hit_members = []
+    hit_members, count = [], 0
     with tarfile.open(path, "r|gz", encoding="utf-8", errors="surrogateescape") as tf:
         for m in tf:
+            count += not m.isdir()
             if not m.isreg():
                 continue
             before = len(hits)
-            if KEY_FILE.search(m.name) or ENV_FILE.search(m.name):
-                hits.append("%s is a file that holds keys" % m.name)
             scan_stream(hits, m.name, tf.extractfile(m))
             if len(hits) > before:
                 hit_members.append(m.name)
-    return hit_members
+    return hit_members, count
 
 
 def shown(hits):
@@ -174,12 +176,10 @@ def main(argv):
     hits = []
     if argv[:1] == ["--payload"] and len(argv) == 2:
         with open(argv[1], "rb") as f:
-            ti = json.loads(f.read().decode("utf-8"))
-        if not isinstance(ti, dict):
-            raise TypeError("payload")
-        scan_payload(hits, ti)
+            scan_payload(hits, json.loads(f.read().decode("utf-8")))
     elif argv[:1] == ["--snapshot"] and len(argv) == 3:
-        members = scan_snapshot(hits, argv[1])
+        members, count = scan_snapshot(hits, argv[1])
+        print(count)
         if members:
             with open(argv[2], "wb") as f:
                 f.write(b"".join(n.encode("utf-8", "surrogateescape") + b"\0" for n in members))

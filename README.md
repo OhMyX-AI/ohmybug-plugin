@@ -181,6 +181,14 @@ repository per week, and is not a merge gate.
   `/me/policy` sends the diff without the snapshot. Set
   `OHMYBUG_SECRET_SCAN=0` (in the `env` block of `settings.json`) to turn the
   scan off.
+- The upload script's boundary: POSIX sh (dash, bash 3.2+, busybox ash),
+  git >= 2.25, python3 >= 3.7, curl, gzip, on macOS or Linux. Anything else
+  is unsupported: where the script can tell (python3 missing or older than
+  3.7, no curl) it refuses with one sentence, and it never sends what it did
+  not scan, unless the scan is turned off. The secret-name list is best
+  effort. Stated, not handled: a hard kill leaves its private temporary folder behind, a full temporary folder sends
+  nothing, and a working copy near the 1 GiB ceiling may not fit the agent's
+  600 s shell call on a slow machine.
 
 ### What runs where
 

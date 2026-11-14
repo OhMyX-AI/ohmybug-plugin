@@ -417,8 +417,9 @@ related modules. Budget: at most 25 files and 300 KB total. Prefer callers
 over callees. Pass them to the upload script after the diff file. Never
 include files matching `.env*`, `*secret*`, `*credential*`, key material, or
 anything gitignored, and never a file outside the repository root or reached
-through a symlink: the script sends only files git lists, never one with a
-symlink in any part of its path, and names any it skips.
+through a symlink: the script sends only regular files git lists, never a
+symlink (a path through a linked folder is sent as the listed file it names),
+and names any it skips.
 
 The manifest is the upload script's: before anything is sent it prints one
 line saying what leaves the machine (the diff's size, the snapshot's file
@@ -593,6 +594,15 @@ inline `diff` outside diff mode is refused anyway.
    script goes on. The block writes the diff to a private directory of its
    own and removes it on any exit, and a failed `git diff` stops it before
    the script runs.
+   The script's boundary: POSIX sh (dash, bash 3.2+, busybox ash), git >= 2.25,
+   python3 >= 3.7, curl, gzip, on macOS or Linux. Anything else is unsupported:
+   where the script can tell (python3 missing or older than 3.7, no curl) it
+   refuses with one sentence, and it never sends what it did not scan, unless
+   the scan is turned off. The secret-name list is best effort. Stated, not
+   handled: a hard kill leaves its private temporary folder behind; a full temporary folder fails
+   a write and nothing is sent; a working copy near the server's 1 GiB
+   ceiling may not pack and scan inside the 600 s call on a slow machine (the
+   remedy is that of `snapshot_too_large`).
 
 ```bash
 (set -e; umask 077; d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
@@ -612,8 +622,8 @@ bash '<skill_dir>/omb-upload.sh' '<upload_url>' '<snapshot>' "$d/diff.patch")
      `OHMYBUG_SECRET_SCAN=0`, or commit + push + rung 1. A snapshot file that
      carries a credential is not a refusal: the script leaves that file out
      and names it in the manifest.
-   - `4` – no `python3` or no `curl`, so nothing was sent. Say so once and
-     stop.
+   - `4` – no `python3` 3.7 or newer, or no `curl`, so nothing was sent.
+     Say so once and stop.
    - `75` – busy or unreachable. The ticket stays valid: run the same command
      again (after the seconds it names, if it names any).
    - `1` – refused; the last line says why and what to do. A 413

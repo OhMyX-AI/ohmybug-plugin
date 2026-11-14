@@ -253,12 +253,9 @@ fm "--payload: a missing file refuses"         2 payload "$FM/none.json"
 err=$(python3 "$CORE" --payload "$FM/hit.json" 2>&1)
 printf '%s' "$err" | LC_ALL=C grep -qF "$AWS" && { echo "FAIL --payload: the full key reached the message"; fails=$((fails + 1)); } || echo "ok   --payload: the key is masked"
 tgz "$FM/hit.tgz" "src/ok.ts=x = 1" "conf/leak.yml=k: $AWS" "docs/a.md=fine"
-tgz "$FM/name.tgz" "keys/server.pem=x" "a.ts=x"
 tgz "$FM/clean.tgz" "src/ok.ts=x = 1"
 fm "--snapshot: a key in a member"             3 snapshot "$FM/hit.tgz"   "" "conf/leak.yml:1 AWS access key"
 check "--snapshot: the hit members are written, NUL-separated" "$(tr '\0' '|' < "$FM/hits")" "conf/leak.yml|"
-fm "--snapshot: a key-named member"            3 snapshot "$FM/name.tgz"  "" "keys/server.pem is a file that holds keys"
-check "--snapshot: ...named for the script to drop" "$(tr '\0' '|' < "$FM/hits")" "keys/server.pem|"
 fm "--snapshot: clean"                         0 snapshot "$FM/clean.tgz" ""
 check "--snapshot: clean writes no hit list" "$([ -s "$FM/hits" ] && echo yes || echo no)" no
 head -c 40 "$FM/hit.tgz" > "$FM/cut.tgz"

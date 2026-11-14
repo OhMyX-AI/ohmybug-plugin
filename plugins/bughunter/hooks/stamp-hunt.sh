@@ -430,9 +430,11 @@ case "$TOOL" in
     # a record would hold the Stop nudge for hours on an upload that may never
     # happen (a refused script call, a credential in the diff, the user's no).
     # The tombstone makes the finished poll a quiet no-op instead of a search
-    # for a record that was never meant to exist.
+    # for a record that was never meant to exist; but a duplicate answer names a
+    # review that may hold a live record here (a ref hunt of this commit), and
+    # that record must still be promoted, so it is never buried.
     if [ "${UPLOAD:-0}" = 2 ]; then
-      mkdir -p "$(dirname "$TOMB")" 2>/dev/null && : > "$TOMB" 2>/dev/null
+      [ -s "$PENDING" ] || { mkdir -p "$(dirname "$TOMB")" 2>/dev/null && : > "$TOMB" 2>/dev/null; }
       say "ohmybug: an uploaded hunt is not recorded for the merge gate. To record this change: commit, push, and submit with meta.repo + meta.ref = the pushed head sha + meta.base_branch and no payload."
       live_tail
       exit 0

@@ -42,6 +42,8 @@ cp "$f" "$STUB/$door.$n.sent"
 # A connection that never answered writes no body and no headers, and leaves
 # whatever files were there before, as curl does.
 if [ "$code" = 000 ]; then printf 000; exit 7; fi
+# A transfer cut after its status line: curl prints the status and fails.
+if [ "$code" = cut ]; then printf '%s' "$body" > "$o"; printf 'HTTP/1.1 200 X\r\n' > "$h"; printf 200; exit 18; fi
 printf '%s' "$body" > "$o"
 { printf 'HTTP/1.1 %s X\r\n' "$code"; [ -n "$ra" ] && printf 'Retry-After: %s\r\n' "$ra"; } > "$h"
 printf '%s' "$code"
@@ -51,7 +53,7 @@ printf '#!/bin/sh\necho "$1" >> "$STUB/sleeps"\n' > "$BIN/sleep"
 chmod +x "$BIN/curl" "$BIN/sleep"
 
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=main "$@"; }
-fresh() { STUB=$(mktemp -d "$ROOT/stub.XXXX"); export STUB; : > "$STUB/transcript"; }
+fresh() { STUB=$(mktemp -d "$ROOT/stub.XXXXXX"); export STUB; : > "$STUB/transcript"; }
 plan() { printf '%s\n' "$2" > "$STUB/$1.plan"; }
 # run <dir> <args...>: rc in $rc, stdout+stderr in $out (stdout also in the transcript)
 run() {
@@ -298,10 +300,13 @@ fresh; run "$R" "$URL" required "$EP"
 
 # ---- 5b. Bytes, names and failures the payload must survive --------------
 # A step of the pack that fails stops everything: an unreadable file fails git add.
+# Root reads a mode-000 file, so the row cannot fail git add there: skipped.
+if [ "$(id -u)" = 0 ]; then echo "skip a failed git add inside the pack (running as root)"; else
 printf 'x\n' > "$R/locked.txt"; chmod 000 "$R/locked.txt"
 fresh; run "$R" "$URL" required "$P"
 [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "a failed git add inside the pack sends nothing" || fail "pack step failure: rc $rc calls $(calls) $out"
 chmod 600 "$R/locked.txt"; rm -f "$R/locked.txt"
+fi
 # The no-git probe reads git in the C locale: a git that answers in another language still means "no repository".
 GB="$ROOT/gitbin"; mkdir -p "$GB"
 printf '#!/bin/sh\nif [ "${LC_ALL:-}" != C ] && [ "$1 $2" = "rev-parse --git-dir" ]; then echo "fatal: kein Git-Repository" >&2; exit 128; fi\nexec %s "$@"\n' "$(command -v git)" > "$GB/git"; chmod +x "$GB/git"
@@ -351,6 +356,118 @@ fresh; run "$R" "$URL" required "$P"
 printf '%s' "$out" | grep -q 'conf/leak.yml:1 AWS access key (AKIA...GH)' && ok "the snapshot's masked hits are shown" || fail "snapshot hits hidden: $out"
 rm -rf "$R/conf"
 
+# ---- 5c. The audit's rows ----------------------------------------------------
+# Inside a hunk, "--- x" is a removed "-- x" line and "+++ x" an added "++ x":
+# never a file name. A mode-only change has no ---/+++ lines: its name comes
+# from the diff --git header alone.
+printf 'diff --git a/db.sql b/db.sql\n--- a/db.sql\n+++ b/db.sql\n@@ -1,2 +1,2 @@\n--- secret table\n+++ credentials below\n x\ndiff --git a/.env b/.env\nold mode 100644\nnew mode 100755\n' > "$ROOT/sql.patch"
+fresh; run "$R" "$URL" required "$ROOT/sql.patch"
+python3 - "$STUB/payload.1.sent" <<'PY' && printf '%s' "$out" | grep -q 'secret-named: .env\.' && ok "hunk lines are not file names; a mode-only secret-named file is still left out" || fail "hunk names: $out"
+import json, sys
+d = json.load(open(sys.argv[1]))["diff"]
+sys.exit(0 if "--- secret table" in d and "a/.env" not in d else 1)
+PY
+# A quoted name with control bytes: replaced in the manifest, which stays one true line.
+printf 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n+ok\ndiff --git "a/.env\\nX\\033Y" "b/.env\\nX\\033Y"\n--- "a/.env\\nX\\033Y"\n+++ "b/.env\\nX\\033Y"\n@@ -1 +1 @@\n+z\n' > "$ROOT/ctl.patch"
+fresh; run "$R" "$URL" required "$ROOT/ctl.patch"
+first=$(head -n 1 "$STUB/transcript")
+case $first in *'secret-named: .env?X?Y.'*'Credential scan'*) ok "control bytes in a name are replaced; the manifest is one line" ;; *) fail "control bytes: $first" ;; esac
+printf '%s' "$first" | grep -q 'diff 1 KB (1 file)' && ok "...and its numbers are not shifted" || fail "shifted manifest: $first"
+# The path list: a listed file dropped for a credential is named as that, never as
+# "not in the working copy"; a list whose every path is dropped refuses truly.
+mkdir -p "$R/conf"; printf 'k = "%s"\n' "$AWS" > "$R/conf/leak.yml"
+printf 'conf/leak.yml\na.txt\n' > "$ROOT/pl2"; printf 'conf/leak.yml\n' > "$ROOT/pl1"
+fresh; out=$(cd "$R" && OMB_SNAPSHOT_PATHS="$ROOT/pl2" PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [ "$(names | tr '\n' ' ')" = "a.txt " ] && printf '%s' "$out" | grep -q 'credential match: conf/leak.yml' && ! printf '%s' "$out" | grep -q 'not in the working copy'; then
+  ok "path list: a dropped file is named as dropped, the hunt goes on"; else fail "path list drop: rc $rc [$(names | tr '\n' ' ')] $out"; fi
+fresh; out=$(cd "$R" && OMB_SNAPSHOT_PATHS="$ROOT/pl1" PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'every path in OMB_SNAPSHOT_PATHS was left out for a credential match' && ok "path list: all dropped refuses with the true sentence" || fail "path list all dropped: rc $rc $out"
+rm -rf "$R/conf"
+printf 'no/such\n' > "$ROOT/pl0"
+fresh; out=$(cd "$R" && OMB_SNAPSHOT_PATHS="$ROOT/pl0" PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'none of the paths' && ok "path list: no listed path in the working copy refuses" || fail "path list none: rc $rc $out"
+mkdir -p "$R/sub"; printf 'a.txt\n' > "$R/sub/rel.list"
+fresh; out=$(cd "$R/sub" && OMB_SNAPSHOT_PATHS=rel.list PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+[ "$rc" = 0 ] && [ "$(names | tr '\n' ' ')" = "a.txt " ] && ok "path list: a relative list read from a subfolder" || fail "relative path list: rc $rc $out"
+rm -rf "$R/sub"
+# python3 older than 3.7 refuses in one sentence.
+OP="$ROOT/oldpy"; mkdir -p "$OP"
+printf '#!/bin/sh\ncase "$*" in *"version_info < (3, 7)"*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v python3)" > "$OP/python3"; chmod +x "$OP/python3"
+fresh; out=$(cd "$R" && PATH="$OP:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+[ "$rc" = 4 ] && [ "$(calls)" = 0 ] && [ "$out" = "omb-upload: python3 3.7 or newer is needed; nothing was sent" ] && ok "python3 older than 3.7: one sentence, exit 4" || fail "old python: rc $rc $out"
+# A secret-named context file is never sent, even when git lists it.
+printf 'registry=x\n' > "$R/.npmrc"; git -C "$R" add -f .npmrc; printf 'fine\n' > "$R/c.txt"
+fresh; run "$R" "$URL" off "$P" .npmrc c.txt
+python3 - "$STUB/payload.1.sent" <<'PY' && printf '%s' "$out" | grep -q 'Not sent.*\.npmrc' && ok "a secret-named context file is left out and named" || fail "secret context: $out"
+import json, sys
+sys.exit(0 if [f["path"] for f in json.load(open(sys.argv[1]))["files"]] == ["c.txt"] else 1)
+PY
+grep -q "^0o700 0o600 " "$STUB/modes" && ok "the payload file is readable by its owner only" || fail "payload mode: $(cat "$STUB/modes")"
+git -C "$R" rm -q --cached .npmrc; rm -f "$R/.npmrc" "$R/c.txt"
+# The payload scan that cannot run refuses on its own (diff mode: no snapshot scan to fail instead).
+fresh; out=$(cd "$R" && OHMYBUG_TEST_SCAN_RAISE=1 PATH="$BIN:$PATH" sh "$UP" "$URL" off "$P" 2>&1); rc=$?
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'could not scan the payload' && ok "an unscannable payload is not sent (diff mode)" || fail "payload scan failure: rc $rc $out"
+# A missing diff file: a sentence, not a traceback.
+fresh; run "$R" "$URL" required "$ROOT/no-such.patch"
+[ "$rc" = 1 ] && printf '%s' "$out" | grep -q 'cannot read the diff file' && ok "a missing diff file is refused in one sentence" || fail "missing diff: $out"
+# The pattern count is not a glob over the current folder.
+printf 'k\n' > "$R/a.key"; printf 'k\n' > "$R/b.key"
+fresh; run "$R" "$URL" required "$P"
+printf '%s' "$out" | grep -q 'and 24 more patterns' && ok "the pattern count ignores files in the folder" || fail "pattern count: $out"
+rm -f "$R/a.key" "$R/b.key"
+# Context files given with a snapshot are named as not sent.
+fresh; run "$R" "$URL" required "$P" a.txt
+printf '%s' "$out" | grep -q 'context files are not sent with a repository snapshot' && ok "context files with a snapshot: said" || fail "context note: $out"
+# A signal mid-POST removes the private folder. Under dash where there is one:
+# bash runs the EXIT trap on TERM by itself, dash only through the script's trap.
+SIGSH=$(command -v dash || echo sh)
+mkdir -p "$ROOT/slowbin"
+printf '#!/bin/sh\nfor a; do case $a in @*) dirname "${a#@}" > "$STUB/dir" ;; esac; done\n/bin/sleep 3\nprintf 000; exit 7\n' > "$ROOT/slowbin/curl"; chmod +x "$ROOT/slowbin/curl"
+fresh; (cd "$R" && PATH="$ROOT/slowbin:$BIN:$PATH" exec "$SIGSH" "$UP" "$URL" off "$P" >/dev/null 2>&1) & pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s "$STUB/dir" ] && break; /bin/sleep 0.2; done
+kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+dir=$(cat "$STUB/dir" 2>/dev/null)
+[ -n "$dir" ] && [ ! -e "$dir" ] && ok "TERM mid-POST removes the private folder" || fail "TERM: folder [$dir] left"
+# A file name that is not UTF-8 and hits is dropped, where the file system allows such names (not macOS).
+if ( cd "$R" && printf 'k = "%s"\n' "$AWS" > "$(printf 'caf\351.txt')" ) 2>/dev/null && [ -e "$R/$(printf 'caf\351.txt')" ]; then
+  fresh; run "$R" "$URL" required "$P"
+  [ "$rc" = 0 ] && ! names | grep -q caf && ok "a non-UTF-8 name that hits is dropped" || fail "non-UTF-8 name: rc $rc $out"
+  rm -f "$R/$(printf 'caf\351.txt')"
+else echo "skip a non-UTF-8 file name (this file system refuses it)"; fi
+# The real curl: a server that takes the snapshot, then needs 40 s to answer, is
+# not cut as a stall and sent the snapshot again.
+# It takes 40 s; OMB_TEST_SKIP_SLOW=1 skips it where that is too long (mutant runs).
+if [ -n "${OMB_TEST_SKIP_SLOW:-}" ]; then echo "skip the slow-answer row (OMB_TEST_SKIP_SLOW)"; else
+REALCURL=$(command -v curl)
+cat > "$ROOT/srv.py" <<'PY'
+import http.server, sys, time
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers["content-length"]))
+        open(sys.argv[2], "a").write(self.path + "\n")
+        if self.path.endswith("/repo"):
+            time.sleep(40)
+        self.send_response(200); self.end_headers(); self.wfile.write(b'{"ok":true}')
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1], "w").write(str(s.server_port))
+s.serve_forever()
+PY
+python3 "$ROOT/srv.py" "$ROOT/port" "$ROOT/srvlog" >/dev/null 2>&1 & srv=$!
+trap 'kill "$srv" 2>/dev/null; chmod -R u+rwx "$ROOT" 2>/dev/null; rm -rf "$ROOT"' EXIT
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$ROOT/port" ] && break; /bin/sleep 0.3; done
+mkdir -p "$ROOT/realbin"
+cat > "$ROOT/realbin/curl" <<SH
+#!/bin/sh
+for a; do shift; case \$a in https://mcp.ohmybug.ai/*) a="http://127.0.0.1:$(cat "$ROOT/port")/\${a#https://mcp.ohmybug.ai/}" ;; esac; set -- "\$@" "\$a"; done
+exec "$REALCURL" "\$@"
+SH
+chmod +x "$ROOT/realbin/curl"
+out=$(cd "$R" && PATH="$ROOT/realbin:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+kill "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
+[ "$rc" = 0 ] && [ "$(grep -c '/repo$' "$ROOT/srvlog")" = 1 ] && ok "a slow answer after the snapshot is waited for, not resent" || fail "slow answer: rc $rc, repo posts $(grep -c '/repo$' "$ROOT/srvlog" 2>/dev/null): $out"
+fi
+
 # ---- 6. Status table ---------------------------------------------------------
 st() { # name, want rc, repo plan, payload plan, mode, [want calls "repo payload ..."], [text]
   fresh; plan repo "$3"; plan payload "$4"; run "$R" "$URL" "$5" "$P"
@@ -380,15 +497,17 @@ st "no answer five times: 75, said cleanly" 75 "$(printf '000|x|\n%.0s' 1 2 3 4 
 st "a failed attempt does not reread the last one's Retry-After" 75 "$(printf '429|{}|7\n000|x|\n000|x|\n000|x|\n000|x|\n')" '' required "repo repo repo repo repo "
 [ "$(tr '\n' ' ' < "$STUB/sleeps")" = "7 30 30 30 " ] && ok "...each attempt reads its own answer" || fail "stale answer: slept $(tr '\n' ' ' < "$STUB/sleeps")"
 st "the last Retry-After is passed on" 75 "$(printf '429|{}|7\n%.0s' 1 2 3 4 5)" '' required "repo repo repo repo repo " "in about 7 seconds"
-grep -q -- '--connect-timeout 10 --speed-limit 1024 --speed-time 30' "$STUB/args" && ok "curl has a connect timeout and a stall limit" || fail "curl limits: $(head -n 1 "$STUB/args")"
-# The retries stop at the time budget, inside the skill's 600 s Bash call: a
-# clock that has run 470 s allows no 30 s wait.
+grep -q -- '--connect-timeout 10 --max-time ' "$STUB/args" && ! grep -q -- '--speed-' "$STUB/args" && ok "curl has a connect timeout and a time limit, no stall limit" || fail "curl limits: $(head -n 1 "$STUB/args")"
+st "a transfer cut after its status line is retried" 0 'cut|{"ok":true}|1' '' required "repo repo payload "
+# The retries stop at the time budget, inside the skill's 600 s Bash call. A
+# clock that moves STEP seconds per read: at 300 one attempt runs and its 30 s
+# wait would cross the budget; at 470 not even one attempt has 30 s left.
 DB="$ROOT/datebin"; mkdir -p "$DB"
-printf '#!/bin/sh
-n=$(cat "$STUB/clock" 2>/dev/null || echo 1000); echo $((n + 470)) > "$STUB/clock"; echo "$n"
-' > "$DB/date"; chmod +x "$DB/date"
-fresh; plan repo '429|{}|30'; out=$(cd "$R" && PATH="$DB:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
-[ "$rc" = 75 ] && [ ! -e "$STUB/sleeps" ] && ok "no wait past the time budget" || fail "budget: rc $rc slept $(cat "$STUB/sleeps" 2>/dev/null) $out"
+printf '#!/bin/sh\nn=$(cat "$STUB/clock" 2>/dev/null || echo 1000); echo $((n + STEP)) > "$STUB/clock"; echo "$n"\n' > "$DB/date"; chmod +x "$DB/date"
+fresh; plan repo '429|{}|30'; out=$(cd "$R" && STEP=300 PATH="$DB:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+[ "$rc" = 75 ] && [ "$(calls)" = 1 ] && [ ! -e "$STUB/sleeps" ] && ok "no wait past the time budget" || fail "budget wait: rc $rc calls $(calls) slept $(cat "$STUB/sleeps" 2>/dev/null) $out"
+fresh; out=$(cd "$R" && STEP=470 PATH="$DB:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+[ "$rc" = 75 ] && [ "$(calls)" = 0 ] && ok "no attempt with under 30 s of budget left" || fail "budget attempt: rc $rc calls $(calls) $out"
 st "payload 409 snapshot_required in diff mode: stop, rerun with required" 1 '' '409|{"code":"snapshot_required"}|' off "payload " "required in place of off"
 st "payload 409 after a snapshot was sent: stop, no loop" 1 '' '409|{"code":"snapshot_required"}|' required "repo payload "
 st "payload 400: stop" 1 '' '400|{"code":"diff_not_a_diff"}|' required "repo payload " "diff_not_a_diff"
