@@ -181,7 +181,10 @@ def _swap(path, flags, mode=0o777, *, dir_fd=None):
 os.open = _swap
 os.supports_dir_fd.add(_swap)
 PY
-SWAP_TOP="$FX/swap" SWAP_TO="$FX/away" PYTHONPATH="$FX/swapper" fillrun "$FX/swap" '["sub/d.ts"]'
+# The hook runs python3 -I, which ignores PYTHONPATH: this row's python3 drops
+# the -I, so the swapper loads. The row is about the walk, not the flag.
+mkdir -p "$FX/swapper/bin" && printf '#!/bin/sh\n[ "$1" = -I ] && shift\nexec %s "$@"\n' "$(command -v python3)" > "$FX/swapper/bin/python3" && chmod +x "$FX/swapper/bin/python3"
+SWAP_TOP="$FX/swap" SWAP_TO="$FX/away" PYTHONPATH="$FX/swapper" PATH="$FX/swapper/bin:$PATH" fillrun "$FX/swap" '["sub/d.ts"]'
 check "paths: a directory swapped for a link mid-call sends the checked file" \
   "$rc:$(field "[(f['path'], f['content']) for f in o['updatedInput']['files']]")" "0:[('sub/d.ts', 'here\\n')]"
 check "paths: ...and the swap really happened under the walk" "$([ -L "$FX/swap/sub" ] && [ -d "$FX/swap/sub.real" ] && echo yes)" yes
@@ -215,5 +218,19 @@ check "paths: under Codex nothing is filled (the server refuses the paths)" "$rc
 fillrun "$FX" '["outside.ts"]'
 check "paths: outside any repository nothing is sent" "$rc:$out" "2:"
 case "$err" in *"not inside one"*) echo "ok   paths: ...and the agent is told to send contents";; *) echo "FAIL paths: no-repo message: $err"; fails=$((fails + 1));; esac
+
+FM="$FX/filemode"; mkdir -p "$FM"
+# One detector: the hook carries no second copy of the shapes.
+grep -q 'SHAPES = \[' "$G/secret-scan.sh" && { echo "FAIL the hook carries its own copy of the shapes"; fails=$((fails + 1)); } || echo "ok   one detector, in the skill folder"
+# Not installed beside the skill (a skill-only install moved the hook), the hook refuses.
+mkdir -p "$FM/lone"; cp "$G/secret-scan.sh" "$FM/lone/"
+rc=$(printf '%s' "{\"tool_name\":\"mcp__plugin_bughunter_ohmybug__submit_review\",\"tool_input\":{\"diff\":\"+print(1)\"}}" | OHMYBUG_TEST_STAMP="$STUB/stamp.sh" bash "$FM/lone/secret-scan.sh" >/dev/null 2>&1; echo $?)
+check "a hook that cannot find the detector refuses" "$rc" 2
+# A json.py in the session's folder (the user's repository) is never imported:
+# it would run inside the hook, and could pass a payload unscanned.
+mkdir -p "$FM/repo"; printf 'open("%s", "w").close()\nloads = lambda *a, **k: {}\n' "$FM/imported" > "$FM/repo/json.py"
+rc=$(printf '%s' "{\"tool_name\":\"mcp__plugin_bughunter_ohmybug__submit_review\",\"tool_input\":{\"diff\":\"+k = $AWS\"}}" | (cd "$FM/repo" && bash "$G/secret-scan.sh" >/dev/null 2>&1); echo $?)
+check "a json.py in the session folder is not imported, and the key is still refused" "$rc:$([ -e "$FM/imported" ] && echo imported || echo no)" "2:no"
+[ -e "$G/../skills/bughunter/__pycache__" ] && { echo "FAIL the scan wrote bytecode into the skill folder"; fails=$((fails + 1)); } || echo "ok   no bytecode in the skill folder"
 
 [ "$fails" = 0 ] && echo "secret-scan: all rows pass" || { echo "secret-scan: $fails failing"; exit 1; }

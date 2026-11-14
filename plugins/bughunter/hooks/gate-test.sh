@@ -33,7 +33,12 @@ SCRATCH=".ohmybug-gate-test-scratch.$$"
 # `git add -N` is what makes the file visible to `git diff`, and it leaves an
 # index entry behind — so the cleanup has to undo both, or this test dirties the
 # repository it just finished testing.
-cleanup_scratch() { rm -f "$SCRATCH"; git reset -q -- "$SCRATCH" 2>/dev/null || true; }
+# The working diff reaches the rows' python in a file, read as the shell's $(...)
+# would hand it over (no trailing newlines). Never in an environment string:
+# Linux caps one at 128 KiB, and this repository's own branch diff can be
+# larger, which failed every stamp row on CI while macOS stayed green.
+export OMB_DIFF_FILE=$(mktemp)
+cleanup_scratch() { rm -f "$SCRATCH" "$OMB_DIFF_FILE"; git reset -q -- "$SCRATCH" 2>/dev/null || true; }
 trap 'cleanup_scratch' EXIT
 # What the tree looked like before we touched anything. A test that runs against
 # the real repository has to leave it exactly as it found it: this file once put
@@ -270,7 +275,7 @@ post() { # tool, done?, review id, envelope -> runs stamp-hunt.sh
   # The ENVELOPE is a parameter because it is not ours to choose: the client
   # decides how a tool response reaches a hook, and reading only one spelling of
   # it is what let a clean hunt go unrecorded.
-  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
   python3 -c "import json,os,sys;
 body={'review_id':sys.argv[4],'status':'done' if sys.argv[2]=='1' else 'running'}
 parts=[{'type':'text','text':json.dumps(body)}]
@@ -281,7 +286,7 @@ resp={'content':parts} if sys.argv[5]=='content' else (
       'ohmybug: upstream said no' if sys.argv[5]=='garbage' else json.dumps(body)))))
 print(json.dumps({
     'tool_name':'mcp__plugin_bughunter_ohmybug__'+sys.argv[1],
-    'tool_input':{'review_id':sys.argv[4],'diff':os.environ.get('OMB_DIFF','')},
+    'tool_input':{'review_id':sys.argv[4],'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
     'tool_response':resp,
     'cwd':sys.argv[3]}))" "$1" "$2" "$PWD" "${3:-rev_x}" "${4:-content}" \
   | bash "$G/stamp-hunt.sh"
@@ -388,27 +393,27 @@ else
   # them. The server's field decides; an older server that lacks it is judged by
   # the pair it was derived from; an ERROR decides nothing at all.
   postx() { # tool, review id, extra body fields (JSON object), [envelope] -> rc
-    OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+    git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
     python3 -c "import json,os,sys;
 body={'review_id':sys.argv[2]}; body.update(json.loads(sys.argv[3]))
 parts=[{'type':'text','text':json.dumps(body)}]
 resp={'content':parts,'isError':True} if sys.argv[4]=='error' else (body if sys.argv[4]=='raw' else {'content':parts})
 print(json.dumps({
     'tool_name':'mcp__plugin_bughunter_ohmybug__'+sys.argv[1],
-    'tool_input':{'review_id':sys.argv[2],'diff':os.environ.get('OMB_DIFF','')},
+    'tool_input':{'review_id':sys.argv[2],'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
     'tool_response':resp,'hook_event_name':'PostToolUse',
     'cwd':os.getcwd()}))" "$1" "$2" "$3" "${4:-content}" \
     | bash "$G/stamp-hunt.sh" >/dev/null 2>&1; echo $?
   }
   postxo() { # same payload as postx -> the hook's stdout
-    OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+    git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
     python3 -c "import json,os,sys;
 body={'review_id':sys.argv[2]}; body.update(json.loads(sys.argv[3]))
 parts=[{'type':'text','text':json.dumps(body)}]
 resp={'content':parts,'isError':True} if sys.argv[4]=='error' else (body if sys.argv[4]=='raw' else {'content':parts})
 print(json.dumps({
     'tool_name':sys.argv[5]+sys.argv[1],
-    'tool_input':{'review_id':sys.argv[2],'diff':os.environ.get('OMB_DIFF','')} if sys.argv[1]!='submit_review' else {'diff':os.environ.get('OMB_DIFF',''), **(json.loads(sys.argv[6]) if sys.argv[6] else {})},
+    'tool_input':{'review_id':sys.argv[2],'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')} if sys.argv[1]!='submit_review' else {'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n'), **(json.loads(sys.argv[6]) if sys.argv[6] else {})},
     'tool_response':resp,'hook_event_name':'PostToolUse',
     'cwd':os.getcwd()}))" "$1" "$2" "$3" "${4:-content}" "${5:-mcp__plugin_bughunter_ohmybug__}" "${6:-}" \
     | bash "$G/stamp-hunt.sh" 2>/dev/null
@@ -656,10 +661,10 @@ fi
 # what tells the script a PreToolUse fired. Wiring both events to the same
 # command line is one thing that cannot be half-installed.
 pre() { # tool -> what the PreToolUse hook sees, before anyone allows or refuses
-  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
   python3 -c "import json,os,sys;print(json.dumps({
     'tool_name':'mcp__plugin_bughunter_ohmybug__'+sys.argv[1],
-    'tool_input':{'diff':os.environ.get('OMB_DIFF','')},
+    'tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
     'cwd':sys.argv[2]}))" "$1" "$PWD" | bash "$G/stamp-hunt.sh"
 }
 reset_state
@@ -780,10 +785,10 @@ if [ -n "$ID" ]; then
   # The positional field protocol carries three free-text fields before the two
   # flags, and review_id is model-authored: one newline in it made a PostToolUse
   # read as a PreToolUse, so the finished review could never promote.
-  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
   python3 -c "import json,os,sys;print(json.dumps({
     'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
-    'tool_input':{'review_id':'rev_nl\n1','diff':os.environ.get('OMB_DIFF','')},
+    'tool_input':{'review_id':'rev_nl\n1','diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
     'tool_response':{'review_id':'rev_nl','status':'running'},
     'cwd':sys.argv[1]}))" "$PWD" | bash "$G/stamp-hunt.sh"
   [ -n "$(ls -A "$(ohmybug_hunt_dir).pending" 2>/dev/null)" ] || {
@@ -876,16 +881,16 @@ fi
 # (The pending record itself needs the id the SERVER minted, and an empty
 # answer carries none: nothing to file, and the hook says so.)
 reset_state
-OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
 python3 -c "import json,os,sys;print(json.dumps({
   'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
-  'tool_input':{'diff':os.environ.get('OMB_DIFF','')},
+  'tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
   'cwd':sys.argv[1]}))" "$PWD" | bash "$G/stamp-hunt.sh" >/dev/null 2>&1
 ohmybug_attempted "$ID" || { printf 'FAIL the PreToolUse offer left no attempt record\n'; fails=$((fails + 1)); }
-OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
 python3 -c "import json,os,sys;print(json.dumps({
   'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
-  'tool_input':{'diff':os.environ.get('OMB_DIFF','')},
+  'tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
   'tool_response':{},
   'cwd':sys.argv[1]}))" "$PWD" | bash "$G/stamp-hunt.sh" 2>/dev/null >"$HOME/hook.out"
 ohmybug_attempted "$ID" && { printf 'FAIL an empty tool_response was read as PreToolUse: the attempt record survived the call\n'; fails=$((fails + 1)); }
@@ -1671,51 +1676,96 @@ rc=$(mk "$V" "$SREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
 [ "$rc" = 2 ] || { printf 'FAIL code after a ref-keyed hunt did not re-arm the gate (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
 rm -rf "$(dirname "$SREPO")"
 
-# An out-of-band upload (upload:true, empty diff) never passes through this
-# hook, so it can prove nothing about the tree: no tree ids, and with
-# uncommitted work the ref: line is never honoured either. The gate blocking
-# is the documented boundary; the defect was crossing it SILENTLY, at merge
-# time, after the review had been paid for — the submit must say so.
+# An upload TICKET (upload:true answered awaiting_upload) is hunted from bytes
+# this hook never sees, so the gate never credits it: no tree ids and no ref:
+# line, from a dirty tree or a clean one. Crediting the ref let one junk upload
+# plus meta.ref=HEAD bless a clean checkout. The submit must say so at submit
+# time, not leave it to surface at merge time after the review was paid for.
+usub() { # repo, review id, answer status, [extra answer JSON]
+  python3 -c "import json,sys;print(json.dumps({
+  'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
+  'tool_input':{'diff':'','upload':True,'meta':{'repo':'x/y','ref':sys.argv[1]}},
+  'tool_response':{'content':[{'type':'text','text':json.dumps(dict(
+     {'review_id':sys.argv[3],'status':sys.argv[4]}, **json.loads(sys.argv[5] or '{}')))}]},
+  'cwd':sys.argv[2]}))" "$(git -C "$1" rev-parse HEAD)" "$1" "$2" "$3" "${4-}" | bash "$G/stamp-hunt.sh" 2>/dev/null
+}
+UNREC="an uploaded hunt is not recorded for the merge gate. To record this change: commit, push, and submit with meta.repo + meta.ref = the pushed head sha + meta.base_branch and no payload."
 UREPO=$(mktemp -d)/repo
 mkrepo "$UREPO"
 printf 'big unpushed work\n' >> "$UREPO/a.ts"
-python3 -c "import json,sys;print(json.dumps({
-  'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
-  'tool_input':{'review_id':'rev_up','diff':'','upload':True,
-    'meta':{'repo':'x/y','ref':sys.argv[1]}},
-  'tool_response':{'content':[{'type':'text','text':json.dumps(
-     {'review_id':'rev_up','status':'running'})}]},
-  'cwd':sys.argv[2]}))" "$(git -C "$UREPO" rev-parse HEAD)" "$UREPO" | bash "$G/stamp-hunt.sh" 2>/dev/null >"$HOME/hook.out"; rc=$?; out=$(ctx <"$HOME/hook.out")
+UHUNTS=$(cd "$UREPO" && . "$G/diff-id.sh" && ohmybug_hunt_dir)
+# An upload the server fetched itself (status running, no upload_url) from a
+# DIRTY tree: its ref: line is written but not honoured on a dirty tree. It is
+# told so at submit time, and not in the ticket sentence, which is about tickets only.
+usub "$UREPO" rev_fd running >"$HOME/hook.out"; out=$(ctx <"$HOME/hook.out")
+case "$out" in *"not recorded for the merge gate"*) printf 'FAIL a fetched upload was told it is not recorded: %s\n' "$out"; fails=$((fails + 1)) ;; esac
+case "$out" in *"hunted the pushed commit, not the uncommitted work in this tree, so the merge gate will still block it"*) ;; *) printf 'FAIL a fetched upload from a dirty tree was not told the gate will block: %s\n' "$out"; fails=$((fails + 1)) ;; esac
+grep -qx "ref:$(git -C "$UREPO" rev-parse HEAD)" "$UHUNTS.pending/rev_fd" 2>/dev/null \
+  || { printf 'FAIL a fetched upload did not record its ref\n'; fails=$((fails + 1)); }
+ppost get_findings done "$UREPO" "" rev_fd >/dev/null 2>&1
+rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
+[ "$rc" = 2 ] || { printf 'FAIL a fetched upload credited the dirty tree (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+usub "$UREPO" rev_up awaiting_upload >"$HOME/hook.out"; rc=$?; out=$(ctx <"$HOME/hook.out")
+# No record at all for a ticket: one would hold the Stop nudge for hours on an
+# upload that may never happen.
+[ -e "$UHUNTS.pending/rev_up" ] && { printf 'FAIL an upload ticket left a pending record\n'; fails=$((fails + 1)); }
 case "$out" in
-  *"cannot verify them against this tree"*) ;;
-  *) printf 'FAIL an out-of-band upload from a dirty tree was filed silently: %s\n' "$out"; fails=$((fails + 1)) ;;
+  *"$UNREC"*) ;;
+  *) printf 'FAIL an upload ticket from a dirty tree was filed silently: %s\n' "$out"; fails=$((fails + 1)) ;;
 esac
-[ "$rc" = 0 ] || { printf 'FAIL the out-of-band warning blocked or replaced the result (rc=%s)\n' "$rc"
+[ "$rc" = 0 ] || { printf 'FAIL the upload note blocked or replaced the result (rc=%s)\n' "$rc"
                    fails=$((fails + 1)); }
-ppost get_findings done "$UREPO" "" rev_up
+out=$(ppost get_findings done "$UREPO" "" rev_up 2>&1)
+[ -z "$out" ] || { printf 'FAIL the finished poll of an upload ticket spoke: %s\n' "$out"; fails=$((fails + 1)); }
+ls "$UHUNTS" 2>/dev/null | grep -q '^upload:' && { printf 'FAIL an upload line was promoted into the hunts dir\n'; fails=$((fails + 1)); }
 rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
 [ "$rc" = 2 ] || { printf 'FAIL out-of-band bytes credited the dirty tree (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
-# ...and a CLEAN checkout does not launder the upload into tree ids either:
-# the sig: allowance belongs only to hunts whose bytes the server provably
-# saw (its own fetch of repo@ref), so prose after an uploaded hunt re-arms
-# the gate where the rung-1 row above stays allowed.
+# ...and a CLEAN checkout at meta.ref does not launder an upload ticket either.
 git -C "$UREPO" add a.ts 2>/dev/null
 git -C "$UREPO" -c user.email=t@t -c user.name=t commit -qm work 2>/dev/null
-python3 -c "import json,sys;print(json.dumps({
-  'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
-  'tool_input':{'review_id':'rev_up2','diff':'','upload':True,
-    'meta':{'repo':'x/y','ref':sys.argv[1]}},
-  'tool_response':{'content':[{'type':'text','text':json.dumps(
-     {'review_id':'rev_up2','status':'running'})}]},
-  'cwd':sys.argv[2]}))" "$(git -C "$UREPO" rev-parse HEAD)" "$UREPO" | bash "$G/stamp-hunt.sh" >/dev/null 2>&1
+usub "$UREPO" rev_up2 awaiting_upload >"$HOME/hook.out"; out=$(ctx <"$HOME/hook.out")
+case "$out" in *"$UNREC"*) ;; *) printf 'FAIL a clean-tree upload ticket was filed silently: %s\n' "$out"; fails=$((fails + 1)) ;; esac
 ppost get_findings done "$UREPO" "" rev_up2
 rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
-[ "$rc" = 0 ] || { printf 'FAIL a clean-tree uploaded hunt was not honoured through its ref (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+[ "$rc" = 2 ] || { printf 'FAIL a clean-tree upload ticket was credited through its ref (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+# An answer that does not read as "no ticket" errs shut: a duplicate (it may be
+# a running upload of the same ref) and an answer with no status.
+usub "$UREPO" rev_dup running '{"already_running":true}' >/dev/null
+ppost get_findings done "$UREPO" "" rev_dup
+usub "$UREPO" rev_nost '' >/dev/null
+ppost get_findings done "$UREPO" "" rev_nost
+usub "$UREPO" rev_url running '{"upload_url":"https://mcp.ohmybug.ai/u/t"}' >/dev/null
+ppost get_findings done "$UREPO" "" rev_url
+usub "$UREPO" rev_q queued >/dev/null
+ppost get_findings done "$UREPO" "" rev_q
+rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
+[ "$rc" = 2 ] || { printf 'FAIL a duplicate, status-less, upload_url-carrying or not-running upload answer was credited through its ref (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+# An upload submit the server fetched itself answers `running`, not a ticket: it
+# hunted repo@ref, so the ref keeps its credit on a clean checkout...
+usub "$UREPO" rev_up3 running >"$HOME/hook.out"; out=$(ctx <"$HOME/hook.out")
+case "$out" in *"merge gate will still block"*) printf 'FAIL a fetched upload from a clean checkout at its ref was told the gate will block: %s\n' "$out"; fails=$((fails + 1)) ;; esac
+ppost get_findings done "$UREPO" "" rev_up3
+rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
+[ "$rc" = 0 ] || { printf 'FAIL an upload the server fetched itself lost its ref credit (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+# ...but no tree ids: prose after it re-arms the gate where a rung-1 hunt stays allowed.
 printf 'a README edit after the uploaded hunt\n' > "$UREPO/README.md"
 git -C "$UREPO" add -N README.md 2>/dev/null
 rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
 [ "$rc" = 2 ] || { printf 'FAIL an upload laundered tree ids through a clean checkout (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
 rm -rf "$(dirname "$UREPO")"
+# A duplicate upload answer (already_running) names a review that may hold a
+# live record here: a rung-1 hunt of this very commit. The ticket branch must
+# not bury that record under a tombstone; its finished poll still promotes it.
+DREPO=$(mktemp -d)/repo
+mkrepo "$DREPO"
+( cd "$DREPO" && printf 'committed work\n' >> a.ts && git add a.ts && git commit -qm work )
+DHEAD=$(git -C "$DREPO" rev-parse HEAD)
+ppost submit_review running "$DREPO" "" rev_dupx "$DHEAD"
+usub "$DREPO" rev_dupx running '{"already_running":true}' >/dev/null
+ppost get_findings done "$DREPO" "" rev_dupx "$DHEAD"
+rc=$(mk "$V" "$DREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
+[ "$rc" = 0 ] || { printf 'FAIL a duplicate upload answer buried the live record of a hunted commit (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
+rm -rf "$(dirname "$DREPO")"
 
 # A promotion that finds no pending record is TWO different facts, and the hook
 # cannot tell them apart: another session owns the submit (fine, it will record
@@ -1844,12 +1894,13 @@ if git worktree add -q --detach "$WT" HEAD 2>/dev/null; then
   # submit_review carrying the worktree's diff, reported with the MAIN checkout
   # as cwd — the exact shape that recorded nothing.
   wpost() { # tool, done?, cwd, diff-text
-    python3 -c "import json,sys;print(json.dumps({
+    printf '%s' "$4" > "$OMB_DIFF_FILE"  # a builtin: no argument limit (see OMB_DIFF_FILE above)
+    python3 -c "import json,os,sys;print(json.dumps({
       'tool_name':'mcp__plugin_bughunter_ohmybug__'+sys.argv[1],
-      'tool_input':{'diff':sys.argv[4]},
+      'tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read()},
       'tool_response':{'content':[{'type':'text','text':json.dumps(
          {'review_id':'rev_wt','status':'done' if sys.argv[2]=='1' else 'running'})}]},
-      'cwd':sys.argv[3]}))" "$1" "$2" "$3" "$4" | bash "$G/stamp-hunt.sh"
+      'cwd':sys.argv[3]}))" "$1" "$2" "$3" | bash "$G/stamp-hunt.sh"
   }
   wpost submit_review 0 "$PWD" "$WT_DIFF" >/dev/null 2>&1
   wpost get_findings 1 "$PWD" "$WT_DIFF"
@@ -2323,12 +2374,12 @@ esac
 # clean hunt" that was never its hunt. The record now carries who wrote
 # it, so these rows pin the three states apart: mine, nobody's, somebody else's.
 sess() { # tool, done?, review id, session id -> runs stamp-hunt.sh with a session
-  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
   python3 -c "import json,os,sys;
 body={'review_id':sys.argv[3],'status':'done' if sys.argv[2]=='1' else 'running'}
 print(json.dumps({
     'tool_name':'mcp__plugin_bughunter_ohmybug__'+sys.argv[1],
-    'tool_input':{'review_id':sys.argv[3],'diff':os.environ.get('OMB_DIFF','')},
+    'tool_input':{'review_id':sys.argv[3],'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
     'tool_response':{'content':[{'type':'text','text':json.dumps(body)}]},
     'session_id':sys.argv[4],
     'cwd':sys.argv[5]}))" "$1" "$2" "$3" "$4" "$PWD" \
@@ -2837,6 +2888,50 @@ else
 fi
 rm -rf "$LD"
 
+# DIFF DRIVERS NEVER RUN. A repository's own .gitattributes can name a diff
+# driver, and its config a textconv or an external diff: any of them would run
+# a program of the repository's choosing inside the hunt, and change the bytes
+# that are hashed and sent. Every diff the gate hashes and the skill sends
+# passes --no-textconv --no-ext-diff. Here a repository carries all three
+# drivers, each touching a marker; a copy without the drivers is the yardstick.
+DD=$(mktemp -d)
+mkrepo "$DD/a"
+printf '*.ts diff=evil\n' > "$DD/a/.gitattributes"
+git -C "$DD/a" add .gitattributes && git -C "$DD/a" commit -qm attrs
+git -C "$DD/a" update-ref refs/remotes/origin/main HEAD
+# notes.md has no driver of its own: diff.external is the one that would run on it.
+printf 'more\n' >> "$DD/a/a.ts"; printf 'notes\n' > "$DD/a/notes.md"; git -C "$DD/a" add a.ts notes.md && git -C "$DD/a" commit -qm two
+printf 'dirty\n' >> "$DD/a/b.ts"; printf 'new\n' > "$DD/a/n.ts"
+cp -R "$DD/a" "$DD/b"
+# textconv prints the file it is given; the two external programs print nothing.
+git -C "$DD/a" config diff.evil.textconv "touch '$DD/marker-diff.evil.textconv'; cat"
+for k in diff.evil.command diff.external; do git -C "$DD/a" config "$k" "touch '$DD/marker-$k'; true"; done
+# The yardstick only means something if the drivers do fire without the flags.
+git -C "$DD/a" diff HEAD~1 >/dev/null 2>&1; git -C "$DD/a" -c diff.evil.command= -c diff.evil.textconv= diff HEAD~1 >/dev/null 2>&1
+git -C "$DD/a" -c diff.evil.command= diff --no-ext-diff --textconv HEAD~1 >/dev/null 2>&1
+if [ ! -e "$DD/marker-diff.evil.command" ] || [ ! -e "$DD/marker-diff.external" ] || [ ! -e "$DD/marker-diff.evil.textconv" ]; then
+  echo "FAIL diff drivers: the planted drivers did not fire without the flags ($(ls "$DD" | tr '\n' ' ')), so this row proves nothing"; fails=$((fails + 1))
+fi
+rm -f "$DD"/marker-*
+printf '%s\n' "${LADDER:-}" > "$DD/ladder.sh"
+# The upload recipe (RECIPE, read from SKILL.md above) with a curl that keeps the payload.
+mkdir -p "$DD/bin"; printf '#!/bin/sh\nfor a; do case $a in @*) cp "${a#@}" "$UPLOG" ;; esac; done\n' > "$DD/bin/curl"; chmod +x "$DD/bin/curl"
+dd_run() { # repo -> each spelling's bytes, one file per spelling, under $DD/out-<repo>
+  local r=$1 o="$DD/out-$(basename "$1")"
+  mkdir -p "$o"
+  ( cd "$r" && . "$G/diff-id.sh" && ohmybug_diff_raw > "$o/raw" && ohmybug_sig_id > "$o/sig" )
+  ( cd "$r" && export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t && . "$DD/ladder.sh" \
+      && omb_diff HEAD > "$o/omb_diff" && omb_commits 2 > "$o/omb_commits" )
+  ( cd "$r" && BASE=HEAD~1 UPLOG="$o/default" PATH="$DD/bin:$PATH" bash -c "$RECIPE" ) >/dev/null 2>&1
+}
+dd_run "$DD/a"; dd_run "$DD/b"
+for f in raw sig omb_diff omb_commits default; do
+  if [ ! -s "$DD/out-b/$f" ]; then echo "FAIL diff drivers: the driver-free $f is empty, so the row proves nothing"; fails=$((fails + 1))
+  elif ! cmp -s "$DD/out-a/$f" "$DD/out-b/$f"; then echo "FAIL diff drivers: $f differs from a driver-free run"; fails=$((fails + 1)); fi
+done
+ls "$DD"/marker-* >/dev/null 2>&1 && { echo "FAIL diff drivers: a driver ran: $(ls "$DD" | grep marker | tr '\n' ' ')"; fails=$((fails + 1)); }
+rm -rf "$DD"
+
 # The skill's per-call route opt-in. Sent only on a no-mode rung-1 submit, and only when the background-Bash
 # watch loop (which follows route_state to continued_by) watches it; the CronCreate fallback and other runtimes omit it.
 RT=$(awk '/^\*\*The route opt-in: `follows`\.\*\*/{p=1} p&&/^$/{exit} p' plugins/bughunter/skills/bughunter/SKILL.md | tr '\n' ' ')
@@ -3033,12 +3128,12 @@ KNOWN
 # A routed step 1 is a hunt of record that may not be the answer: the gate takes
 # the last hunt of the chain. These rows walk each route_state through the stamp.
 post_r() { # tool, status, review id, extra body fields as JSON
-  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) python3 -c 'import json,os,sys
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; python3 -c 'import json,os,sys
 tool, status, rid, extra, cwd = sys.argv[1:6]
 body = {"review_id": rid, "review_of_record": True}
 if status: body["status"] = status
 body.update(json.loads(extra))
-inp = {"diff": os.environ.get("OMB_DIFF", "")} if tool == "submit_review" else {"review_id": rid}
+inp = {"diff": open(os.environ["OMB_DIFF_FILE"], errors="surrogateescape").read().rstrip("\n")} if tool == "submit_review" else {"review_id": rid}
 print(json.dumps({"tool_name": "mcp__plugin_bughunter_ohmybug__" + tool, "tool_input": inp,
   "tool_response": {"content": [{"type": "text", "text": json.dumps(body)}]}, "cwd": cwd}))' "$1" "$2" "$3" "${4:-"{}"}" "$PWD" \
   | bash "$G/stamp-hunt.sh"

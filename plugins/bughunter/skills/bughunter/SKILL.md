@@ -314,8 +314,12 @@ beyond the base branch plus staged and unstaged changes:
 
 ```bash
 BASE=$(git merge-base HEAD origin/$(git remote show origin | sed -n 's/.*HEAD branch: //p'))
-git diff "$BASE"
+git diff --no-textconv --no-ext-diff "$BASE"
 ```
+
+`--no-textconv --no-ext-diff` on every diff you send: a diff driver configured
+in the repository then runs no program, and the payload stays a patch. The
+merge gate hashes the same spelling.
 
 If the user asked to review something narrower, respect that.
 
@@ -349,7 +353,7 @@ omb_diff() (
   local base=${1} T rc p x=(); shift
   for p in "${OMB_SECRETS[@]}"; do x+=(":(exclude,top,icase,glob)**/$p" ":(exclude,top,icase,glob)**/$p/**"); done
   T=$(mktemp); cp "$(git rev-parse --git-path index)" "$T" 2>/dev/null || rm -f "$T"
-  GIT_INDEX_FILE=$T git add -N -- :/ && GIT_INDEX_FILE=$T git diff "$base" -- "${@:-:/}" "${x[@]}"
+  GIT_INDEX_FILE=$T git add -N -- :/ && GIT_INDEX_FILE=$T git diff --no-textconv --no-ext-diff "$base" -- "${@:-:/}" "${x[@]}"
   rc=$?; rm -f "$T"; return $rc
 )
 # omb_commits <N>: the last N commits only – commit to commit, nothing from the working
@@ -357,7 +361,7 @@ omb_diff() (
 omb_commits() (
   local p x=()
   for p in "${OMB_SECRETS[@]}"; do x+=(":(exclude,top,icase,glob)**/$p" ":(exclude,top,icase,glob)**/$p/**"); done
-  git diff "$(git rev-parse -q --verify "HEAD~${1}" || echo "$EMPTY")" HEAD -- :/ "${x[@]}"
+  git diff --no-textconv --no-ext-diff "$(git rev-parse -q --verify "HEAD~${1}" || echo "$EMPTY")" HEAD -- :/ "${x[@]}"
 )
 # omb_nogit [paths...]: a folder that is not a git repository, as new code. The git
 # directory is a throwaway one outside the folder; nothing is left behind.
@@ -394,7 +398,8 @@ when it is large) with `meta.repo_hint` saying which rung this is, and
 can fetch the merge-base diff itself, and it then reviews that instead of
 your payload – on a `main` whose head is its own base, an empty diff.
 `meta.repo` and `meta.ref` alone are fine (they let reviewers read files). The recorder will
-answer that the payload does not match the working tree: that note is about
+answer that the payload does not match the working tree, or, for an upload,
+that an uploaded hunt is not recorded for the merge gate: either note is about
 the pre-merge gate, which has nothing to gate here – mention it in one line
 at most, never as a failure. Everything after the submit – the wait, the
 verdicts, the bill – is the same as for a pull request.
@@ -540,7 +545,7 @@ the out-of-band flow instead:
    out there (the server would review its own empty merge-base diff instead),
    and in the script below write the chosen rung's output (`omb_diff HEAD`,
    `omb_commits 10`, `omb_nogit`, …) to `diff.patch`, with the ladder block
-   pasted above it in the same command instead of `git diff "$BASE"`.
+   pasted above it in the same command instead of the `git diff` line.
    A `review_id` with `status: running` instead of
    `awaiting_upload` means exactly that – nothing to upload, go monitor.
 2. Build the payload with a script, reading straight from disk, in a private
@@ -551,7 +556,7 @@ the out-of-band flow instead:
 
 ```bash
 (umask 077; d=$(mktemp -d) || exit 1; trap 'rm -rf "$d"' EXIT
-git diff "$BASE" > "$d/diff.patch"
+git diff --no-textconv --no-ext-diff "$BASE" > "$d/diff.patch"
 python3 - "$d" <<'PY'
 import json, sys
 d = sys.argv[1]
@@ -570,12 +575,15 @@ curl -sS -w '\nHTTP %{http_code}\n' -X POST -H 'content-type: application/json' 
    enough.
 
 An uploaded payload never passes through the local recorder, so the merge
-gate cannot credit this working tree with the hunt: the record is `meta.ref`
-only, honoured on a clean checkout standing at that commit or when that sha
-is the head of the pull request `gh pr merge <N>` names. When the
-work is unpushed AND the diff is too big to send inline, commit and push it
-first and use rung 1 (`ref` = the pushed head sha) – otherwise the merge gate
-will still block after the review, and the submit says so at submit time.
+gate never credits a hunt of uploaded bytes: an answer that hands an upload
+ticket (`awaiting_upload`) leaves no record, whatever `meta.ref` says. Only
+when the answer reads `status: running` (the server fetched the commit itself
+and hunted that) is the record `meta.ref`, honoured on a clean checkout
+standing at that commit or when that sha is the head of the pull request
+`gh pr merge <N>` names. When the work is unpushed AND the diff is too big to
+send inline, commit and push it first and use rung 1 (`ref` = the pushed head
+sha) – otherwise the merge gate will still block after the review, and the
+submit says so at submit time.
 
 Call `submit_review` with the diff, the context files, and `meta`. The
 `meta` object is REQUIRED plumbing, not garnish – fill it every time:

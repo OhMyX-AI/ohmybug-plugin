@@ -38,7 +38,8 @@ ohmybug_base() {
 ohmybug_diff_raw() {
   local base
   base=$(ohmybug_base) || return 1
-  git diff "$base" 2>/dev/null
+  # No diff driver runs: the spelling the skill sends.
+  git diff --no-textconv --no-ext-diff "$base" 2>/dev/null
 }
 
 ohmybug_diff_id() {
@@ -129,7 +130,7 @@ ohmybug_sig_id() {
   # record what cwd-dependent identity costs.
   #
   # Unquoted on purpose: each line of the list is one pathspec argument.
-  diff=$(git diff "$base" -- $OHMYBUG_SKIP_GLOBS 2>/dev/null) || return 1
+  diff=$(git diff --no-textconv --no-ext-diff "$base" -- $OHMYBUG_SKIP_GLOBS 2>/dev/null) || return 1
   if [ -z "$diff" ]; then
     # Empty is the answer that ALLOWS a merge, so it has to be earned. Three
     # states leave this function — "code changed", "only prose changed", "git
