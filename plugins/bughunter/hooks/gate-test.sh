@@ -2112,12 +2112,7 @@ rm -rf "$BK"
 # advice here is about the user's own permission settings — the one place this
 # plugin must never write.
 FR=$(mktemp -d)
-# The notice speaks at the first OhMyBug tool call, naming the rule after the
-# server that call goes through; a session start has no tool name, so it is silent.
-say() { printf '{"hook_event_name":"PreToolUse","tool_name":"mcp__plugin_bughunter_ohmybug__get_balance","permission_mode":"default","session_id":"f0"}' \
-  | OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh"; }
-[ -z "$(OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh" </dev/null)" ] || { printf 'FAIL first-run: spoke at a session start, with no tool name to give\n'; fails=$((fails + 1)); }
-[ ! -e "$FR/state/permission-notice-v1" ] || { printf 'FAIL first-run: a session start consumed the once-per-machine mark\n'; fails=$((fails + 1)); }
+say() { OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh" </dev/null; }
 # Under Codex (PLUGIN_DATA set) the notice is about the wrong client: silent,
 # and the mark is NOT written, so a Claude Code session on the same machine
 # still hears it once.
@@ -2172,29 +2167,6 @@ rm -f "$FR/.claude/settings.local.json"
 mkdir -p "$FR/p/.claude"
 printf '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__provide_files"]}}\n' > "$FR/p/.claude/settings.json"
 fr_row "a project rule counts too" "$(pre provide_files auto s5)" ''
-# A second server at the same URL: the advice names its tools, and only a rule
-# for that name is a decision.
-rm -rf "$FR/state" "$FR/.claude" "$FR/p/.claude"; mkdir -p "$FR/.claude"
-kpre() { printf '{"hook_event_name":"PreToolUse","tool_name":"mcp__ohmybug__%s","permission_mode":"auto","session_id":"%s"}' "$1" "$2" \
-  | OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh"; }
-printf '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}\n' > "$FR/.claude/settings.json"
-# The plugin server's call consumed its own mark; the second server's notice is its own.
-pre get_balance default p0 >/dev/null
-fr_row "key server beside a plugin rule: the notice gives the way back" "$(kpre get_balance k1)" 'second OhMyBug server you added \(mcp__ohmybug\).*hides the plugin server.*api-key'
-case "$(rm -rf "$FR/state"; kpre get_balance k9)" in *"Add rule ->"*"mcp__ohmybug__*"*) printf 'FAIL first-run: advised a rule the gate cannot read\n'; fails=$((fails + 1)) ;; esac
-fr_row "key server beside a plugin rule: the provide_files hint names its tool" "$(kpre provide_files k1)" 'Add rule -> mcp__ohmybug__provide_files'
-rm -rf "$FR/state"
-printf '{"permissions":{"allow":["mcp__ohmybug__*"]}}\n' > "$FR/.claude/settings.json"
-fr_row "key server with its own rule: still told the way back" "$(kpre get_balance k2)" 'hides the plugin server'
-fr_row "key server: the way back is told once" "$(kpre get_balance k3)" ''
-fr_row "key server with its own rule: no provide_files hint" "$(kpre provide_files k2)" ''
-rm -rf "$FR/state" "$FR/.claude"
-# A machine that heard the old notice is not told again on the plugin server.
-mkdir -p "$FR/state" && : > "$FR/state/permission-notice-v1"
-fr_row "the plugin server keeps the old mark" "$(pre get_balance default o1)" ''
-rm -rf "$FR/state"
-fr_row "a call that names no event still carries the notice" "$(printf '{"tool_name":"mcp__plugin_bughunter_ohmybug__get_balance"}' | OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh")" 'Add rule ->'
-rm -rf "$FR/state" "$FR/.claude"
 
 # --- the scan hint: once per machine, Claude Code only, a suggestion ----------
 SH=$(mktemp -d)
@@ -2248,8 +2220,7 @@ for turn in 1 2; do
 import json, sys
 d = json.loads(sys.argv[1])
 ctx = d.get('hookSpecificOutput', {}).get('additionalContext', '')
-ok = ('confirm the OhMyBug MCP tools (submit_review, get_findings, confirm_findings, from a server whose name contains ohmybug' in ctx
-      and 'mcp__' not in ctx
+ok = ('confirm the OhMyBug MCP tools (mcp__plugin_bughunter_ohmybug__*) are present' in ctx
       and 'tell the user once' in ctx and 'go on with what they asked' in ctx
       and 'do not start' not in ctx and 'systemMessage' not in d)
 sys.exit(0 if ok else 1)
@@ -3319,7 +3290,7 @@ mkdir -p "$PLD/h0/.claude"; printf '{"permissions":{"allow":["mcp__plugin_bughun
 plrow "diff-id.sh still reads the permission rule" 0 "$(cd "$PL" && HOME="$PLD/h0" CLAUDE_PROJECT_DIR="$PL" PLUGIN_DATA= ohmybug_tools_allowed; echo $?)"
 IN=$(plj '{"tool_name":"mcp__plugin_bughunter_ohmybug__get_balance","tool_response":{"content":[{"type":"text","text":"{\"bugarium\":{\"vote\":{\"url\":\"https://example.invalid/bugs/vote/7\",\"closes_at\":\"2026-09-28T04:00:00.000Z\"}}}"}]}}')
 plrow "bugarium-notice.sh still hands the vote over" yes "$(printf '%s' "$IN" | (cd "$PL" && bash "$G/bugarium-notice.sh" 2>/dev/null) | grep -q 'example.invalid/bugs/vote/7' && echo yes)"
-plrow "first-run.sh still gives its notice" yes "$(cd "$PL" && printf '{"hook_event_name":"PreToolUse","tool_name":"mcp__plugin_bughunter_ohmybug__get_balance"}' | OMB_STATE_DIR="$PLD/s1" HOME="$PLD/h1" CLAUDE_PROJECT_DIR="$PLD/p1" PLUGIN_DATA= bash "$G/first-run.sh" 2>/dev/null | grep -q . && echo yes)"
+plrow "first-run.sh still gives its notice" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s1" HOME="$PLD/h1" CLAUDE_PROJECT_DIR="$PLD/p1" PLUGIN_DATA= bash "$G/first-run.sh" </dev/null 2>/dev/null | grep -q . && echo yes)"
 plrow "scan-hint.sh still names the commands" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s2" HOME="$PLD/h2" PLUGIN_DATA= bash "$G/scan-hint.sh" 2>/dev/null | grep -q '/bughunter:scan' && echo yes)"
 plrow "tools-check.sh still asks for the tools check" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s3" HOME="$PLD/h3" PLUGIN_DATA= bash "$G/tools-check.sh" 2>/dev/null | grep -q 'additionalContext' && echo yes)"
 rm -rf "$(cd "$PL" && ohmybug_hunt_dir)" "$(cd "$PL" && ohmybug_hunt_dir).pending" "$PLD"

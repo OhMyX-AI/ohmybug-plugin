@@ -46,8 +46,9 @@ environment. From a CI secret:
 ```
 
 Never type the key itself on a command line. A key in the file takes the place
-of the browser sign-in; a file that holds no key is ignored with a one-line note
-(`OHMYBUG_API_KEY` is read only by clients that pass it to the plugin).
+of the browser sign-in; delete the file to go back to it. A file that holds no
+key is ignored with a one-line note. With the plugin installed, do not add a
+second OhMyBug server for the key (see below).
 
 ## Install (pi)
 
@@ -134,20 +135,16 @@ codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp \
   --bearer-token-env-var OHMYBUG_API_KEY
 ```
 
-(Claude Code without the plugin can do the same with
+(Claude Code without the plugin, for example in CI, can do the same with
 `claude mcp add --transport http ohmybug https://mcp.ohmybug.ai/mcp
 --header "Authorization: Bearer $OHMYBUG_API_KEY"`; an explicit
 Authorization header disables the OAuth flow. With the plugin installed, use
-the plugin's key file instead (see Install (Claude Code)). A second server at
-the same URL, added this way or from an `ohmybug` entry in a project
-`.mcp.json`, can hide the plugin's own. The tools then carry that server's name
-(`mcp__ohmybug__*` for a server named `ohmybug`), and the plugin's merge gate
-counts permission rules for the plugin's own server only
-(`mcp__plugin_bughunter_ohmybug__*`), so remove the second server. To go back
-to the plugin's own server: write the key file, remove
-the second server (`claude mcp remove ohmybug`, or its `.mcp.json` entry if
-only Claude Code reads that file), restart Claude Code, and move any
-`mcp__ohmybug__*` permission rule to `mcp__plugin_bughunter_ohmybug__*`.)
+the plugin's key file instead (see Install (Claude Code)). Where the plugin is installed,
+any second server at the same URL can hide the plugin's own: one added this way,
+or an `ohmybug` entry in the project's `.mcp.json` such as the pi setup above
+writes. The OhMyBug tools then carry that server's name, `mcp__ohmybug__*`,
+and the plugin's permission advice and the merge gate's permission check,
+which name `mcp__plugin_bughunter_ohmybug__*`, do not apply to them.)
 
 Questions → [Discord](https://discord.gg/6d7g8J44C7).
 

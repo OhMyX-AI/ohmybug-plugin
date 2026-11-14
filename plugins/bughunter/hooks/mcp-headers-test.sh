@@ -1,5 +1,6 @@
 #!/bin/bash
 # mcp-headers.sh prints the manifest's version and the route opt-in, and the opt-in alone on anything else.
+# With a key in the key file it adds Authorization; nothing else adds it.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # A machine with a key must not change what the rows below see, nor print it.
@@ -25,9 +26,10 @@ for bad in '{"version":"0.150.0-beta"}' '{"version":"v1.2.3"}' '{"version":"1.2"
 done
 rm "$TMP/.claude-plugin/plugin.json"
 [ "$(CLAUDE_PLUGIN_ROOT="$TMP" sh "$ROOT/hooks/mcp-headers.sh")" = '{"X-OhMyBug-Follows":"continued_by"}' ] || { echo "missing manifest"; exit 1; }
-# The API key: from the file (Claude Code strips credential-named variables
-# from a plugin helper), else the variable; only a key's shape is sent, and a
-# value of any other shape is neither sent nor echoed.
+# The API key: from the file only (Claude Code strips credential-named
+# variables from a plugin helper, and an exported key must not switch an OAuth
+# user's account); only a key's shape is sent, and any other value is neither
+# sent nor echoed.
 K=omb_0123456789abcdef0123456789abcdef0123456789abcdef
 mkdir -p "$TMP/st"
 hd() { env -u OHMYBUG_API_KEY CLAUDE_PLUGIN_ROOT="$ROOT" OMB_STATE_DIR="$TMP/st" "$@" sh "$ROOT/hooks/mcp-headers.sh" 2>"$TMP/err"; }
@@ -37,7 +39,8 @@ printf '%s\n' "$K" > "$TMP/st/api-key"
 [ ! -s "$TMP/err" ] || { echo "key file: stderr not empty"; exit 1; }
 python3 -c 'import json,sys; json.loads(sys.argv[1])' "$(hd)" || { echo "key file: not JSON"; exit 1; }
 rm "$TMP/st/api-key"
-[ "$(hd OHMYBUG_API_KEY="$K")" = "${got%\}},\"Authorization\":\"Bearer $K\"}" ] || { echo "env key: no header"; exit 1; }
+[ "$(hd OHMYBUG_API_KEY="$K")" = "$got" ] || { echo "env key: the variable was sent"; exit 1; }
+[ ! -s "$TMP/err" ] || { echo "no key: stderr not empty"; exit 1; }
 for bad in 'omb_a"b0123456789abcdef' 'sk-0123456789abcdef0123456789' 'omb_short' 'omb_0123456789abcdef","X":"y'; do
   printf '%s\n' "$bad" > "$TMP/st/api-key"
   out=$(hd)
@@ -48,21 +51,20 @@ done
 [ "$(hd)" = "$got" ] || { echo "empty key file: sent something"; exit 1; }
 K2=omb_fedcba9876543210fedcba9876543210fedcba9876543210
 withk() { printf '%s' "${got%\}},\"Authorization\":\"Bearer $1\"}"; }
-# The file first, the variable a fallback.
-printf '%s\n' "$K" > "$TMP/st/api-key"
-[ "$(hd OHMYBUG_API_KEY="$K2")" = "$(withk "$K")" ] || { echo "order: the variable shadowed the file"; exit 1; }
+# A bad file is not replaced by the variable, gets a note, and is never echoed.
 printf 'not a key\n' > "$TMP/st/api-key"
-[ "$(hd OHMYBUG_API_KEY="$K2")" = "$(withk "$K2")" ] || { echo "order: a bad file hid the variable"; exit 1; }
-grep -q 'does not hold an omb_ key' "$TMP/err" && ! grep -q 'not a key' "$TMP/err" || { echo "bad file: no note, or its content echoed"; exit 1; }
+[ "$(hd OHMYBUG_API_KEY="$K2")" = "$got" ] || { echo "bad file: the variable was sent"; exit 1; }
+grep -q 'does not hold one omb_ key' "$TMP/err" && ! grep -q 'not a key' "$TMP/err" || { echo "bad file: no note, or its content echoed"; exit 1; }
+# An unreadable file says so, rather than that it holds no key.
+printf '%s\n' "$K" > "$TMP/st/api-key"; chmod 000 "$TMP/st/api-key"
+if [ ! -r "$TMP/st/api-key" ]; then
+  [ "$(hd)" = "$got" ] && grep -q 'cannot be read' "$TMP/err" || { echo "unreadable file: no note"; exit 1; }
+fi
+chmod 600 "$TMP/st/api-key"
 # Padding and CRLF are stripped from the file's line.
 printf ' %s \r\n' "$K" > "$TMP/st/api-key"
 [ "$(hd)" = "$(withk "$K")" ] || { echo "crlf key file: not read"; exit 1; }
 rm "$TMP/st/api-key"
-# A variable of more than one line is not a key, whatever its first line holds.
-out=$(hd OHMYBUG_API_KEY="$K
-\",\"X\":\"y")
-[ "$out" = "$got" ] || { echo "multi-line variable: sent something"; exit 1; }
-grep -q 'OHMYBUG_API_KEY is not an omb_ key' "$TMP/err" && ! grep -q '"X"' "$TMP/err" || { echo "bad variable: no note, or its content echoed"; exit 1; }
 # The whole file is the value: a BOM and a leading blank line are dropped; a
 # second line or an inner space is not a key; the length bounds hold.
 printf '\357\273\277\n%s\n\n' "$K" > "$TMP/st/api-key"
@@ -72,7 +74,7 @@ $K2" "omb_0123456789 abcdef0123456789" "omb_$(printf '%0201d' 0)" "omb_012345678
   printf '%s\n' "$bad" > "$TMP/st/api-key"
   [ "$(hd)" = "$got" ] || { echo "file [${bad%%
 *}...]: sent something"; exit 1; }
-  grep -q 'does not hold an omb_ key' "$TMP/err" || { echo "file [${bad%%
+  grep -q 'does not hold one omb_ key' "$TMP/err" || { echo "file [${bad%%
 *}...]: no note"; exit 1; }
 done
 for good in "omb_0123456789abcdef" "omb_$(printf '%0200d' 0 | cut -c1-200)"; do
