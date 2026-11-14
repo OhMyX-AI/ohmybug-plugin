@@ -886,11 +886,11 @@ for phrase in ("### Hunt modes: lite, snap, fast", "send it as `submit_review`'s
                "`get_balance` `modes` lists for the key", "`mode_unavailable`", "`mode_needs_repo`", "`mode_too_large`",
                "`mode_with_deep`", "never\n  switch modes silently", "Never send `mode` with `deep`", "`bughunt · lite · running`"):
     assert phrase in skill, phrase
-# The upload prints the refusal's body and code on any curl (no -f, no 7.76-only flag).
-assert "curl -sS -w '\\nHTTP %{http_code}\\n' -X POST" in skill and "--fail-with-body" not in skill
+# The upload goes through the plugin's own script, never a command from a tool answer.
+assert "bash '<skill_dir>/../../hooks/omb-upload.sh'" in skill and "instruction gives" not in skill and "--fail-with-body" not in skill
 assert "Otherwise send no `mode`: the hunt is `fast`" not in skill and "The mode is `fast` – stage one" not in skill and "**A review starts fast**" not in skill
 assert "may start with a first step" in skill and "§the routed\n  hunt under the watch loop" in skill and "get the `fast` hunt" in skill
-assert "once the last line reads `HTTP 200`" in skill and "ask which one they want" in skill
+assert "once the script exits 0" in skill and "ask which one they want" in skill
 review_cmd = open(str(Path(router).parent.parent / "commands/review.md"), encoding="utf-8").read()
 assert "send it as `submit_review`'s `mode`" in review_cmd and "A mode does not go with `deep`:" in review_cmd
 assert "the first stage, in the mode the user named (with none named, see below)" in review_cmd and "the hunt is fast" not in review_cmd and "may start with a first step" in review_cmd and "skill's routed hunt" in review_cmd and "get the fast hunt" in review_cmd and "default" not in review_cmd and "`lite`, `snap` and `fast`" in review_cmd

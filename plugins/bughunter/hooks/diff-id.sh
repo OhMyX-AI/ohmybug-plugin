@@ -38,7 +38,7 @@ ohmybug_base() {
 ohmybug_diff_raw() {
   local base
   base=$(ohmybug_base) || return 1
-  # No diff driver runs, the spelling the skill sends (#3525).
+  # No diff driver runs: the spelling the skill sends.
   git diff --no-textconv --no-ext-diff "$base" 2>/dev/null
 }
 
