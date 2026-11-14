@@ -27,10 +27,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: bash plugins/bughunter/hooks/gate-test.sh
       # The router test executes the skill's watch loop under zsh – the shell
-      # Claude Code runs it in on macOS – and fails, not skips, without it.
+      # Claude Code runs it in on macOS – and fails, not skips, without it; the
+      # gate test runs the skill's upload blocks under zsh too.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
+      - run: bash plugins/bughunter/hooks/gate-test.sh
       - run: bash plugins/bughunter/hooks/codex-router-test.sh
       # The scan must read a payload under a multibyte locale; its test fails,
       # not skips, when a locale is missing, so generate the ones it runs under.
@@ -41,6 +42,8 @@ jobs:
       - run: bash plugins/bughunter/hooks/secret-scan-test.sh
       # The upload script with real git and a stubbed curl: what leaves, in what order, after which scan.
       - run: bash plugins/bughunter/hooks/omb-upload-test.sh
+      # The same rows with the script under bash (sh above is dash here).
+      - run: OMB_TEST_SH=bash OMB_TEST_SKIP_SLOW=1 bash plugins/bughunter/hooks/omb-upload-test.sh
       - run: bash plugins/bughunter/hooks/watch-guard-test.sh
       - run: bash plugins/bughunter/hooks/version-check-test.sh
       - run: bash plugins/bughunter/hooks/mcp-headers-test.sh

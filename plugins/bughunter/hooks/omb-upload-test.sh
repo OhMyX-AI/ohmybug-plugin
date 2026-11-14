@@ -8,7 +8,10 @@
 # Keys are glued together at run time, as in secret-scan-test.sh.
 set -u
 G=$(cd "$(dirname "$0")" && pwd)
-UP="$G/../skills/bughunter/omb-upload.sh"
+UP="$G/omb-upload.sh"
+# The shell that runs the script: sh by default (dash on Debian and Ubuntu),
+# OMB_TEST_SH=bash for the second CI leg.
+TSH=${OMB_TEST_SH:-sh}
 export PYTHONDONTWRITEBYTECODE=1
 ROOT=$(mktemp -d)
 trap 'chmod -R u+rwx "$ROOT" 2>/dev/null; rm -rf "$ROOT"' EXIT
@@ -64,7 +67,7 @@ plan() { printf '%s\n' "$2" > "$STUB/$1.plan"; }
 # run <dir> <args...>: rc in $rc, stdout+stderr in $out (stdout also in the transcript)
 run() {
   local dir=$1; shift
-  out=$(cd "$dir" && PATH="$BIN:$PATH" sh "$UP" "$@" 2>"$STUB/err" | tee -a "$STUB/transcript"; exit "${PIPESTATUS[0]}")
+  out=$(cd "$dir" && PATH="$BIN:$PATH" "$TSH" "$UP" "$@" 2>"$STUB/err" | tee -a "$STUB/transcript"; exit "${PIPESTATUS[0]}")
   rc=$?
   out="$out$(cat "$STUB/err")"
 }
@@ -86,7 +89,7 @@ printf '[filter "marker"]\n\tsmudge = touch %s; cat\n\tclean = cat\n' "$SMUDGED"
 # ---- 1. Secret-list parity --------------------------------------------------
 # Written out here, not read from anywhere: dropping a name from the script,
 # the skill or the server's list must redden this row. This is the server's
-# SNAPSHOT_SECRETS, name for name.
+# snapshot secret list, name for name.
 SERVER='.env* *secret* *credential* id_rsa* id_dsa* id_ecdsa* id_ed25519* *.pem *.key *.p12 *.pfx .npmrc .netrc .pgpass .pypirc .git-credentials *.tfstate* *.tfvars* kubeconfig .kube .docker *.ppk *.jks *.keystore .ssh .aws .gnupg'
 script=$(python3 - "$UP" <<'PY'
 import re, sys
@@ -181,7 +184,7 @@ R="$ROOT/nogit"; mkdir -p "$R"
 printf 'print(1)\n' > "$R/main.py"; printf 'CIPHERTEXT\n' > "$R/cipher.txt"; printf 'k\n' > "$R/server.KEY"; printf 'x\n' > "$R/.npmrc"
 for x in __pycache__ venv target dist build node_modules/dep src/build .aws .config .cache/sub; do mkdir -p "$R/$x"; printf 'x\n' > "$R/$x/f"; done
 NT="$ROOT/nogit-tmp"; mkdir -p "$NT"
-fresh; out=$(cd "$R" && TMPDIR="$NT" PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+fresh; out=$(cd "$R" && TMPDIR="$NT" PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 n=$(names | tr '\n' ' ')
 [ "$n" = "cipher.txt main.py src/build/f " ] && [ "$rc" = 0 ] && ok "pack: a folder without git, with its extra exclusions" || fail "pack: no git: got [$n] rc $rc $out"
 [ -z "$(ls -A "$NT")" ] && ok "pack: the no-git form leaves no git directory behind" || fail "pack: left behind in TMPDIR: $(ls -A "$NT")"
@@ -190,7 +193,7 @@ printf '%s' "$out" | grep -q 'folder without git' && ok "manifest: the no-git va
 
 # Refusals: nothing reaches the door.
 refused() { # name, dir, HOME, want text, [env]
-  fresh; out=$(cd "$2" && env HOME="$3" ${5:-} PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+  fresh; out=$(cd "$2" && env HOME="$3" ${5:-} PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
   if [ "$rc" != 0 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q "$4"; then ok "$1"; else fail "$1: rc $rc, calls $(calls): $out"; fi
 }
 H2="$ROOT/home2"; mkdir -p "$H2/u"; printf 'x\n' > "$H2/a.py"
@@ -203,7 +206,7 @@ H3="$ROOT/dot"; mkdir -p "$H3/proj"; g -C "$H3" init -q; printf 'x\n' > "$H3/pro
 refused "a dotfiles repository holding the home folder is refused" "$H3/proj" "$H3" "refusing to pack"
 H4="$ROOT/ctr"; mkdir -p "$H4"; printf 'print(1)\n' > "$H4/main.py"
 refused "a project that is the home folder names the opt-in" "$H4" "$H4" "OMB_SNAPSHOT_HOME_OK=1"
-fresh; out=$(cd "$H4" && HOME="$H4" OMB_SNAPSHOT_HOME_OK=1 PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+fresh; out=$(cd "$H4" && HOME="$H4" OMB_SNAPSHOT_HOME_OK=1 PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 0 ] && [ "$(calls)" = 2 ] && ok "OMB_SNAPSHOT_HOME_OK=1 lets the home-folder project through" || fail "home opt-in: rc $rc $out"
 
 # ---- 4. Scan before any POST -----------------------------------------------
@@ -230,7 +233,7 @@ fresh; run "$R" "$URL" required "$P"
 first=$(grep '^OhMyBug upload' "$STUB/transcript")
 case $first in *'credential match: conf/leak.yml, conf/two?.yml.') [ "$(names | tr '\n' ' ')" = "a.txt conf/ok.yml " ] && ok "manifest: two left-out files are two names, control bytes replaced" || fail "two drops: packed [$(names | tr '\n' ' ')]" ;; *) fail "two drops glued or split: $first" ;; esac
 rm -f "$R/conf/$(printf 'two\033.yml')"
-fresh; out=$(cd "$R" && OHMYBUG_SECRET_SCAN=0 PATH="$BIN:$PATH" sh "$UP" "$URL" required "$KP" 2>&1); rc=$?
+fresh; out=$(cd "$R" && OHMYBUG_SECRET_SCAN=0 PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required "$KP" 2>&1); rc=$?
 [ "$rc" = 0 ] && [ "$(calls)" = 2 ] && printf '%s' "$out" | grep -q 'Credential scan: off (OHMYBUG_SECRET_SCAN=0)' && ok "OHMYBUG_SECRET_SCAN=0: sent, and the manifest says scan off" || fail "scan off: rc $rc $out"
 tar -tzf "$STUB/repo.1.sent" | grep -qx conf/leak.yml && ok "scan off: nothing is dropped either" || fail "scan off: leak.yml dropped"
 rm -rf "$R/conf"
@@ -238,23 +241,23 @@ rm -rf "$R/conf"
 NP="$ROOT/nopy"; mkdir -p "$NP"
 for t in git sh bash mktemp dirname rm mkdir cp xargs grep tr paste awk wc tar cat sed env; do ln -sf "$(command -v "$t")" "$NP/$t"; done
 cp "$BIN/curl" "$NP/"
-fresh; out=$(cd "$R" && PATH="$NP" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+fresh; out=$(cd "$R" && PATH="$NP" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 4 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'python3 not found' && ok "no python3: exit 4, nothing sent" || fail "no python3: rc $rc calls $(calls) $out"
 NC="$ROOT/nocurl"; mkdir -p "$NC"
 for t in git sh bash mktemp dirname rm mkdir cp xargs grep tr paste awk wc tar cat sed env python3; do ln -sf "$(command -v "$t")" "$NC/$t"; done
-fresh; out=$(cd "$R" && PATH="$NC" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+fresh; out=$(cd "$R" && PATH="$NC" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 4 ] && printf '%s' "$out" | grep -q 'curl not found' && ok "no curl: exit 4, said once" || fail "no curl: rc $rc $out"
 # An unscannable snapshot is not sent.
-fresh; out=$(cd "$R" && OHMYBUG_TEST_SCAN_RAISE=1 PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+fresh; out=$(cd "$R" && OHMYBUG_TEST_SCAN_RAISE=1 PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "a scan that fails refuses, nothing sent" || fail "scan failure: rc $rc calls $(calls) $out"
 
 # The snapshot scan's own outcomes, through a stand-in detector beside a copy
 # of the script: one that cannot read the snapshot, one that reports a hit
 # without naming a member, and one whose hit survives the second pack (a
 # rescan that still hits). None may send anything.
-FS="$ROOT/fakescan"; mkdir -p "$FS/skills/bughunter" "$FS/hooks"; cp "$UP" "$FS/skills/bughunter/omb-upload.sh"
+FS="$ROOT/fakescan"; mkdir -p "$FS"; cp "$UP" "$FS/omb-upload.sh"
 for v in 2 3 still; do
-  cat > "$FS/hooks/omb_scan.py" <<PY
+  cat > "$FS/omb_scan.py" <<PY
 import sys
 if sys.argv[1] == "--payload": sys.exit(0)
 if "$v" == "still":
@@ -262,15 +265,15 @@ if "$v" == "still":
     sys.exit(3)
 sys.exit(int("$v"))
 PY
-  fresh; out=$(cd "$R" && PATH="$BIN:$PATH" sh "$FS/skills/bughunter/omb-upload.sh" "$URL" required "$P" 2>&1); rc=$?
+  fresh; out=$(cd "$R" && PATH="$BIN:$PATH" "$TSH" "$FS/omb-upload.sh" "$URL" required "$P" 2>&1); rc=$?
   [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "a snapshot scan that ends '$v' sends nothing" || fail "snapshot scan $v: rc $rc calls $(calls) $out"
 done
-# A skill folder without the plugin's hooks folder (a skill-only install): no detector, nothing sent.
-rm -rf "$FS/hooks"
-fresh; out=$(cd "$R" && PATH="$BIN:$PATH" sh "$FS/skills/bughunter/omb-upload.sh" "$URL" required "$P" 2>&1); rc=$?
-[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'detector (hooks/omb_scan.py) is not installed' && ok "no detector beside the skill: refused in one sentence, nothing sent" || fail "no detector: rc $rc calls $(calls) $out"
+# No detector beside the script: nothing sent, and the sentence names the way on.
+rm -f "$FS/omb_scan.py"
+fresh; out=$(cd "$R" && PATH="$BIN:$PATH" "$TSH" "$FS/omb-upload.sh" "$URL" required "$P" 2>&1); rc=$?
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'detector (omb_scan.py) is not installed' && printf '%s' "$out" | grep -q 'rung 1), or install the full plugin' && ok "no detector beside the script: refused, naming rung 1 or the full plugin, nothing sent" || fail "no detector: rc $rc calls $(calls) $out"
 # A repository git refuses to read is not packed as a folder without git.
-fresh; out=$(cd "$R" && GIT_TEST_ASSUME_DIFFERENT_OWNER=1 PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+fresh; out=$(cd "$R" && GIT_TEST_ASSUME_DIFFERENT_OWNER=1 PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "a repository git cannot read (ownership) is refused, not packed without .gitignore" || fail "dubious ownership: rc $rc calls $(calls) $out"
 
 # A json.py or hashlib.py in the repository is never imported, by the payload
@@ -294,7 +297,7 @@ p = json.load(open(sys.argv[1]))
 sys.exit(0 if p == {"diff": open(sys.argv[2]).read(), "files": []} else 1)
 PY
 packed=$(tar -tzf "$STUB/repo.1.sent" | grep -vc '/$')
-grep -q "snapshot $packed file" "$STUB/transcript" && grep -q 'diff 1 KB (1 file)' "$STUB/transcript" && grep -q 'and 24 more patterns' "$STUB/transcript" && ok "manifest: the counts" || fail "manifest counts ($packed): $(head -n 1 "$STUB/transcript")"
+grep -q "snapshot of $packed file" "$STUB/transcript" && grep -q 'diff 1 KB (1 file)' "$STUB/transcript" && grep -q 'and 24 more patterns' "$STUB/transcript" && ok "manifest: the counts" || fail "manifest counts ($packed): $(head -n 1 "$STUB/transcript")"
 first=$(sed -n 1p "$STUB/modes")
 fresh; run "$R" "$URL" required "$P"
 python3 - "$first" "$(sed -n 1p "$STUB/modes")" <<'PY' && ok "a private 0700 directory, files nobody else reads, removed, new per run" || fail "private directory"
@@ -332,7 +335,7 @@ fi
 GB="$ROOT/gitbin"; mkdir -p "$GB"
 printf '#!/bin/sh\nif [ "${LC_ALL:-}" != C ] && [ "$1 $2" = "rev-parse --git-dir" ]; then echo "fatal: kein Git-Repository" >&2; exit 128; fi\nexec %s "$@"\n' "$(command -v git)" > "$GB/git"; chmod +x "$GB/git"
 NG="$ROOT/nogit2"; mkdir -p "$NG"; printf 'x\n' > "$NG/main.py"
-fresh; out=$(cd "$NG" && PATH="$GB:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+fresh; out=$(cd "$NG" && PATH="$GB:$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'folder without git' && ok "the no-git probe is locale-proof" || fail "no-git probe locale: rc $rc $out"
 # CRLF and a lone CR survive; a diff that is not UTF-8 refuses, naming its file.
 printf 'diff --git a/w.bat b/w.bat\n--- a/w.bat\n+++ b/w.bat\n@@ -1 +1,2 @@\n a\r\n+b\r\n+c\rd\n' > "$ROOT/crlf.patch"
@@ -393,7 +396,7 @@ printf '%s' "$first" | grep -q 'diff 1 KB (1 file)' && ok "...and its numbers ar
 # python3 older than 3.7 refuses in one sentence.
 OP="$ROOT/oldpy"; mkdir -p "$OP"
 printf '#!/bin/sh\ncase "$*" in *"version_info < (3, 7)"*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v python3)" > "$OP/python3"; chmod +x "$OP/python3"
-fresh; out=$(cd "$R" && PATH="$OP:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+fresh; out=$(cd "$R" && PATH="$OP:$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 4 ] && [ "$(calls)" = 0 ] && [ "$out" = "omb-upload: python3 3.7 or newer is needed; nothing was sent" ] && ok "python3 older than 3.7: one sentence, exit 4" || fail "old python: rc $rc $out"
 # A secret-named context file is never sent, even when git lists it.
 printf 'registry=x\n' > "$R/.npmrc"; git -C "$R" add -f .npmrc; printf 'fine\n' > "$R/c.txt"
@@ -405,7 +408,7 @@ PY
 grep -q "^0o700 0o600 " "$STUB/modes" && ok "the payload file is readable by its owner only" || fail "payload mode: $(cat "$STUB/modes")"
 git -C "$R" rm -q --cached .npmrc; rm -f "$R/.npmrc" "$R/c.txt"
 # The payload scan that cannot run refuses on its own (diff mode: no snapshot scan to fail instead).
-fresh; out=$(cd "$R" && OHMYBUG_TEST_SCAN_RAISE=1 PATH="$BIN:$PATH" sh "$UP" "$URL" off "$P" 2>&1); rc=$?
+fresh; out=$(cd "$R" && OHMYBUG_TEST_SCAN_RAISE=1 PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" off "$P" 2>&1); rc=$?
 [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'could not scan the payload' && ok "an unscannable payload is not sent (diff mode)" || fail "payload scan failure: rc $rc $out"
 # A missing diff file: a sentence, not a traceback.
 fresh; run "$R" "$URL" required "$ROOT/no-such.patch"
@@ -428,6 +431,10 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s "$STUB/dir"
 kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 dir=$(cat "$STUB/dir" 2>/dev/null)
 [ -n "$dir" ] && [ ! -e "$dir" ] && ok "TERM mid-POST removes the private folder" || fail "TERM: folder [$dir] left"
+fresh; (cd "$R" && PATH="$ROOT/slowbin:$BIN:$PATH" exec "$TSH" "$UP" "$URL" off "$P" >/dev/null 2>&1) & pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s "$STUB/dir" ] && break; /bin/sleep 0.2; done
+kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; rc=$?
+[ "$rc" = 75 ] && ok "TERM mid-POST exits 75, as a stopped call reads" || fail "TERM: exit $rc, want 75"
 # A file name that is not UTF-8 and hits is dropped, where the file system allows such names (not macOS).
 if ( cd "$R" && printf 'k = "%s"\n' "$AWS" > "$(printf 'caf\351.txt')" ) 2>/dev/null && [ -e "$R/$(printf 'caf\351.txt')" ]; then
   fresh; run "$R" "$URL" required "$P"
@@ -463,7 +470,7 @@ for a; do shift; case \$a in https://mcp.ohmybug.ai/*) a="http://127.0.0.1:$(cat
 exec "$REALCURL" "\$@"
 SH
 chmod +x "$ROOT/realbin/curl"
-out=$(cd "$R" && PATH="$ROOT/realbin:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+out=$(cd "$R" && PATH="$ROOT/realbin:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 kill "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
 [ "$rc" = 0 ] && [ "$(grep -c '/repo$' "$ROOT/srvlog")" = 1 ] && ok "a slow answer after the snapshot is waited for, not resent" || fail "slow answer: rc $rc, repo posts $(grep -c '/repo$' "$ROOT/srvlog" 2>/dev/null): $out"
 fi
@@ -499,6 +506,9 @@ st "R3+D2 DELETE 410 ticket_gone: used or expired" 1 "$(taken "$OTHER")" '' '410
 st "R3+D3 DELETE 500: 75" 75 "$(taken "$OTHER")" '' '500|{}|' required "repo delete " "$AGAIN"
 st "R3+D3 DELETE no answer: 75" 75 "$(taken "$OTHER")" '' '000|x|' required "repo delete " "$AGAIN"
 st "R3+D3 DELETE 200 cut: 75, not retired" 75 "$(taken "$OTHER")" '' "cut|$NEXT|" required "repo delete " "$AGAIN" "Submit again"
+st "R3+D3 DELETE 429 with Retry-After: 75 with the seconds" 75 "$(taken "$OTHER")" '' '429|{}|9' required "repo delete " "in about 9 seconds"
+st "R3+D3 DELETE 503 with Retry-After: 75 with the seconds" 75 "$(taken "$OTHER")" '' '503|{}|20' required "repo delete " "in about 20 seconds"
+st "R3+D3 DELETE 403: final, the ticket named" 1 "$(taken "$OTHER")" '' '403|{}|' required "repo delete " "retire the ticket was refused (HTTP 403"
 st "R4 409 taken without sha256: exit 1, no DELETE, no payload" 1 '409|{"code":"snapshot_taken"}|' '' '' required "repo " "did not say which"
 st "R4 ...an empty sha256 is no sha256" 1 '409|{"code":"snapshot_taken","sha256":""}|' '' '' required "repo " "did not say which"
 st "R5 404: gone, the payload not sent" 1 '404|{}|' '' '' required "repo " "$GONE_T; the payload was not sent"
@@ -506,8 +516,8 @@ st "R5 410: gone" 1 '410|{}|' '' '' required "repo " "get_findings"
 st "R6 413: the body printed, same answer again" 1 '413|{"code":"snapshot_too_large","error":"use /me/policy"}|' '' '' required "repo " "/me/policy"
 printf '%s' "$out" | grep -qF 'The same command would get the same answer' && ok "R6 ...says a rerun gets the same answer" || fail "R6 rerun sentence: $out"
 st "R6 413 then a broken upload (curl 55): the status is kept" 1 '413!|{"code":"snapshot_too_large"}|' '' '' required "repo " "refused (HTTP 413"
-st "R7 408 (variant A): final, with the three remedies" 1 '408!||' '' '' required "repo " "the snapshot did not reach the server in 5 minutes"
-printf '%s' "$out" | grep -qF 'a partial upload, diff mode at https://mcp.ohmybug.ai/me/policy, or push and hunt the pushed commit' && ok "R7 ...names the three remedies" || fail "R7 remedies: $out"
+st "R7 408 (variant A): final, with the remedies" 1 '408!||' '' '' required "repo " "the snapshot did not reach the server in 5 minutes"
+printf '%s' "$out" | grep -qF 'Tell the user: diff mode at https://mcp.ohmybug.ai/me/policy, or push and hunt the pushed commit.' && ok "R7 ...names the two remedies, no partial upload" || fail "R7 remedies: $out"
 for c in snapshot_busy snapshot_intake_full rate_limited; do
   st "R8 429 $c with Retry-After: 75 with the seconds, one request" 75 "429|{\"code\":\"$c\"}|7" '' '' required "repo " "run the same command again in about 7 seconds"
 done
@@ -522,6 +532,7 @@ for c in 500 502; do
   st "R10 $c: 75, no seconds, no payload" 75 "$c|{}|9" '' '' required "repo " "$AGAIN;" "in about"
 done
 st "R10 no answer (curl 7): 75" 75 '000|x|' '' '' required "repo " "$AGAIN;"
+st "R10 a 1xx as the last status: no answer, 75" 75 '100|x|' '' '' required "repo " "$AGAIN;"
 st "R10 a 200 cut mid-body (curl 18): no answer, 75" 75 'cut|{"ok":true}|' '' '' required "repo " "$AGAIN;"
 st "P1 200: exit 0, the body printed" 0 '' '200|{"ok":true,"status":"running"}|' '' required "repo payload " '"status":"running"'
 st "P1 200 duplicate: exit 0" 0 '' '200|{"ok":true,"status":"running","duplicate":true}|' '' required "repo payload " '"duplicate":true'
@@ -562,9 +573,46 @@ git -C "$R" checkout -q -- a.txt
 python3 -I - "$UP" <<'PY' && ok "no clock: no date, sleep, --max-time or retry in the script" || fail "no clock: the script reads a clock or retries"
 import re, sys
 code = "\n".join(l for l in open(sys.argv[1]).read().splitlines() if not l.lstrip().startswith("#"))
-sys.exit(1 if re.search(r"\$\(date\b|\bdate \+|\bsleep\b|--max-time|--retry|--speed-|\bwhile\b|\buntil\b", code) else 0)
+# One request per door: three call sites (snapshot, retire, payload), two curl lines in req().
+sys.exit(1 if re.search(r"\$\(date\b|\bdate \+|\bsleep\b|--max-time|--retry|--speed-", code)
+         or len(re.findall(r"^\s*req (POST|DELETE) ", code, re.M)) != 3 or code.count("curl -sS") != 2 else 0)
 PY
+fresh; plan delete "200|$NEXT|"; plan repo "$(taken "$OTHER")"; run "$R" "$URL" required "$P"
+fresh; plan delete "200|$NEXT|"; plan repo "$(taken "$OTHER")"; run "$R" "$URL" required "$P"
+grep -q -- '-X POST -H content-type: application/gzip --data-binary @.* https://mcp.ohmybug.ai/u/tok_1-A/repo$' "$STUB/args" \
+  && grep -q -- '-X DELETE https://mcp.ohmybug.ai/u/tok_1-A$' "$STUB/args" && ! grep -- '-X DELETE' "$STUB/args" | grep -q content-type \
+  && ok "content-type: the snapshot is application/gzip; the DELETE carries no body" || fail "content-type: $(cat "$STUB/args")"
+fresh; run "$R" "$URL" required "$P"
+grep -q -- '-X POST -H content-type: application/json --data-binary @.* https://mcp.ohmybug.ai/u/tok_1-A$' "$STUB/args" && ok "content-type: the payload is application/json" || fail "content-type payload: $(cat "$STUB/args")"
 grep -v -- '--connect-timeout 10 ' "$STUB/args" | grep -q . && fail "curl: a request without the connect timeout: $(cat "$STUB/args")" || ok "curl: every request has the 10 s connect timeout, nothing else limits it"
+
+# ---- 6b. --base: the script writes the diff; the branch name has a ref's shape
+BR="$ROOT/based"; mkdir -p "$BR"; g -C "$BR" init -q; printf 'a\n' > "$BR/a.txt"; g -C "$BR" add -A; g -C "$BR" commit -qm one
+g -C "$BR" update-ref refs/remotes/origin/main HEAD; printf 'b\n' >> "$BR/a.txt"; printf 'n\n' > "$BR/new.txt"; g -C "$BR" add -N new.txt
+fresh; run "$BR" "$URL" off --base main
+python3 -I - "$STUB/payload.1.sent" "$BR" <<'PY' && [ "$rc" = 0 ] && ok "--base: the payload's diff is git diff against the merge base, new files included" || fail "--base diff: rc $rc $out"
+import json, subprocess, sys
+want = subprocess.run(["git", "-C", sys.argv[2], "diff", "--no-textconv", "--no-ext-diff", "HEAD"], capture_output=True, text=True).stdout
+sys.exit(0 if json.load(open(sys.argv[1]))["diff"] == want and "+n" in want else 1)
+PY
+for b in "main'; touch $ROOT/pwned2; '" "-p" "--output=x" "ma in" 'ma$in' "" ; do
+  fresh; run "$BR" "$URL" off --base "$b"
+  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'is not a branch name this script accepts' && ok "--base refuses [$b] before anything" || fail "--base [$b]: rc $rc calls $(calls) $out"
+done
+[ -e "$ROOT/pwned2" ] && fail "--base: a branch name was evaluated"
+fresh; run "$BR" "$URL" off --base nosuch
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'no merge base with origin/nosuch' && ok "--base: a branch with no merge base refuses, nothing sent" || fail "--base nosuch: rc $rc $out"
+fresh; run "$BR" "$URL" off --base
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "--base with no name refuses" || fail "--base empty: rc $rc $out"
+
+# A .git that git cannot read (a worktree or submodule whose git folder moved)
+# is a broken repository, never a folder without git: it would be packed
+# without its .gitignore.
+BW="$ROOT/brokenwt"; mkdir -p "$BW/sub"; printf 'gitdir: %s/gone\n' "$ROOT" > "$BW/.git"; printf 'x\n' > "$BW/sub/a.py"; printf 'secret.log\n' > "$BW/.gitignore"
+for at in "$BW" "$BW/sub"; do
+  fresh; run "$at" "$URL" required "$P"
+  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q '.git is there but git cannot read it' && ok "a .git file whose folder is gone refuses ($(basename "$at")), nothing sent" || fail "broken .git ($at): rc $rc calls $(calls) $out"
+done
 
 # ---- 7. URL and arguments ------------------------------------------------------
 for bad in "https://evil.example/u/tok" "http://mcp.ohmybug.ai/u/tok" "https://mcp.ohmybug.ai/u/x; touch $ROOT/pwned" "https://mcp.ohmybug.ai/u/" "https://mcp.ohmybug.ai.evil/u/tok" "https://mcp.ohmybug.ai/u/a/../b"; do

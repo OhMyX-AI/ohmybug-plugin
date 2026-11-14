@@ -1,6 +1,6 @@
 """The credential detector: the one copy of the shapes.
 
-secret-scan.sh, beside it, imports it; skills/bughunter/omb-upload.sh runs it
+secret-scan.sh, beside it, imports it; omb-upload.sh, also beside it, runs it
 on the two files it posts. It lives in hooks/, not in the skill folder: the
 merge gate treats skills/ as prose, and an edit to the detector must count as
 a code change.

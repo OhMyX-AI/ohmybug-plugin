@@ -224,7 +224,7 @@ fillrun "$FX" '["outside.ts"]'
 check "paths: outside any repository nothing is sent" "$rc:$out" "2:"
 case "$err" in *"not inside one"*) echo "ok   paths: ...and the agent is told to send contents";; *) echo "FAIL paths: no-repo message: $err"; fails=$((fails + 1));; esac
 
-# The detector's file mode: the two files skills/bughunter/omb-upload.sh
+# The detector's file mode: the two files hooks/omb-upload.sh
 # posts, scanned before any POST.
 CORE="$G/omb_scan.py"
 FM="$FX/filemode"; mkdir -p "$FM"

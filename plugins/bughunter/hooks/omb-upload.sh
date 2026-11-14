@@ -1,12 +1,16 @@
 #!/bin/sh
+# omb-upload.sh <upload_url> <required|off> --base <branch> [context-file ...]
 # omb-upload.sh <upload_url> <required|off> <diff.patch> [context-file ...]
 #
 # Sends a payload hunt's bytes to its upload ticket: the repository snapshot
-# (with `required`), then {diff, files}. The skill runs this file; it never runs
-# a command a tool answer hands it. Only two values come from the server: the
+# (with `required`), then {diff, files}. With --base it writes the diff itself
+# (the working tree against the merge base with origin/<branch>); a diff file
+# is for the no-branch ladder. The skill runs this file; it never runs a
+# command a tool answer hands it. Only two values come from the server: the
 # upload URL, whose host is pinned below, and required|off. Neither is ever
-# evaluated. It sits in the skill folder, beside its detector (omb_scan.py), so
-# every install that has the skill has both.
+# evaluated, and the branch name is refused unless it has the shape of a ref.
+# It sits in hooks/, beside its detector (omb_scan.py): the merge gate counts
+# both as code. A skill-only install has neither, so it cannot upload.
 #
 # Order, all before the first request: build the payload, scan it, pack the
 # snapshot, scan that, take its sha256, print one manifest line. A credential
@@ -43,7 +47,7 @@ set -eu
 umask 077
 
 HOST=mcp.ohmybug.ai
-# The server's SNAPSHOT_SECRETS and the skill's OMB_SECRETS, name for name
+# The server's snapshot secret list and the skill's OMB_SECRETS, name for name
 # (omb-upload-test.sh holds the parity check).
 OMB_SECRETS='.env* *secret* *credential* id_rsa* id_dsa* id_ecdsa* id_ed25519* *.pem *.key *.p12 *.pfx
   .npmrc .netrc .pgpass .pypirc .git-credentials *.tfstate* *.tfvars* kubeconfig .kube .docker
@@ -54,8 +58,8 @@ die() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
 # sys.path. The script runs inside the user's repository, where a json.py would
 # otherwise be imported in place of the standard one.
 py() { python3 -I "$@"; }
-[ $# -ge 3 ] || die "usage: omb-upload.sh <upload_url> <required|off> <diff.patch> [context-file ...]"
-url=$1 patch=$3
+[ $# -ge 3 ] || die "usage: omb-upload.sh <upload_url> <required|off> (--base <branch> | <diff.patch>) [context-file ...]"
+url=$1
 # The one dispatch point: argv[2] is read here and nowhere else. snap says
 # what goes to <upload_url>/repo: whole = the working copy, empty = nothing
 # (diff mode). A partial arm goes here: it builds its path list and sets
@@ -65,26 +69,48 @@ case $2 in
   off) snap= ;;
   *) die "omb-upload: the second argument is required or off, got '$2'; nothing was sent" ;;
 esac
-shift 3
+shift 2
+base= patch=
+if [ "$1" = --base ]; then
+  [ $# -ge 2 ] || die "omb-upload: --base needs a branch name; nothing was sent"
+  base=$2; shift 2
+  # Only the shape of a ref: no quote, space or other shell byte, no leading dash.
+  case $base in ''|-*|*[!A-Za-z0-9._/-]*) die "omb-upload: '$base' is not a branch name this script accepts (letters, digits, '.', '_', '/', '-'; not starting with '-'); nothing was sent" ;; esac
+else
+  patch=$1; shift
+fi
 case $url in "https://$HOST/u/"*) tok=${url#"https://$HOST/u/"} ;; *) die "omb-upload: not an upload URL of $HOST; nothing was sent" ;; esac
 case $tok in ''|*[!A-Za-z0-9_-]*) die "omb-upload: not an upload URL of $HOST; nothing was sent" ;; esac
-[ -f "$patch" ] && [ -r "$patch" ] || die "omb-upload: cannot read the diff file $patch; nothing was sent"
+[ -n "$base" ] || { [ -f "$patch" ] && [ -r "$patch" ]; } || die "omb-upload: cannot read the diff file $patch; nothing was sent"
 command -v python3 >/dev/null 2>&1 || die "omb-upload: python3 not found, so nothing could be scanned and nothing was sent" 4
 py -c 'import sys; sys.exit(sys.version_info < (3, 7))' || die "omb-upload: python3 3.7 or newer is needed; nothing was sent" 4
 command -v curl >/dev/null 2>&1 || die "omb-upload: curl not found, so nothing could be sent" 4
-# The detector: hooks/omb_scan.py of the same plugin install.
-CORE=$(cd "$(dirname "$0")" && pwd)/../../hooks/omb_scan.py
+CORE=$(cd "$(dirname "$0")" && pwd)/omb_scan.py
 
 d=$(mktemp -d)
 trap 'rm -rf "$d"' EXIT
-trap 'exit 1' HUP INT TERM
+# A stopped call is "nothing final known", as the skill reads a call stopped at 600 s.
+trap 'exit 75' HUP INT TERM
 
-# A folder without git: the server's noGitWrapper. Only on "not a git
-# repository" (read in the C locale, so a translated git says it the same way);
-# a repository git refuses to read (an ownership check) stops here rather than
+if [ -n "$base" ]; then
+  patch="$d/diff.patch"
+  mb=$(git merge-base HEAD "origin/$base" 2>/dev/null) || die "omb-upload: no merge base with origin/$base here (is the branch fetched?); nothing was sent"
+  git diff --no-textconv --no-ext-diff "$mb" > "$patch" || die "omb-upload: git diff failed (above); nothing was sent"
+fi
+
+# A folder without git: packed as the server packs one. Only on "not a git
+# repository" (read in the C locale, so a translated git says it the same way)
+# AND no .git entry here or above: a repository git refuses to read (an
+# ownership check, a .git file whose folder is gone) stops here rather than
 # being packed without its .gitignore.
 if ! err=$(LC_ALL=C git rev-parse --git-dir 2>&1 >/dev/null); then
   case $err in *"not a git repository"*) ;; *) die "omb-upload: git cannot read this repository ($err); nothing was sent" ;; esac
+  p=$(pwd -P)
+  while :; do
+    [ -e "$p/.git" ] || [ -L "$p/.git" ] && die "omb-upload: $p/.git is there but git cannot read it ($err); nothing was sent. Repair the repository (a worktree or submodule whose git folder moved), then run the same command again."
+    [ "$p" = / ] && break
+    p=$(dirname "$p")
+  done
   nogit=1
   export GIT_DIR="$d/w"
   git init -q --bare "$GIT_DIR"
@@ -94,7 +120,7 @@ else
   nogit=0
 fi
 
-# The packing step: the server's snapshotPack, statement for statement, in a
+# The packing step: the server's own packing recipe, statement for statement, in a
 # folder of this script's ($1) instead of its own mktemp. Additions: $2, a
 # NUL-separated list of paths to leave out (the credential hits of a first
 # pack), removed from the temporary index before write-tree; the tree id
@@ -108,8 +134,8 @@ pack() (
   k=$1 drop=$2
   set -e; umask 077; unset CDPATH; r=$(git rev-parse --show-toplevel); cd "$r"
   if [ "${OMB_SNAPSHOT_HOME_OK:-}" != 1 ]; then
-    h=; [ -n "${HOME:-}" ] && h=$(cd "$HOME" 2>/dev/null && pwd -P) || :; [ -n "$h" ] || { echo "refusing to pack: HOME is not set to a folder this shell can enter, so the home-folder check cannot run; if this folder is the project, run export OMB_SNAPSHOT_HOME_OK=1 in this shell, then the command again" >&2; exit 1; }
-    p=$(pwd -P); case "$h/" in "${p%/}/"*) echo "refusing to pack $p: it is your home folder or a folder above it; run this from the project folder, or, if this folder is the project itself (a container checkout), run export OMB_SNAPSHOT_HOME_OK=1 in this shell, then the command again" >&2; exit 1;; esac
+    h=; [ -n "${HOME:-}" ] && h=$(cd "$HOME" 2>/dev/null && pwd -P) || :; [ -n "$h" ] || { echo "refusing to pack: HOME is not set to a folder this shell can enter, so the home-folder check cannot run; if this folder is the project, run the same command again as one call with OMB_SNAPSHOT_HOME_OK=1 in front of it (OMB_SNAPSHOT_HOME_OK=1 bash .../omb-upload.sh ...)" >&2; exit 1; }
+    p=$(pwd -P); case "$h/" in "${p%/}/"*) echo "refusing to pack $p: it is your home folder or a folder above it; run this from the project folder, or, if this folder is the project itself (a container checkout), run the same command again as one call with OMB_SNAPSHOT_HOME_OK=1 in front of it (OMB_SNAPSHOT_HOME_OK=1 bash .../omb-upload.sh ...)" >&2; exit 1;; esac
   fi
   o=$(cd "$(git rev-parse --git-path objects)" && pwd); rm -rf "$k"; mkdir "$k"
   cp "$(git rev-parse --git-path index)" "$k/i" 2>/dev/null || :; f=$(git rev-parse --show-object-format 2>/dev/null) || :; case $f in sha1|sha256) g=--object-format=$f;; *) g=;; esac; mkdir -p "$k/o/info"; printf '%s\n' "$o" > "$k/o/info/alternates"; export GIT_INDEX_FILE="$k/i" GIT_OBJECT_DIRECTORY="$k/o"; s='-c splitIndex.maxPercentChange=100'
@@ -192,9 +218,10 @@ for sec in secs:
     try:
         text = sec.decode("utf-8")
     except UnicodeDecodeError:
-        who = names(sec.decode("utf-8", "replace")) or ["the diff"]
-        sys.stderr.write("omb-upload: the diff of %s is not valid UTF-8 text, so it cannot be sent; nothing was sent. "
-                         "Leave that file out of the diff, or convert it, and run the same command again.\n" % who[-1])
+        who = names(sec.decode("utf-8", "replace"))
+        sys.stderr.write("omb-upload: %s is not valid UTF-8 text, so it cannot be sent; nothing was sent. "
+                         "Leave that file out of the diff, or convert it, and run the same command again.\n"
+                         % ("the diff of " + who[-1] if who else "the diff"))
         sys.exit(1)
     n = names(text) if text.startswith("diff --git ") else []
     if any(secret(x) for x in n):
@@ -238,7 +265,7 @@ PY
 scan_off=0
 [ "${OHMYBUG_SECRET_SCAN:-1}" = 0 ] && scan_off=1
 if [ "$scan_off" = 0 ]; then
-  [ -f "$CORE" ] || die "omb-upload: the credential detector (hooks/omb_scan.py) is not installed beside this skill, so nothing could be scanned and nothing was sent"
+  [ -f "$CORE" ] || die "omb-upload: the credential detector (omb_scan.py) is not installed beside this script, so nothing could be scanned and nothing was sent. Push the branch and hunt the pushed commit (rung 1), or install the full plugin."
   set +e
   py "$CORE" --payload "$d/payload.json"; rc=$?
   set -e
@@ -299,7 +326,7 @@ snapline() {
     printf ' + repository snapshot of %s, %s packed. Left out: git-ignored files, submodules, secret-named files' "$(files "$total")" "$size"
   else
     packed=$(cat "$d/count")
-    printf ' + repository snapshot %s, %s packed. Left out: git-ignored files, submodules, %s' "$(files "$packed")" "$size" "$(files "$((total - packed))" secret-named)"
+    printf ' + repository snapshot of %s, %s packed. Left out: git-ignored files, submodules, %s' "$(files "$packed")" "$size" "$(files "$((total - packed))" secret-named)"
   fi
   printf ' (.env*, *.pem, *.key and %s more patterns), LFS content (pointers only)' "$((npat - 3))"
   if [ "$nogit" = 1 ]; then printf '; folder without git: top-level dot-folders, node_modules, __pycache__ and build output also left out'; fi
@@ -309,14 +336,15 @@ snapline() {
 # server's own limits end a slow transfer (408 at 300 s). A status curl
 # printed is the answer even when the transfer then failed (an early 409, a
 # 413 or a 408 close the connection mid-upload), except a 2xx: that body was
-# cut, so it is no answer (000). The body and header files are new per request.
+# cut, so it is no answer (000). A 1xx as the last status is no answer either. The body and header files are new per request.
 req() { # method url [file content-type] -> $code, body in $d/body, headers in $d/hdr
   : > "$d/body"; : > "$d/hdr"
   if [ $# -gt 2 ]; then
-    code=$(curl -sS --connect-timeout 10 -o "$d/body" -D "$d/hdr" -w '%{http_code}' -X "$1" -H "content-type: $4" --data-binary @"$3" "$2") || case $code in [13-5][0-9][0-9]) ;; *) code=000 ;; esac
+    code=$(curl -sS --connect-timeout 10 -o "$d/body" -D "$d/hdr" -w '%{http_code}' -X "$1" -H "content-type: $4" --data-binary @"$3" "$2") || case $code in [3-5][0-9][0-9]) ;; *) code=000 ;; esac
   else
-    code=$(curl -sS --connect-timeout 10 -o "$d/body" -D "$d/hdr" -w '%{http_code}' -X "$1" "$2") || case $code in [13-5][0-9][0-9]) ;; *) code=000 ;; esac
+    code=$(curl -sS --connect-timeout 10 -o "$d/body" -D "$d/hdr" -w '%{http_code}' -X "$1" "$2") || case $code in [3-5][0-9][0-9]) ;; *) code=000 ;; esac
   fi
+  case $code in 1??) code=000 ;; esac
 }
 # A string field of the JSON answer, one line, control bytes as spaces; empty
 # when absent. Only compared or printed, never evaluated.
@@ -329,7 +357,7 @@ body() { [ -s "$d/body" ] && { tr '\n' ' ' < "$d/body"; echo; }; :; }
 retry_after() { sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]:[[:space:]]*\([0-9]\{1,9\}\)[[:space:]]*$/\1/p' "$d/hdr" 2>/dev/null | tail -n 1; }
 rerun() { body; die "omb-upload: no final answer from the server. Call get_findings for this review: with awaiting_upload true, run the same command again${1:+ in about $1 seconds}; otherwise do what it says." 75; }
 GONE="the ticket is used or expired; the payload was not sent. Call get_findings for this review: if it is running, watch it; else submit again."
-slow() { die "omb-upload: the $1 did not reach the server in 5 minutes on this connection; the same command would take as long. Tell the user: a partial upload, diff mode at https://$HOST/me/policy, or push and hunt the pushed commit."; }
+slow() { die "omb-upload: the $1 did not reach the server in 5 minutes on this connection; the same command would take as long. Tell the user: diff mode at https://$HOST/me/policy, or push and hunt the pushed commit."; }
 
 # The retire door, only on a digest mismatch: one DELETE, and the payload is never sent.
 retire() {
@@ -338,7 +366,9 @@ retire() {
     200) nx=$(field next); if [ -n "$nx" ]; then printf '%s\n' "$nx"; else body; fi
          die "omb-upload: the ticket held a snapshot of another state of this working copy, so it was retired and nothing was hunted. Submit again as above and run this command with the new upload_url." ;;
     404|410) body; die "omb-upload: $GONE" ;;
-    *) rerun ;;
+    429|503) rerun "$(retry_after)" ;;
+    000|5??) rerun ;;
+    *) body; die "omb-upload: the request to retire the ticket was refused (HTTP $code, above), and the payload was not sent. The ticket holds a snapshot of another state of this working copy: call get_findings for this review and tell the user." ;;
   esac
 }
 
@@ -363,7 +393,12 @@ send_snapshot() {
 if [ -n "$snap" ]; then
   snapshot
   # The digest of the exact file posted, as the server hashes what it stores.
-  sha=$(py -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$d/k/s.tgz")
+  sha=$(py -c 'import hashlib, sys
+h = hashlib.sha256()
+with open(sys.argv[1], "rb") as f:
+    for b in iter(lambda: f.read(1 << 20), b""):
+        h.update(b)
+print(h.hexdigest())' "$d/k/s.tgz")
   manifest "$(snapline)"
   send_snapshot
 else

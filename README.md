@@ -127,6 +127,8 @@ codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp
 
 `codex mcp add` detects OAuth and opens the GitHub sign-in flow automatically.
 
+A skill-only install has no upload script (it ships with the full plugin), so it cannot hunt uncommitted work: push the branch and hunt the pushed commit, or install the full plugin.
+
 For headless CI, use an operator-issued raw `omb_` key — write to
 [hi@ohmybug.ai](mailto:hi@ohmybug.ai) or DM [@ohmybug](https://x.com/ohmybug)
 to get one:
