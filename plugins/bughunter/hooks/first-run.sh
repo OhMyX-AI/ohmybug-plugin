@@ -62,7 +62,10 @@ tool = str(d.get("tool_name") or "")
 # Every rule in the four files a user edits. Allow, ask and deny are all
 # decisions: re-suggesting a rule against a deliberate deny would be nagging
 # someone to undo their own choice.
-P = "mcp__plugin_bughunter_ohmybug"
+# The key server of the README (`claude mcp add ... ohmybug`) hides the plugin server
+# of the same URL, and its tools are mcp__ohmybug__*: a rule for the plugin name
+# would match nothing there. Before a call the live name is known.
+P = "mcp__ohmybug" if tool.startswith("mcp__ohmybug__") else "mcp__plugin_bughunter_ohmybug"
 rules, mentioned = [], False
 for f in (home + "/.claude/settings.json", home + "/.claude/settings.local.json",
           proj + "/.claude/settings.json", proj + "/.claude/settings.local.json"):
@@ -70,7 +73,7 @@ for f in (home + "/.claude/settings.json", home + "/.claude/settings.local.json"
         text = open(f, encoding="utf-8", errors="replace").read()
     except OSError:
         continue
-    mentioned = mentioned or "bughunter_ohmybug" in text
+    mentioned = mentioned or "bughunter_ohmybug" in text or "mcp__ohmybug__" in text
     try:
         perms = json.loads(text).get("permissions") or {}
     except (ValueError, AttributeError):
@@ -96,7 +99,8 @@ if not mentioned:
                "refuses the files the reviewers ask for mid-run, at any size; the hunt then\n"
                "goes on without them. One rule lets the OhMyBug\n"
                "tools through, and only you can add it — /permissions -> Add rule ->\n"
-               "mcp__plugin_bughunter_ohmybug__* . One tool at a time instead? Then allow both\n"
+               + P + "__* ." + ("" if tool else " (mcp__ohmybug__* if you added the OhMyBug server\n"
+               "yourself with claude mcp add.)") + " One tool at a time instead? Then allow both\n"
                + P + "__submit_review and " + P + "__provide_files .\n"
                + "Nothing will add them for you. With the rule, the files go through the plugin,\n"
                "read from disk; no shell command uploads them.")

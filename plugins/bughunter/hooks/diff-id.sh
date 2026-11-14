@@ -340,7 +340,8 @@ for path in sys.argv[1:]:
     except Exception:
         continue
     rules = (data.get("permissions") or {}).get("allow") or []
-    if any("bughunter_ohmybug" in str(r) for r in rules):
+    # mcp__ohmybug__*: the README's key server, which hides the plugin's own (same URL).
+    if any("bughunter_ohmybug" in str(r) or str(r).startswith("mcp__ohmybug__") for r in rules):
         sys.exit(0)
 sys.exit(1)
 PY

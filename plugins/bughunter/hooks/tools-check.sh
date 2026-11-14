@@ -26,7 +26,10 @@ set -euo pipefail
 
 [ -n "${PLUGIN_DATA:-}" ] && exit 0
 
-NOTE='First thing this session: confirm the OhMyBug MCP tools (mcp__plugin_bughunter_ohmybug__*) are present. If they are not, tell the user once, now — a session that began without them will not get them, and a restart (claude -c) usually does — then let the user decide and go on with what they asked; do not leave the discovery to the merge gate hours later.'
+# A user who also added the README's key server (`claude mcp add ... ohmybug`) gets
+# that server's tools, mcp__ohmybug__*: Claude Code hides the plugin's server of the
+# same URL as a duplicate, and the hunt works through the other name.
+NOTE='First thing this session: confirm the OhMyBug MCP tools are present: mcp__plugin_bughunter_ohmybug__*, or mcp__ohmybug__* when the user added the OhMyBug server with claude mcp add (Claude Code then hides the plugin'"'"'s server of the same URL; the hunt works through those tools: use them, and tell the user so in one line). If neither is there, tell the user once, now — a session that began without them will not get them, and a restart (claude -c) usually does — then let the user decide and go on with what they asked; do not leave the discovery to the merge gate hours later.'
 
 python3 - "$NOTE" <<'PY' || exit 0
 import json, sys

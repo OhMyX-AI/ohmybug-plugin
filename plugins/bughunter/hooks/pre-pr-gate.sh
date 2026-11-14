@@ -676,7 +676,7 @@ fi
 # we could have blocked — the harmless direction. Ask the client for the answer
 # if a hook API ever offers one.
 if [ -n "$ATTEMPT" ] && ! ohmybug_tools_allowed; then
-  MSG="OhMyBug: a submit_review call was made for this diff and no findings came back, and the hunt tools are not permitted in this environment — so the gate has nothing to stand on and is allowing the merge. To arm it, add one permission rule yourself: /permissions -> mcp__plugin_bughunter_ohmybug__*"
+  MSG="OhMyBug: a submit_review call was made for this diff and no findings came back, and the hunt tools are not permitted in this environment — so the gate has nothing to stand on and is allowing the merge. To arm it, add one permission rule yourself: /permissions -> mcp__plugin_bughunter_ohmybug__* (mcp__ohmybug__* if you added the OhMyBug server yourself with claude mcp add)"
   echo "$MSG" >&2
   echo "$MSG"
   exit 0

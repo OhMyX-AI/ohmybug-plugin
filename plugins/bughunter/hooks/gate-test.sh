@@ -2067,7 +2067,8 @@ say() { OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G
 # still hears it once.
 [ -z "$(PLUGIN_DATA=/x say)" ] || { printf 'FAIL first-run: gave Codex the Claude Code permission note\n'; fails=$((fails + 1)); }
 [ ! -e "$FR/state/permission-notice-v1" ] || { printf 'FAIL first-run: Codex consumed the once-per-machine mark\n'; fails=$((fails + 1)); }
-[ -n "$(say)" ] || { printf 'FAIL first-run: said nothing on a fresh install\n'; fails=$((fails + 1)); }
+case "$(say)" in *'/permissions -> Add rule ->\nmcp__plugin_bughunter_ohmybug__* . (mcp__ohmybug__* if you added'*) ;;
+  *) printf 'FAIL first-run: a fresh install did not name both rules\n'; fails=$((fails + 1)) ;; esac
 [ -z "$(say)" ] || { printf 'FAIL first-run: said it twice\n'; fails=$((fails + 1)); }
 rm -rf "$FR/state"
 mkdir -p "$FR/.claude"
@@ -2116,6 +2117,24 @@ rm -f "$FR/.claude/settings.local.json"
 mkdir -p "$FR/p/.claude"
 printf '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__provide_files"]}}\n' > "$FR/p/.claude/settings.json"
 fr_row "a project rule counts too" "$(pre provide_files auto s5)" ''
+
+# The README's key server (claude mcp add ... ohmybug) hides the plugin's server of
+# the same URL, and its tools are mcp__ohmybug__*: the advice names that rule, and a
+# rule of that name is a decision (#3158).
+rm -rf "$FR/state" "$FR/.claude" "$FR/p/.claude"; mkdir -p "$FR/.claude"
+kpre() { printf '{"hook_event_name":"PreToolUse","tool_name":"mcp__ohmybug__%s","permission_mode":"auto","session_id":"%s"}' "$1" "$2" \
+  | OMB_STATE_DIR="$FR/state" HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash "$G/first-run.sh"; }
+fr_row "key server: the notice names its rule" "$(kpre get_balance k1)" 'Add rule ->\\nmcp__ohmybug__\* \. One tool'
+fr_row "key server: the provide_files hint names its tool" "$(kpre provide_files k1)" 'Add rule -> mcp__ohmybug__provide_files'
+printf '{"permissions":{"allow":["mcp__ohmybug__*"]}}\n' > "$FR/.claude/settings.json"
+fr_row "key server: its rule decides submit" "$(kpre submit_review k2)" ''
+fr_row "key server: its rule decides provide_files" "$(kpre provide_files k2)" ''
+for r in 'mcp__ohmybug__*' 'mcp__plugin_bughunter_ohmybug__*' ''; do
+  printf '{"permissions":{"allow":["%s"]}}\n' "$r" > "$FR/.claude/settings.json"
+  want=0; [ -n "$r" ] || want=1
+  got=$(HOME="$FR" CLAUDE_PROJECT_DIR="$FR/p" bash -c ". '$G/diff-id.sh'; ohmybug_tools_allowed; echo \$?")
+  [ "$got" = "$want" ] || { printf 'FAIL tools-allowed: rule [%s] gave %s, want %s\n' "$r" "$got" "$want"; fails=$((fails + 1)); }
+done
 
 # --- the scan hint: once per machine, Claude Code only, a suggestion ----------
 SH=$(mktemp -d)
@@ -2169,7 +2188,7 @@ for turn in 1 2; do
 import json, sys
 d = json.loads(sys.argv[1])
 ctx = d.get('hookSpecificOutput', {}).get('additionalContext', '')
-ok = ('confirm the OhMyBug MCP tools (mcp__plugin_bughunter_ohmybug__*) are present' in ctx
+ok = ('confirm the OhMyBug MCP tools are present: mcp__plugin_bughunter_ohmybug__*, or mcp__ohmybug__*' in ctx
       and 'tell the user once' in ctx and 'go on with what they asked' in ctx
       and 'do not start' not in ctx and 'systemMessage' not in d)
 sys.exit(0 if ok else 1)

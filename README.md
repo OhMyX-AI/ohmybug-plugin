@@ -120,10 +120,13 @@ codex mcp add ohmybug --url https://mcp.ohmybug.ai/mcp \
   --bearer-token-env-var OHMYBUG_API_KEY
 ```
 
-(Claude Code users who prefer a key over OAuth can do the same with
+(Claude Code without the plugin, for example in CI, can do the same with
 `claude mcp add --transport http ohmybug https://mcp.ohmybug.ai/mcp
---header "Authorization: Bearer $OHMYBUG_API_KEY"` — an explicit
-Authorization header disables the OAuth flow.)
+--header "Authorization: Bearer $OHMYBUG_API_KEY"`; an explicit
+Authorization header disables the OAuth flow. With the plugin installed, sign
+in through the plugin instead: a second server at the same URL makes Claude
+Code hide the plugin's own, and its tools then carry the name
+`mcp__ohmybug__*`, so permission rules must use that name.)
 
 Questions → [Discord](https://discord.gg/6d7g8J44C7).
 
