@@ -206,7 +206,7 @@ repository per week, and is not a merge gate.
   `/me/policy` sends the diff without the snapshot. Set
   `OHMYBUG_SECRET_SCAN=0` (in the `env` block of `settings.json`) to turn the
   scan off.
-- The upload script's boundary: POSIX sh (dash, bash 3.2+, busybox ash),
+- The upload script's boundary: POSIX sh (tested under dash and bash on Linux and bash 3.2 on macOS),
   git >= 2.25, python3 >= 3.7, curl, gzip, on macOS or Linux. Anything else
   is unsupported: where the script can tell (python3 missing or older than
   3.7, no curl) it refuses with one sentence, and it never sends what it did

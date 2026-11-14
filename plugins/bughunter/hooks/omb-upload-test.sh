@@ -106,7 +106,7 @@ PY
 [ "$script" = "$SERVER" ] && ok "the script's secret list is the server's" || fail "secret list: script has [$script]"
 [ "$skill" = "$SERVER" ] && ok "the skill's OMB_SECRETS is the server's" || fail "secret list: SKILL.md has [$skill]"
 
-# ---- 2. Pack: the server's snapshot-recipe cases, ported ------------------
+# ---- 2. Pack: what goes into the snapshot and what stays out -------------
 fixture() { # $1 dir, $2 commit (1/0)
   local r=$1
   mkdir -p "$r" && g -C "$r" init -q
@@ -228,11 +228,11 @@ else fail "key in snapshot: rc $rc [$n] $out"; fi
 printf '%s' "$out" | grep -q 'credential match: conf/leak.yml' && ok "manifest: the left-out file is named" || fail "manifest: leak.yml not named: $out"
 python3 -I "$G/omb_scan.py" --snapshot "$STUB/repo.1.sent" "$ROOT/hits" >/dev/null 2>&1 && ok "the snapshot sent is the one scanned clean" || fail "the snapshot sent does not scan clean"
 # Two dropped files are two names; a control byte inside a name becomes "?", and the manifest stays one line.
-cp "$R/conf/leak.yml" "$R/conf/$(printf 'two\033.yml')"
+cp "$R/conf/leak.yml" "$R/conf/$(printf 'two,x\033.yml')"
 fresh; run "$R" "$URL" required "$P"
 first=$(grep '^OhMyBug upload' "$STUB/transcript")
-case $first in *'credential match: conf/leak.yml, conf/two?.yml.') [ "$(names | tr '\n' ' ')" = "a.txt conf/ok.yml " ] && ok "manifest: two left-out files are two names, control bytes replaced" || fail "two drops: packed [$(names | tr '\n' ' ')]" ;; *) fail "two drops glued or split: $first" ;; esac
-rm -f "$R/conf/$(printf 'two\033.yml')"
+case $first in *'credential match: conf/leak.yml, conf/two,x?.yml.') [ "$(names | tr '\n' ' ')" = "a.txt conf/ok.yml " ] && ok "manifest: two left-out files are two names, a comma in a name kept, control bytes replaced" || fail "two drops: packed [$(names | tr '\n' ' ')]" ;; *) fail "two drops glued or split: $first" ;; esac
+rm -f "$R/conf/$(printf 'two,x\033.yml')"
 fresh; out=$(cd "$R" && OHMYBUG_SECRET_SCAN=0 PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required "$KP" 2>&1); rc=$?
 [ "$rc" = 0 ] && [ "$(calls)" = 2 ] && printf '%s' "$out" | grep -q 'Credential scan: off (OHMYBUG_SECRET_SCAN=0)' && ok "OHMYBUG_SECRET_SCAN=0: sent, and the manifest says scan off" || fail "scan off: rc $rc $out"
 tar -tzf "$STUB/repo.1.sent" | grep -qx conf/leak.yml && ok "scan off: nothing is dropped either" || fail "scan off: leak.yml dropped"
@@ -247,7 +247,8 @@ NC="$ROOT/nocurl"; mkdir -p "$NC"
 for t in git sh bash mktemp dirname rm mkdir cp xargs grep tr paste awk wc tar cat sed env python3; do ln -sf "$(command -v "$t")" "$NC/$t"; done
 fresh; out=$(cd "$R" && PATH="$NC" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 4 ] && printf '%s' "$out" | grep -q 'curl not found' && ok "no curl: exit 4, said once" || fail "no curl: rc $rc $out"
-# An unscannable snapshot is not sent.
+# A scan that fails refuses (the payload's scan runs first and raises here;
+# a failing snapshot scan is the stand-in detector rows below).
 fresh; out=$(cd "$R" && OHMYBUG_TEST_SCAN_RAISE=1 PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "a scan that fails refuses, nothing sent" || fail "scan failure: rc $rc calls $(calls) $out"
 
@@ -338,7 +339,7 @@ NG="$ROOT/nogit2"; mkdir -p "$NG"; printf 'x\n' > "$NG/main.py"
 fresh; out=$(cd "$NG" && PATH="$GB:$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'folder without git' && ok "the no-git probe is locale-proof" || fail "no-git probe locale: rc $rc $out"
 # CRLF and a lone CR survive; a diff that is not UTF-8 refuses, naming its file.
-printf 'diff --git a/w.bat b/w.bat\n--- a/w.bat\n+++ b/w.bat\n@@ -1 +1,2 @@\n a\r\n+b\r\n+c\rd\n' > "$ROOT/crlf.patch"
+printf 'diff --git a/w.bat b/w.bat\n--- a/w.bat\n+++ b/w.bat\n@@ -1 +1,3 @@\n a\r\n+b\r\n+c\rd\n' > "$ROOT/crlf.patch"
 fresh; run "$R" "$URL" required "$ROOT/crlf.patch"
 python3 - "$STUB/payload.1.sent" "$ROOT/crlf.patch" <<'PY' && ok "CRLF and a lone CR reach the payload unchanged" || fail "CRLF: $out"
 import json, sys
@@ -346,7 +347,8 @@ sys.exit(0 if json.load(open(sys.argv[1], encoding="utf-8"))["diff"].encode() ==
 PY
 printf 'diff --git a/ok.py b/ok.py\n--- a/ok.py\n+++ b/ok.py\n@@ -1 +1 @@\n+x\ndiff --git a/latin.txt b/latin.txt\n--- a/latin.txt\n+++ b/latin.txt\n@@ -1 +1 @@\n+caf\351\n' > "$ROOT/latin.patch"
 fresh; run "$R" "$URL" required "$ROOT/latin.patch"
-[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'the diff of latin.txt is not valid UTF-8' && ok "a diff that is not UTF-8 refuses, naming the file" || fail "non-UTF-8 diff: rc $rc $out"
+python3 -I -c 'import json, sys; d = json.load(open(sys.argv[1]))["diff"]; sys.exit(0 if "ok.py" in d and "latin" not in d else 1)' "$STUB/payload.1.sent" 2>/dev/null \
+  && [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'Left out of the diff as not UTF-8 text: latin.txt' && printf '%s' "$out" | grep -q '(1 file)' && ok "a file whose diff is not UTF-8 is left out and named; the rest goes" || fail "non-UTF-8 diff: rc $rc $out"
 # Secret-named files are out of the diff as they are out of the snapshot, and named.
 printf 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n+ok\ndiff --git a/.env.local b/.env.local\nnew file mode 100644\n--- /dev/null\n+++ b/.env.local\n@@ -0,0 +1 @@\n+PORT=1\ndiff --git a/config/Secrets/db.yml b/config/Secrets/db.yml\n--- a/config/Secrets/db.yml\n+++ b/config/Secrets/db.yml\n@@ -1 +1 @@\n+x\ndiff --git "a/k\\303\\251y.PEM" "b/k\\303\\251y.PEM"\n--- "a/k\\303\\251y.PEM"\n+++ "b/k\\303\\251y.PEM"\n@@ -1 +1 @@\n+y\n' > "$ROOT/sec.patch"
 fresh; run "$R" "$URL" required "$ROOT/sec.patch"
@@ -376,7 +378,7 @@ fresh; run "$R" "$URL" required "$P"
 printf '%s' "$out" | grep -q 'conf/leak.yml:1 AWS access key (AKIA...GH)' && ok "the snapshot's masked hits are shown" || fail "snapshot hits hidden: $out"
 rm -rf "$R/conf"
 
-# ---- 5c. The audit's rows ----------------------------------------------------
+# ---- 5c. Diff names, old python, secret-named context, signals ------------
 # Inside a hunk, "--- x" is a removed "-- x" line and "+++ x" an added "++ x":
 # never a file name. A mode-only change has no ---/+++ lines: its name comes
 # from the diff --git header alone.
@@ -420,7 +422,7 @@ printf '%s' "$out" | grep -q 'and 24 more patterns' && ok "the pattern count ign
 rm -f "$R/a.key" "$R/b.key"
 # Context files given with a snapshot are named as not sent.
 fresh; run "$R" "$URL" required "$P" a.txt
-printf '%s' "$out" | grep -q 'context files are not sent with a repository snapshot' && ok "context files with a snapshot: said" || fail "context note: $out"
+printf '%s' "$out" | grep -q 'context files are not sent with a repository snapshot' && ! printf '%s' "$out" | grep -q 'Not sent (' && ok "context files with a snapshot: said once, as not sent with a snapshot" || fail "context note: $out"
 # A signal mid-POST removes the private folder. Under dash where there is one:
 # bash runs the EXIT trap on TERM by itself, dash only through the script's trap.
 SIGSH=$(command -v dash || echo sh)
@@ -516,7 +518,7 @@ st "R5 410: gone" 1 '410|{}|' '' '' required "repo " "get_findings"
 st "R6 413: the body printed, same answer again" 1 '413|{"code":"snapshot_too_large","error":"use /me/policy"}|' '' '' required "repo " "/me/policy"
 printf '%s' "$out" | grep -qF 'The same command would get the same answer' && ok "R6 ...says a rerun gets the same answer" || fail "R6 rerun sentence: $out"
 st "R6 413 then a broken upload (curl 55): the status is kept" 1 '413!|{"code":"snapshot_too_large"}|' '' '' required "repo " "refused (HTTP 413"
-st "R7 408 (variant A): final, with the remedies" 1 '408!||' '' '' required "repo " "the snapshot did not reach the server in 5 minutes"
+st "R7 408 (the server stopped receiving at 300 s): final, with the remedies" 1 '408!||' '' '' required "repo " "the snapshot did not reach the server in 5 minutes"
 printf '%s' "$out" | grep -qF 'Tell the user: diff mode at https://mcp.ohmybug.ai/me/policy, or push and hunt the pushed commit.' && ok "R7 ...names the two remedies, no partial upload" || fail "R7 remedies: $out"
 for c in snapshot_busy snapshot_intake_full rate_limited; do
   st "R8 429 $c with Retry-After: 75 with the seconds, one request" 75 "429|{\"code\":\"$c\"}|7" '' '' required "repo " "run the same command again in about 7 seconds"
@@ -543,7 +545,7 @@ st "P3 410 snapshot_partial_unsupported: gone, the body printed" 1 '' '410|{"cod
 st "P4 413: refused, same answer again" 1 '' '413|{"code":"too_large"}|' '' required "repo payload " "The same command would get the same answer"
 st "P5 429 with Retry-After: 75 with the seconds" 75 '' '429|{"code":"rate_limited"}|5' '' required "repo payload " "in about 5 seconds"
 st "P5 503 with Retry-After 120: 75 with the seconds" 75 '' '503|{}|120' '' required "repo payload " "in about 120 seconds"
-st "P6 408 (variant A): final" 1 '' '408||' '' required "repo payload " "the payload did not reach the server in 5 minutes"
+st "P6 408 (the server stopped receiving at 300 s): final" 1 '' '408||' '' required "repo payload " "the payload did not reach the server in 5 minutes"
 st "P7 500: 75, no seconds" 75 '' '500|{}|9' '' required "repo payload " "$AGAIN;" "in about"
 st "P7 no answer: 75" 75 '' '000|x|' '' required "repo payload " "$AGAIN;"
 st "P7 a 200 cut mid-body: 75" 75 '' 'cut|{"ok":true}|' '' required "repo payload " "$AGAIN;"
@@ -553,7 +555,6 @@ st "P8 409 of another kind in diff mode: refused" 1 '' '409|{"code":"other"}|' '
 # dispatch: off sends no /repo and required no payload mark (covered above:
 # "the payload carries the diff" compares the whole payload); here, the URLs.
 st "dispatch: off sends no /repo" 0 '' '' '' off "payload "
-grep -q 'pack=' "$STUB/transcript" && fail "dispatch: a pack= query without a partial pack" || ok "dispatch: no pack= query on a whole or no snapshot"
 
 # The digest: real git, real packs. Same tree, twice, 2 s apart: equal; one edit: different.
 fresh; run "$R" "$URL" required "$P"; d1=$(sha "$STUB/repo.1.sent")
@@ -574,27 +575,47 @@ python3 -I - "$UP" <<'PY' && ok "no clock: no date, sleep, --max-time or retry i
 import re, sys
 code = "\n".join(l for l in open(sys.argv[1]).read().splitlines() if not l.lstrip().startswith("#"))
 # One request per door: three call sites (snapshot, retire, payload), two curl lines in req().
-sys.exit(1 if re.search(r"\$\(date\b|\bdate \+|\bsleep\b|--max-time|--retry|--speed-", code)
+sys.exit(1 if re.search(r"\$\(date\b|\bdate \+|\bsleep\b|--max-time|--retry", code)
          or len(re.findall(r"^\s*req (POST|DELETE) ", code, re.M)) != 3 or code.count("curl -sS") != 2 else 0)
 PY
-fresh; plan delete "200|$NEXT|"; plan repo "$(taken "$OTHER")"; run "$R" "$URL" required "$P"
 fresh; plan delete "200|$NEXT|"; plan repo "$(taken "$OTHER")"; run "$R" "$URL" required "$P"
 grep -q -- '-X POST -H content-type: application/gzip --data-binary @.* https://mcp.ohmybug.ai/u/tok_1-A/repo$' "$STUB/args" \
   && grep -q -- '-X DELETE https://mcp.ohmybug.ai/u/tok_1-A$' "$STUB/args" && ! grep -- '-X DELETE' "$STUB/args" | grep -q content-type \
   && ok "content-type: the snapshot is application/gzip; the DELETE carries no body" || fail "content-type: $(cat "$STUB/args")"
 fresh; run "$R" "$URL" required "$P"
 grep -q -- '-X POST -H content-type: application/json --data-binary @.* https://mcp.ohmybug.ai/u/tok_1-A$' "$STUB/args" && ok "content-type: the payload is application/json" || fail "content-type payload: $(cat "$STUB/args")"
-grep -v -- '--connect-timeout 10 ' "$STUB/args" | grep -q . && fail "curl: a request without the connect timeout: $(cat "$STUB/args")" || ok "curl: every request has the 10 s connect timeout, nothing else limits it"
+grep -v -- '--connect-timeout 10 --speed-limit 1 --speed-time 120 ' "$STUB/args" | grep -q . && fail "curl: a request without the connect and stall limits: $(cat "$STUB/args")" || ok "curl: every request has the 10 s connect limit and ends after 120 s with no byte moving"
 
 # ---- 6b. --base: the script writes the diff; the branch name has a ref's shape
+# The branch has a commit past the merge base, and origin/main one the branch
+# lacks: the diff is against the merge base, never against origin/main's tip.
 BR="$ROOT/based"; mkdir -p "$BR"; g -C "$BR" init -q; printf 'a\n' > "$BR/a.txt"; g -C "$BR" add -A; g -C "$BR" commit -qm one
-g -C "$BR" update-ref refs/remotes/origin/main HEAD; printf 'b\n' >> "$BR/a.txt"; printf 'n\n' > "$BR/new.txt"; g -C "$BR" add -N new.txt
+MB=$(git -C "$BR" rev-parse HEAD)
+printf 'theirs\n' > "$BR/theirs.txt"; g -C "$BR" add theirs.txt; g -C "$BR" commit -qm theirs
+g -C "$BR" update-ref refs/remotes/origin/main HEAD; g -C "$BR" reset -q --hard "$MB"
+printf 'mine\n' > "$BR/mine.txt"; g -C "$BR" add mine.txt; g -C "$BR" commit -qm mine
+printf 'b\n' >> "$BR/a.txt"; printf 'n\n' > "$BR/new.txt"; g -C "$BR" add -N new.txt
 fresh; run "$BR" "$URL" off --base main
-python3 -I - "$STUB/payload.1.sent" "$BR" <<'PY' && [ "$rc" = 0 ] && ok "--base: the payload's diff is git diff against the merge base, new files included" || fail "--base diff: rc $rc $out"
+python3 -I - "$STUB/payload.1.sent" "$BR" "$MB" <<'PY' && [ "$rc" = 0 ] && ok "--base: the diff is against the merge base: the branch's commit and working tree in, origin/main's own commit out" || fail "--base diff: rc $rc $out"
 import json, subprocess, sys
-want = subprocess.run(["git", "-C", sys.argv[2], "diff", "--no-textconv", "--no-ext-diff", "HEAD"], capture_output=True, text=True).stdout
-sys.exit(0 if json.load(open(sys.argv[1]))["diff"] == want and "+n" in want else 1)
+want = subprocess.run(["git", "-C", sys.argv[2], "diff", "--no-textconv", "--no-ext-diff", sys.argv[3]], capture_output=True, text=True).stdout
+got = json.load(open(sys.argv[1]))["diff"]
+sys.exit(0 if got == want and "+mine" in got and "+n" in got and "theirs" not in got else 1)
 PY
+# A colour setting, a relative-diff setting and a secret-named change: the
+# script's own diff has no colour, full paths, and no .env.
+printf 'K=1\n' > "$BR/.env"; g -C "$BR" add -N .env
+g -C "$BR" config color.ui always; g -C "$BR" config color.diff always; g -C "$BR" config diff.relative true
+fresh; run "$BR/" "$URL" off --base main
+python3 -I -c 'import json, sys; d = json.load(open(sys.argv[1]))["diff"]; sys.exit(0 if "\x1b" not in d and ".env" not in d and "b/mine.txt" in d else 1)' "$STUB/payload.1.sent" 2>/dev/null \
+  && [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'secret-named: .env' && ok "--base: color.ui=always and diff.relative: no colour, .env left out and named" || fail "--base colour: rc $rc $out"
+g -C "$BR" config --unset color.ui; g -C "$BR" config --unset color.diff; g -C "$BR" config --unset diff.relative; git -C "$BR" rm -q --cached .env; rm -f "$BR/.env"
+# A Latin-1 file in the working tree: left out and named, the rest goes.
+printf 'caf\351\n' > "$BR/latin.txt"; g -C "$BR" add -N latin.txt
+fresh; run "$BR" "$URL" off --base main
+python3 -I -c 'import json, sys; d = json.load(open(sys.argv[1]))["diff"]; sys.exit(0 if "latin" not in d and "b/mine.txt" in d else 1)' "$STUB/payload.1.sent" 2>/dev/null \
+  && [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'not UTF-8 text: latin.txt' && ok "--base: a Latin-1 file is left out of the diff and named, the rest sent" || fail "--base latin: rc $rc $out"
+git -C "$BR" rm -q --cached latin.txt; rm -f "$BR/latin.txt"
 for b in "main'; touch $ROOT/pwned2; '" "-p" "--output=x" "ma in" 'ma$in' "" ; do
   fresh; run "$BR" "$URL" off --base "$b"
   [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'is not a branch name this script accepts' && ok "--base refuses [$b] before anything" || fail "--base [$b]: rc $rc calls $(calls) $out"
@@ -604,6 +625,37 @@ fresh; run "$BR" "$URL" off --base nosuch
 [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'no merge base with origin/nosuch' && ok "--base: a branch with no merge base refuses, nothing sent" || fail "--base nosuch: rc $rc $out"
 fresh; run "$BR" "$URL" off --base
 [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "--base with no name refuses" || fail "--base empty: rc $rc $out"
+
+# The secret-name filter on a plain unified diff (diff -ruN): .env is left out and named.
+printf 'diff -ruN a/app.py b/app.py\n--- a/app.py\t2026-01-01 00:00:00\n+++ b/app.py\t2026-01-02 00:00:00\n@@ -1 +1,2 @@\n x\n+y\ndiff -ruN a/.env b/.env\n--- a/.env\t2026-01-01 00:00:00\n+++ b/.env\t2026-01-02 00:00:00\n@@ -0,0 +1 @@\n+K=1\n' > "$ROOT/plain.patch"
+fresh; run "$R" "$URL" off "$ROOT/plain.patch"
+python3 -I -c 'import json, sys; d = json.load(open(sys.argv[1]))["diff"]; sys.exit(0 if "app.py" in d and ".env" not in d else 1)' "$STUB/payload.1.sent" 2>/dev/null \
+  && [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'secret-named: .env' && ok "plain diff -ruN: .env left out and named" || fail "plain diff: rc $rc $out"
+# The same without the diff lines (--- / +++ headers only), and a removed "-- x" line that is not a header.
+printf -- '--- a/app.py\n+++ b/app.py\n@@ -1,2 +1 @@\n--- x\n x\n--- .env\n+++ .env\n@@ -0,0 +1 @@\n+K=1\n' > "$ROOT/bare.patch"
+fresh; run "$R" "$URL" off "$ROOT/bare.patch"
+python3 -I -c 'import json, sys; d = json.load(open(sys.argv[1]))["diff"]; sys.exit(0 if "--- x" in d and "K=1" not in d else 1)' "$STUB/payload.1.sent" 2>/dev/null \
+  && [ "$rc" = 0 ] && ok "headers only: .env left out, a removed '-- x' line kept as content" || fail "bare headers: rc $rc $out"
+# Fail closed: a section that names no file, or a diff in colours, sends nothing.
+printf 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\nSome note with no header\n+K=1\n' > "$ROOT/noname.patch"
+printf 'just some text\n+K=1\n' > "$ROOT/noname2.patch"
+printf '\033[1mdiff --git a/.env b/.env\033[m\n\033[1m--- a/.env\033[m\n\033[1m+++ b/.env\033[m\n\033[36m@@ -0,0 +1 @@\033[m\n\033[32m+K=1\033[m\n' > "$ROOT/color.patch"
+for p in noname noname2 color; do
+  fresh; run "$R" "$URL" off "$ROOT/$p.patch"
+  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -qE 'names no file|belongs to no file|terminal colours' && ok "fail closed: $p sends nothing" || fail "fail closed $p: rc $rc calls $(calls) $out"
+done
+# Context files outside the repository, relative and absolute: not sent, named.
+printf 'out\n' > "$ROOT/outside.txt"
+fresh; run "$R" "$URL" off "$P" ../outside.txt "$ROOT/outside.txt"
+python3 -I -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["files"] == [] else 1)' "$STUB/payload.1.sent" 2>/dev/null \
+  && printf '%s' "$out" | grep -q "Not sent.*\.\./outside.txt, $ROOT/outside.txt" && ok "context outside the repository (relative, absolute): not sent, named" || fail "outside context: $out"
+# A context file whose name is not UTF-8: skipped and named, no traceback (where the file system allows such names).
+NU="$R/$(printf 'n\351.txt')"
+if { printf 'x\n' > "$NU"; } 2>/dev/null && [ -e "$NU" ]; then
+  fresh; run "$R" "$URL" off "$P" "$NU"
+  [ "$rc" = 0 ] && ! printf '%s' "$out" | grep -q Traceback && printf '%s' "$out" | grep -q 'Not sent.*n.*\.txt' && ok "a context file name that is not UTF-8 is skipped and named" || fail "non-UTF-8 context name: rc $rc $out"
+  rm -f "$NU"
+else echo "skip a non-UTF-8 context file name (this file system refuses it)"; fi
 
 # A .git that git cannot read (a worktree or submodule whose git folder moved)
 # is a broken repository, never a folder without git: it would be packed

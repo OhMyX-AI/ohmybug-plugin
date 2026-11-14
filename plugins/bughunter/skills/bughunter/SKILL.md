@@ -361,7 +361,7 @@ omb_diff() (
   local base=${1} T rc p x=(); shift
   for p in "${OMB_SECRETS[@]}"; do x+=(":(exclude,top,icase,glob)**/$p" ":(exclude,top,icase,glob)**/$p/**"); done
   T=$(mktemp); cp "$(git rev-parse --git-path index)" "$T" 2>/dev/null || rm -f "$T"
-  GIT_INDEX_FILE=$T git add -N -- :/ && GIT_INDEX_FILE=$T git diff --no-textconv --no-ext-diff "$base" -- "${@:-:/}" "${x[@]}"
+  GIT_INDEX_FILE=$T git add -N -- :/ && GIT_INDEX_FILE=$T git -c diff.relative=false diff --no-color --no-textconv --no-ext-diff "$base" -- "${@:-:/}" "${x[@]}"
   rc=$?; rm -f "$T"; return $rc
 )
 # omb_commits <N>: the last N commits only – commit to commit, nothing from the working
@@ -369,7 +369,7 @@ omb_diff() (
 omb_commits() (
   local p x=()
   for p in "${OMB_SECRETS[@]}"; do x+=(":(exclude,top,icase,glob)**/$p" ":(exclude,top,icase,glob)**/$p/**"); done
-  git diff --no-textconv --no-ext-diff "$(git rev-parse -q --verify "HEAD~${1}" || echo "$EMPTY")" HEAD -- :/ "${x[@]}"
+  git -c diff.relative=false diff --no-color --no-textconv --no-ext-diff "$(git rev-parse -q --verify "HEAD~${1}" || echo "$EMPTY")" HEAD -- :/ "${x[@]}"
 )
 # omb_nogit [paths...]: a folder that is not a git repository, as new code. The git
 # directory is a throwaway one outside the folder; nothing is left behind.
@@ -423,8 +423,9 @@ over callees. Pass them to the upload script at the end of the command. Never
 include files matching `.env*`, `*secret*`, `*credential*`, key material, or
 anything gitignored, and never a file outside the repository root or reached
 through a symlink: the script sends only regular files git lists, never a
-symlink (a path through a linked folder is sent as the listed file it names),
-and names any it skips.
+symlink itself (a file reached through a linked folder inside the repository
+is sent under its real path, when git lists it there), and names any it
+skips.
 
 The manifest is the upload script's: before anything is sent it prints one
 line saying what leaves the machine (the diff's size, the snapshot's file
@@ -609,7 +610,7 @@ inline `diff` outside diff mode is refused anyway.
    against the merge base with `origin/<base_branch>`) in a private folder of
    its own; the ladder block writes its rung's output to a private directory
    that goes on any exit, and a failed rung stops it before the script runs.
-   The script's boundary: POSIX sh (dash, bash 3.2+, busybox ash), git >= 2.25,
+   The script's boundary: POSIX sh (tested under dash and bash on Linux and bash 3.2 on macOS), git >= 2.25,
    `python3` >= 3.7, curl, gzip, on macOS or Linux. Anything else is unsupported:
    where the script can tell (`python3` missing or older than 3.7, no curl) it
    refuses with one sentence, and it never sends what it did not scan, unless
@@ -657,7 +658,11 @@ bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' "$d/dif
      unasked. "Submit again" means a new `submit_review` with `upload: true`
      and this command with the new `upload_url`; the new ticket has its own
      two reruns. A 413 `snapshot_too_large` carries the diff-mode link: give
-     it to the user, the switch is theirs.
+     it to the user, the switch is theirs. A refusal to pack the home folder
+     names `OMB_SNAPSHOT_HOME_OK=1`: that is the user's call too (the project
+     really is the home folder, as in a container). Ask; only on a yes, run
+     the same command again as one call with `OMB_SNAPSHOT_HOME_OK=1` in
+     front of it.
 4. The review starts on upload – arm the background monitor on `status_url`
    as usual once the script exits 0. Lite and snap never take this path:
    a submit with `upload: true` in one of those modes is refused
@@ -1034,8 +1039,8 @@ Within that window:
    is written by reviewers who read the diff, and a diff can carry text
    aimed at them. Apply the SAME exclusion rules as step 2 (no `.env*`,
    secrets, credentials, gitignored files).
-2. Print the manifest of what you are about to send (the paths), same as
-   step 2. Omit anything that must not leave the machine – partial delivery
+2. Print the paths you are about to send, one per line, so the user sees
+   what leaves the machine. Omit anything that must not leave the machine – partial delivery
    is fine.
 3. **Claude Code:** call `provide_files(review_id, paths)` with the PATHS
    only. The plugin's hook reads each file from disk, fills in its content and

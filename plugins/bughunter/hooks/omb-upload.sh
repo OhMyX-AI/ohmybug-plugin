@@ -28,7 +28,8 @@
 # retired (DELETE <upload_url>) and nothing is hunted, so a new diff never
 # pairs with an old snapshot; absent (an older server), the script stops.
 #
-# Boundary: POSIX sh (dash, bash 3.2+, busybox ash), git >= 2.25, python3 >=
+# Boundary: POSIX sh (CI runs it under dash and bash on Linux and bash 3.2 on
+# macOS; other shells untested), git >= 2.25, python3 >=
 # 3.7, curl, gzip, on macOS or Linux. Anything else is unsupported; where the
 # script can tell (python3 older than 3.7, no python3, no curl) it refuses with
 # one sentence, and nothing unscanned is sent unless the scan is off. The
@@ -62,8 +63,7 @@ py() { python3 -I "$@"; }
 url=$1
 # The one dispatch point: argv[2] is read here and nowhere else. snap says
 # what goes to <upload_url>/repo: whole = the working copy, empty = nothing
-# (diff mode). A partial arm goes here: it builds its path list and sets
-# snap=partial, or snap=whole on an empty list or a list failure.
+# (diff mode).
 case $2 in
   required) snap=whole ;;
   off) snap= ;;
@@ -95,7 +95,7 @@ trap 'exit 75' HUP INT TERM
 if [ -n "$base" ]; then
   patch="$d/diff.patch"
   mb=$(git merge-base HEAD "origin/$base" 2>/dev/null) || die "omb-upload: no merge base with origin/$base here (is the branch fetched?); nothing was sent"
-  git diff --no-textconv --no-ext-diff "$mb" > "$patch" || die "omb-upload: git diff failed (above); nothing was sent"
+  git -c diff.relative=false -c color.ui=false diff --no-color --no-textconv --no-ext-diff "$mb" > "$patch" || die "omb-upload: git diff failed (above); nothing was sent"
 fi
 
 # A folder without git: packed as the server packs one. Only on "not a git
@@ -169,10 +169,15 @@ if [ -z "$snap" ] && [ $# -gt 0 ]; then
   top=$(git rev-parse --show-toplevel)
   ( cd "$top" && git ls-files -z -co --exclude-standard ) > "$d/listed"
 fi
-[ -n "$snap" ] && [ $# -gt 0 ] && echo "omb-upload: context files are not sent with a repository snapshot, it holds them: $*" >&2
+if [ -n "$snap" ] && [ $# -gt 0 ]; then
+  echo "omb-upload: context files are not sent with a repository snapshot, it holds them: $*" >&2
+  set --
+fi
 # Bytes in, bytes out: the diff and each context file are read as bytes, so CRLF
-# and a lone CR survive. JSON carries text, so a diff that is not valid UTF-8
-# refuses, naming its file; a context file that is not is left out and named.
+# and a lone CR survive. JSON carries text, so a file's section of the diff
+# that is not valid UTF-8 is left out and named, as a context file is.
+# The secret-name filter fails closed: a section of the diff that names no
+# file, or a diff in terminal colours, refuses the whole upload.
 # Exported, not a VAR=x prefix: dash before 0.5.11 does not pass a prefix
 # assignment on a function call (py) to the process it runs.
 export OMB_SECRETS
@@ -186,52 +191,108 @@ def secret(path):
     return any(fnmatch.fnmatchcase(seg.lower(), p.lower()) for seg in path.split("/") for p in SECRETS)
 
 def unq(p):
-    p = p.rstrip("\t")
-    if len(p) > 1 and p[0] == '"' and p[-1] == '"':
-        p = codecs.escape_decode(p[1:-1].encode("utf-8"))[0].decode("utf-8", "replace")
+    p = p.rstrip("\r\n")
+    m = re.match(r'"((?:[^"\\]|\\.)*)"', p)
+    if m:
+        p = codecs.escape_decode(m.group(1).encode("utf-8"))[0].decode("utf-8", "replace")
+    else:
+        # A plain diff puts a date after a tab; git quotes a name that holds one.
+        p = p.split("\t", 1)[0]
     return p[2:] if p[:2] in ("a/", "b/") else p
 
-def names(sec):
+def names(lines):
     # Header lines only, before the first hunk: inside one, "--- x" is a removed
     # "-- x" line and "+++ x" an added "++ x", never a file name.
-    head = sec.split("\n@@", 1)[0].split("\n")
-    first = head[0]
     out = []
-    m = re.match(r"diff --git (.*)$", first)
-    if m:
-        h = m.group(1)
-        if h.startswith('"'):
-            out += [unq(x) for x in re.findall(r'"(?:[^"\\]|\\.)*"|\S+', h)]
-        else:
-            i = h.rfind(" b/")
-            out += [unq(h[:i]), unq(h[i + 1:])] if i > 0 else [unq(h)]
-    for line in head[1:]:
+    for i, line in enumerate(lines):
+        if line.startswith("@@"):
+            break
+        if i == 0 and line.startswith("diff --git "):
+            h = line[len("diff --git "):].rstrip("\r\n")
+            if h.startswith('"'):
+                out += [unq(x) for x in re.findall(r'"(?:[^"\\]|\\.)*"|\S+', h)]
+            else:
+                j = h.rfind(" b/")
+                out += [unq(h[:j]), unq(h[j + 1:])] if j > 0 else [unq(h)]
+        elif i == 0 and line.startswith("diff "):
+            out += [unq(x) for x in line.split()[-2:]]  # diff -ruN a/x b/x
         for pre in ("--- ", "+++ "):
             if line.startswith(pre):
                 out.append(unq(line[len(pre):]))
     return [n for n in out if n and n != "/dev/null"]
 
+def clean1(x):
+    x = x.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+    return re.sub(r"[\x00-\x1f\x7f]", "?", x)
+
+def say(msg):
+    sys.stderr.write("omb-upload: " + msg + "; nothing was sent.\n")
+    sys.exit(1)
+
 raw = open(patch, "rb").read()
-secs = re.split(rb"(?m)^(?=diff --git )", raw)
-kept, dropped, nfiles = [], [], 0
+if re.search(rb"(?m)^\x1b\[", raw):
+    say("the diff is in terminal colours (a git colour setting), so its file names cannot be read and a secret-named file could not be left out. Write it with git diff --no-color")
+# Sections by file. A hunk's own lines are counted off its @@ header, so a
+# removed "-- x" line is never read as the "--- x" header of a next file.
+HUNK = re.compile(rb"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+lines = re.findall(rb"[^\n]*\n|[^\n]+$", raw)  # on LF only: a lone CR is content
+secs, cur, old, new = [], [], 0, 0
+for i, l in enumerate(lines):
+    if old > 0 or new > 0:
+        # A line the counts do not allow ends the hunk and is read as a header:
+        # a wrong count never swallows the next file's "diff" line.
+        c, took = l[:1], True
+        if c == b"-" and old > 0:
+            old -= 1
+        elif c == b"+" and new > 0:
+            new -= 1
+        elif c in (b" ", b"\n", b"\r") and old > 0 and new > 0:
+            old -= 1; new -= 1
+        elif c != b"\\":
+            old = new = 0; took = False
+        if took:
+            cur.append(l)
+            continue
+    m = HUNK.match(l)
+    if m:
+        old = int(m.group(1)) if m.group(1) is not None else 1
+        new = int(m.group(2)) if m.group(2) is not None else 1
+        cur.append(l)
+        continue
+    nxt = lines[i + 1] if i + 1 < len(lines) else b""
+    start = l.startswith(b"diff ") or (l.startswith(b"--- ") and nxt.startswith(b"+++ ")
+                                       and any(x.startswith((b"--- ", b"@@")) for x in cur))
+    if start and cur:
+        secs.append(cur); cur = []
+    elif not start and l.strip() and any(x.startswith(b"@@") for x in cur):
+        # Past a file's hunks only the next file's header may come: a line
+        # that is neither belongs to no file the filter can name.
+        say("a line of the diff belongs to no file (%s), so a secret-named file in it could not be left out. Send a diff from git diff or diff -u" % clean1(l.decode("utf-8", "replace").rstrip("\r\n"))[:60])
+    cur.append(l)
+if cur:
+    secs.append(cur)
+kept, dropped, notutf8, nfiles = [], [], [], 0
 for sec in secs:
-    try:
-        text = sec.decode("utf-8")
-    except UnicodeDecodeError:
-        who = names(sec.decode("utf-8", "replace"))
-        sys.stderr.write("omb-upload: %s is not valid UTF-8 text, so it cannot be sent; nothing was sent. "
-                         "Leave that file out of the diff, or convert it, and run the same command again.\n"
-                         % ("the diff of " + who[-1] if who else "the diff"))
-        sys.exit(1)
-    n = names(text) if text.startswith("diff --git ") else []
+    b = b"".join(sec)
+    if not b.strip():
+        kept.append(b.decode("utf-8", "replace"))
+        continue
+    n = names([x.decode("utf-8", "replace") for x in sec])
+    if not n:
+        say("part of the diff names no file (%s), so a secret-named file in it could not be left out. Send a diff from git diff or diff -u" % clean1(sec[0].decode("utf-8", "replace").rstrip("\r\n"))[:60])
     if any(secret(x) for x in n):
         dropped.append(n[-1])
         continue
-    nfiles += bool(n)
+    try:
+        text = b.decode("utf-8")
+    except UnicodeDecodeError:
+        notutf8.append(n[-1])
+        continue
+    nfiles += 1
     kept.append(text)
 diff = "".join(kept)
 if not diff.strip():
-    sys.stderr.write("omb-upload: the diff is empty, or nothing is left of it once secret-named files are out, so there is nothing to hunt; nothing was sent\n")
+    sys.stderr.write("omb-upload: the diff is empty, or nothing is left of it once secret-named and non-UTF-8 files are out, so there is nothing to hunt; nothing was sent\n")
     sys.exit(1)
 
 files, sent, skipped = [], [], []
@@ -244,23 +305,24 @@ if args:  # "$d/listed" is filled in diff mode only, so with a snapshot nothing 
         full = os.path.abspath(a)
         rel = os.path.relpath(os.path.join(os.path.realpath(os.path.dirname(full)), os.path.basename(full)), top)
         try:
+            rel.encode("utf-8")  # a name that is not UTF-8 cannot go into JSON
             p = os.path.join(top, rel)
             # A path outside the repository ("../x") is never in git's listing.
             if not secret(rel) and os.fsencode(rel) in listed and stat.S_ISREG(os.lstat(p).st_mode):
                 files.append({"path": rel, "content": open(p, "rb").read().decode("utf-8")})
                 sent.append(rel)
                 continue
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeError):
             pass
         skipped.append(a)
 # A quoted git name can decode to control bytes: one line per field below, and one line to the user.
-clean = lambda xs: [re.sub(r"[\x00-\x1f\x7f]", "?", x) for x in xs]
-sent, skipped, dropped = clean(sent), clean(skipped), clean(dropped)
+clean = lambda xs: [clean1(x) for x in xs]
+sent, skipped, dropped, notutf8 = clean(sent), clean(skipped), clean(dropped), clean(notutf8)
 json.dump({"diff": diff, "files": files}, open(d + "/payload.json", "w", encoding="utf-8"), ensure_ascii=False)
 with open(d + "/meta", "w", encoding="utf-8") as f:
-    f.write("\n".join([str(nfiles), ", ".join(sent), ", ".join(skipped), ", ".join(dropped), str(len(diff.encode("utf-8")))]) + "\n")
+    f.write("\n".join([str(nfiles), ", ".join(sent), ", ".join(skipped), ", ".join(dropped), str(len(diff.encode("utf-8"))), ", ".join(notutf8)]) + "\n")
 PY
-{ IFS= read -r nfiles; IFS= read -r ctx_sent; IFS= read -r ctx_skipped; IFS= read -r diff_dropped; IFS= read -r diff_bytes; } < "$d/meta" || :
+{ IFS= read -r nfiles; IFS= read -r ctx_sent; IFS= read -r ctx_skipped; IFS= read -r diff_dropped; IFS= read -r diff_bytes; IFS= read -r diff_notutf8; } < "$d/meta" || :
 
 scan_off=0
 [ "${OHMYBUG_SECRET_SCAN:-1}" = 0 ] && scan_off=1
@@ -289,7 +351,7 @@ snapshot() {
   if [ "$rc" = 3 ] && [ -s "$d/hits" ]; then
     cp "$d/hits" "$d/drop"
     run_pack
-    dropped=$(tr '\001-\037\177' '?' < "$d/drop" | tr '\0' '\n' | sed '/^$/d' | paste -sd, - | sed 's/,/, /g')
+    dropped=$(tr '\001-\037\177' '?' < "$d/drop" | tr '\0' '\n' | sed '/^$/d' | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')
     set +e
     py "$CORE" --snapshot "$d/k/s.tgz" "$d/hits" > "$d/count"; rc=$?
     set -e
@@ -307,6 +369,7 @@ manifest() { # $1: what the snapshot part says
   line="OhMyBug upload → $HOST: diff $(kb "$diff_bytes") ($(files "$nfiles"))$1"
   [ -n "$ctx_sent" ] && line="$line, context files: $ctx_sent"
   [ -n "$diff_dropped" ] && line="$line. Left out of the diff as secret-named: $diff_dropped"
+  [ -n "$diff_notutf8" ] && line="$line. Left out of the diff as not UTF-8 text: $diff_notutf8"
   [ -n "$ctx_skipped" ] && line="$line. Not sent (secret-named, not listed by git, not a regular file, through a symlink, or not UTF-8): $ctx_skipped"
   if [ "$scan_off" = 1 ]; then
     line="$line. Credential scan: off (OHMYBUG_SECRET_SCAN=0)."
@@ -332,17 +395,18 @@ snapline() {
   if [ "$nogit" = 1 ]; then printf '; folder without git: top-level dot-folders, node_modules, __pycache__ and build output also left out'; fi
 }
 
-# One request per door, no retry and no time limit but the connect one: the
-# server's own limits end a slow transfer (408 at 300 s). A status curl
+# One request per door, no retry and no overall time limit: the server's own
+# limits end a slow transfer (408 at 300 s); a connection that moves no byte
+# for 120 s (a stalled answer) ends as no answer. A status curl
 # printed is the answer even when the transfer then failed (an early 409, a
 # 413 or a 408 close the connection mid-upload), except a 2xx: that body was
 # cut, so it is no answer (000). A 1xx as the last status is no answer either. The body and header files are new per request.
 req() { # method url [file content-type] -> $code, body in $d/body, headers in $d/hdr
   : > "$d/body"; : > "$d/hdr"
   if [ $# -gt 2 ]; then
-    code=$(curl -sS --connect-timeout 10 -o "$d/body" -D "$d/hdr" -w '%{http_code}' -X "$1" -H "content-type: $4" --data-binary @"$3" "$2") || case $code in [3-5][0-9][0-9]) ;; *) code=000 ;; esac
+    code=$(curl -sS --connect-timeout 10 --speed-limit 1 --speed-time 120 -o "$d/body" -D "$d/hdr" -w '%{http_code}' -X "$1" -H "content-type: $4" --data-binary @"$3" "$2") || case $code in [3-5][0-9][0-9]) ;; *) code=000 ;; esac
   else
-    code=$(curl -sS --connect-timeout 10 -o "$d/body" -D "$d/hdr" -w '%{http_code}' -X "$1" "$2") || case $code in [3-5][0-9][0-9]) ;; *) code=000 ;; esac
+    code=$(curl -sS --connect-timeout 10 --speed-limit 1 --speed-time 120 -o "$d/body" -D "$d/hdr" -w '%{http_code}' -X "$1" "$2") || case $code in [3-5][0-9][0-9]) ;; *) code=000 ;; esac
   fi
   case $code in 1??) code=000 ;; esac
 }

@@ -53,6 +53,17 @@ jobs:
       # never appears to update.
       - run: bash scripts/version.sh --check
 
+  upload-macos:
+    name: Upload script on macOS
+    # The script's stated boundary includes macOS (bash 3.2, BSD tools).
+    runs-on: macos-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: OMB_TEST_SKIP_SLOW=1 bash plugins/bughunter/hooks/omb-upload-test.sh
+
   mod:
     name: Claude Code mod
     runs-on: ubuntu-latest
