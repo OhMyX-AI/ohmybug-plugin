@@ -169,7 +169,11 @@ repository per week, and is not a merge gate.
   lets a payload through unscanned in four cases only: submits that send no
   payload (repo + ref) have nothing to scan; without `python3` it cannot run,
   and says so in a system message; it does not run on Windows; the out-of-band
-  upload for very large diffs is not scanned. Set
+  upload is not scanned. Every payload hunt goes that way: the diff, and the
+  repository snapshot sent before it (the working copy without ignored files,
+  secret-named files such as `.env*`, `*.pem`, `.npmrc` or `.ssh/`, and
+  submodules; a key under another name is sent). The account's diff mode on
+  `/me/policy` sends the diff without the snapshot. Set
   `OHMYBUG_SECRET_SCAN=0` (in the `env` block of `settings.json`) to turn the
   scan off.
 

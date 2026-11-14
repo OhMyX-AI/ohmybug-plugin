@@ -314,8 +314,12 @@ beyond the base branch plus staged and unstaged changes:
 
 ```bash
 BASE=$(git merge-base HEAD origin/$(git remote show origin | sed -n 's/.*HEAD branch: //p'))
-git diff "$BASE"
+git diff --no-textconv --no-ext-diff "$BASE"
 ```
+
+`--no-textconv --no-ext-diff` on every diff you send: a diff driver configured
+in the repository then runs no program, and the payload stays a patch. The
+merge gate hashes the same spelling.
 
 If the user asked to review something narrower, respect that.
 
@@ -342,14 +346,16 @@ rung – the upload script included:
 
 ```bash
 EMPTY=$(git hash-object -t tree /dev/null)
-OMB_SECRETS=('.env*' '*secret*' '*credential*' 'id_rsa*' 'id_dsa*' 'id_ecdsa*' 'id_ed25519*' '*.pem' '*.key' '*.p12' '*.pfx')
+OMB_SECRETS=('.env*' '*secret*' '*credential*' 'id_rsa*' 'id_dsa*' 'id_ecdsa*' 'id_ed25519*' '*.pem' '*.key' '*.p12' '*.pfx'
+  '.npmrc' '.netrc' '.pgpass' '.pypirc' '.git-credentials' '*.tfstate*' '*.tfvars*' 'kubeconfig' '.kube' '.docker'
+  '*.ppk' '*.jks' '*.keystore' '.ssh' '.aws' '.gnupg')
 # omb_diff <base> [paths...]: everything from <base> to the working tree, new files
 # included, secrets excluded. Paths are relative to where you stand; none = the whole repo.
 omb_diff() (
   local base=${1} T rc p x=(); shift
   for p in "${OMB_SECRETS[@]}"; do x+=(":(exclude,top,icase,glob)**/$p" ":(exclude,top,icase,glob)**/$p/**"); done
   T=$(mktemp); cp "$(git rev-parse --git-path index)" "$T" 2>/dev/null || rm -f "$T"
-  GIT_INDEX_FILE=$T git add -N -- :/ && GIT_INDEX_FILE=$T git diff "$base" -- "${@:-:/}" "${x[@]}"
+  GIT_INDEX_FILE=$T git add -N -- :/ && GIT_INDEX_FILE=$T git diff --no-textconv --no-ext-diff "$base" -- "${@:-:/}" "${x[@]}"
   rc=$?; rm -f "$T"; return $rc
 )
 # omb_commits <N>: the last N commits only – commit to commit, nothing from the working
@@ -357,7 +363,7 @@ omb_diff() (
 omb_commits() (
   local p x=()
   for p in "${OMB_SECRETS[@]}"; do x+=(":(exclude,top,icase,glob)**/$p" ":(exclude,top,icase,glob)**/$p/**"); done
-  git diff "$(git rev-parse -q --verify "HEAD~${1}" || echo "$EMPTY")" HEAD -- :/ "${x[@]}"
+  git diff --no-textconv --no-ext-diff "$(git rev-parse -q --verify "HEAD~${1}" || echo "$EMPTY")" HEAD -- :/ "${x[@]}"
 )
 # omb_nogit [paths...]: a folder that is not a git repository, as new code. The git
 # directory is a throwaway one outside the folder; nothing is left behind.
@@ -388,8 +394,9 @@ drop a file before anything is sent. The payload limit is 2 MB of diff: if a
 rung is larger, ask which part matters (a folder, a feature) rather than
 cutting silently.
 
-Send it as a payload (rung 3 of "How the diff gets here" below; `upload: true`
-when it is large) with `meta.repo_hint` saying which rung this is, and
+Send it as a payload (rung 3 of "How the diff gets here" below: `upload: true`,
+and the repository snapshot first when the ticket asks for it) with
+`meta.repo_hint` saying which rung this is, and
 **without `meta.base_branch`**: repo + ref + base_branch tell the server it
 can fetch the merge-base diff itself, and it then reviews that instead of
 your payload – on a `main` whose head is its own base, an empty diff.
@@ -434,6 +441,20 @@ Work down this list and stop at the first rung that applies:
    bytes, but the gate cannot credit the tree with it, and the merge stays
    blocked until a full-diff hunt. Already pushed? Then rung 1 with `ref` = the
    head commit sha records the hunt without sending anything.
+   **A payload goes with the repository snapshot.** A hunt runs on the whole
+   repository, and a diff alone brings none. So a payload is always
+   `upload: true`, never an inline `diff`, and the ticket's answer says what
+   goes first. `snapshot: "required"`: run the snapshot command its instruction
+   gives, as it stands, before the payload. It packs the working copy from the
+   repository root (untracked files in; ignored files, secret-named files and
+   submodules out; nothing written to your index or object store) and POSTs it
+   to `<upload_url>/repo`. `snapshot: "off"`: the account is in diff mode, so
+   the payload goes alone. An inline `diff` runs only in diff mode; anywhere else
+   it is refused `snapshot_required` with nothing started or charged, so submit
+   again with `upload: true`. Diff mode is the user's switch, never yours: when
+   the repository cannot or should not leave the machine (`snapshot_too_large`,
+   or the user says no), give the user the `/me/policy` link the answer carries
+   and stop.
    **Claude Code in auto mode, and no rule covers `provide_files`** (none of
    `~/.claude/settings.json`, `~/.claude/settings.local.json`,
    `.claude/settings.json`, `.claude/settings.local.json` lists
@@ -446,9 +467,10 @@ Work down this list and stop at the first rung that applies:
    this machine. Say the trade-off with it: only what is committed and pushed
    is hunted, so uncommitted edits are not reviewed. Committing and pushing is
    their call; on a no, send the payload and expect no file answer.
-4. **`upload: true` only when that payload is genuinely large.** It is not a
-   preference for shipping bytes, and the server ignores it whenever rung 1
-   applies.
+4. **`upload: true` hunts your working copy, not the pushed commit.** On a
+   fast hunt it always hands a ticket, even when the server could fetch the
+   commit, so send it only when rung 1 cannot serve: it is not a preference for
+   shipping bytes.
 
 Rung 1 is the cheapest path, not a way around a permission refusal. Measured
 twice: the classifier judges the TOOL from its schema, and `submit_review`
@@ -533,17 +555,25 @@ tool arguments are slow, expensive and get truncated (failed submits). Use
 the out-of-band flow instead:
 
 1. `submit_review` with `upload: true`, full `meta`, and NO diff/files –
-   it returns `upload_url` (one-time) + `review_id` + `status_url`. Always send
-   `meta.repo` + `ref` + `base_branch` anyway: when the server can fetch the
-   diff itself it ignores `upload` and just starts, and you never touch the
-   upload at all. **Except a no-branch ladder payload:** leave `base_branch`
+   it returns `upload_url` (one-time) + `review_id` + `status_url`, and
+   `snapshot` (`required` or `off`). Send `meta.repo` + `ref` + `base_branch`
+   anyway: the reviewers read files with them. **Except a no-branch ladder
+   payload:** leave `base_branch`
    out there (the server would review its own empty merge-base diff instead),
    and in the script below write the chosen rung's output (`omb_diff HEAD`,
    `omb_commits 10`, `omb_nogit`, …) to `diff.patch`, with the ladder block
    pasted above it in the same command instead of `git diff "$BASE"`.
    A `review_id` with `status: running` instead of
    `awaiting_upload` means exactly that – nothing to upload, go monitor.
-2. Build the payload with a script, reading straight from disk, in a private
+2. **`snapshot: "required"`: the snapshot first.** Run the command the
+   answer's instruction gives, in its own shell call, from anywhere inside the
+   repository (outside git, inside the wrapper the instruction names). Its last
+   line is the status: `HTTP 200`, or 409 `snapshot_taken` (it is there
+   already), means go on; 429 means wait the `Retry-After` seconds (about 30) and
+   run it again; 413 `snapshot_too_large` means stop and give the user the
+   diff-mode link. A payload sent before the snapshot is refused with a 409 and
+   the ticket stays valid. With `snapshot_received: true` in an answer, skip it.
+3. Build the payload with a script, reading straight from disk, in a private
    directory of its own – never a fixed path in `/tmp`: on a shared machine
    every other user can read a file left there, and two reviews running at
    once overwrite one fixed name. Run the block as it stands: the subshell
@@ -551,7 +581,7 @@ the out-of-band flow instead:
 
 ```bash
 (umask 077; d=$(mktemp -d) || exit 1; trap 'rm -rf "$d"' EXIT
-git diff "$BASE" > "$d/diff.patch"
+git diff --no-textconv --no-ext-diff "$BASE" > "$d/diff.patch"
 python3 - "$d" <<'PY'
 import json, sys
 d = sys.argv[1]
@@ -561,7 +591,7 @@ PY
 curl -sS -w '\nHTTP %{http_code}\n' -X POST -H 'content-type: application/json' --data-binary @"$d/payload.json" '<upload_url>')
 ```
 
-3. The review starts on upload – arm the background monitor on `status_url`
+4. The review starts on upload – arm the background monitor on `status_url`
    as usual once the last line reads `HTTP 200`; any other code is a refusal,
    and the body above it says why. Lite and snap never take this path:
    a submit with `upload: true` in one of those modes is refused
@@ -1526,6 +1556,9 @@ branch.
 ## Privacy
 
 Only the diff and the manifest files are uploaded, plus the verdicts you
-send – a `known` verdict's ticket ref included. The review runs in memory
+send – a `known` verdict's ticket ref included. A payload hunt also sends the
+repository snapshot: the working copy without ignored files, secret-named
+files or submodules. Secret names are a best-effort list; a key under another
+name is sent, so say so when the repository holds one. The review runs in memory
 on OhMyBug's cloud and payloads are deleted after the review. Nothing is used
 for model training.
