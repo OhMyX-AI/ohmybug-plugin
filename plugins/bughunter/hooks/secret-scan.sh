@@ -96,60 +96,17 @@ if str(d.get("tool_name") or "").endswith("__provide_files") and "paths" in ti a
         stop(5, "")
     top = os.path.realpath(top)
     listed = set(subprocess.check_output(["git", "ls-files", "-z", "-co", "--exclude-standard"], cwd=top, env=env).split(b"\0"))
-    import stat
-    RD = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-    NOFOLLOW, NONBLOCK, DIRECTORY = (getattr(os, f, 0) for f in ("O_NOFOLLOW", "O_NONBLOCK", "O_DIRECTORY"))
+    from omb_scan import read_listed
 
     def walk(p):
-        # Opened one part at a time from the fd of the top level, never through a
-        # symlink, and read from the fd that was checked: nothing can swap the file
-        # between the check and the read. Only a listed file is read, at once, and
-        # every fd is closed here, however many paths are asked for.
-        try:
-            # The name opened is the name sent: a part that is empty, "." or ".." is
-            # refused, never tidied away, or "x/." would open x under another name.
-            parts = os.fsencode(p).replace(os.fsencode(os.sep), b"/").split(b"/")
-            while len(parts) > 1 and parts[0] == b".":
-                parts = parts[1:]
-            if any(c in (b"", b".", b"..") for c in parts):
-                return None, None
-            rel = b"/".join(parts)
-            if os.open not in os.supports_dir_fd:
-                # shortcut: no dir_fd (Windows python), so the whole path is checked for any link or
-                # junction and then opened, a window for someone rewriting the checkout mid-call;
-                # upgrade if it gains dir_fd.
-                full = os.path.join(top, *parts)
-                if os.path.realpath(full) != os.path.normpath(full):
-                    return None, None
-                before = os.stat(full)
-                fd = os.open(full, RD | NONBLOCK)
-                after = os.fstat(fd)
-                if (after.st_ino, after.st_dev) != (before.st_ino, before.st_dev):
-                    os.close(fd)
-                    return None, None
-            else:
-                dfd = os.open(top, RD)
-                try:
-                    for c in parts[:-1]:
-                        sub = os.open(c, RD | NOFOLLOW | DIRECTORY, dir_fd=dfd)
-                        os.close(dfd)
-                        dfd = sub
-                    fd = os.open(parts[-1], RD | NOFOLLOW | NONBLOCK, dir_fd=dfd)
-                finally:
-                    os.close(dfd)
-        except (OSError, ValueError):
-            return None, None
-        try:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                return None, None
-            if rel not in listed:
-                return rel, None
-            with open(fd, encoding="utf-8", errors="replace", closefd=False) as f:
-                return rel, f.read()
-        except OSError:
-            return None, None
-        finally:
-            os.close(fd)
+        # The fd walk lives in omb_scan.read_listed (the upload script reads its
+        # context files with it too); a listed file is decoded here with
+        # replacement, as before.
+        rel, data = read_listed(top, listed, p)
+        if data is None:
+            return rel, None
+        # Universal newlines, as the text-mode read before it: CRLF and CR become LF.
+        return rel, data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
     files = list(ti.get("files") or [])
     sent, skipped, unlisted, read = [], [], [], []

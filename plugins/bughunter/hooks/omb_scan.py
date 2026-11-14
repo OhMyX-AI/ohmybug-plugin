@@ -1,15 +1,26 @@
 """The credential detector: the one copy of the shapes.
 
-secret-scan.sh, beside it, imports it. It lives in hooks/, not in the skill
-folder: the merge gate treats skills/ as prose, and an edit to the detector
-must count as a code change.
+secret-scan.sh, beside it, imports it; omb-upload.sh, also beside it, runs it
+on the two files it posts. It lives in hooks/, not in the skill folder: the
+merge gate treats skills/ as prose, and an edit to the detector must count as
+a code change.
 
 Only high-signal shapes: a token with a vendor prefix, a private-key block, a
 file whose name says it holds keys. A false refusal costs a rerun and teaches
 agents to strip context to get past it, so no entropy guessing. Every value in
 a message is masked: printing the secret to say we did not send it would leak it.
+
+    python3 omb_scan.py --payload <payload.json>
+    python3 omb_scan.py --snapshot <s.tgz> <hits-out>
+
+Exit 0 clean, 3 hits (masked list on stderr; for a snapshot the members that
+hit are written to <hits-out>, NUL-separated), anything else could not scan.
+A snapshot scan prints the number of files it read (every member but folders).
 """
+import json
+import os
 import re
+import sys
 
 SHAPES = [
     ("AWS access key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
@@ -92,7 +103,7 @@ def scan_diff(hits, diff):
 
 
 def scan_payload(hits, ti):
-    """{diff, files}: what an inline submit or a provide_files carries."""
+    """{diff, files}: what an inline submit, a provide_files or an upload carries."""
     diff = ti.get("diff")
     if diff is not None and not isinstance(diff, str):
         raise TypeError("diff")
@@ -112,7 +123,138 @@ def scan_payload(hits, ti):
             scan(hits, path, content)
 
 
+CHUNK = 1 << 20
+OVERLAP = 4096  # longer than any shape, so a token cut by a chunk edge is still read whole
+
+
+def scan_stream(hits, where, f):
+    """A member read in chunks, line by line, with a bounded line buffer."""
+    no, buf = 1, b""
+    while True:
+        data = f.read(CHUNK)
+        if not data:
+            break
+        buf += data
+        lines = buf.split(b"\n")
+        buf = lines.pop()
+        for line in lines:
+            scan_line(hits, "%s:%d" % (where, no), line.decode("utf-8", "replace"))
+            no += 1
+        if len(buf) > CHUNK:
+            # One very long line: read it so far, keep a tail for the next chunk.
+            scan_line(hits, "%s:%d" % (where, no), buf.decode("utf-8", "replace"))
+            buf = buf[-OVERLAP:]
+    if buf:
+        scan_line(hits, "%s:%d" % (where, no), buf.decode("utf-8", "replace"))
+
+
+def scan_snapshot(hits, path):
+    """Every regular member of the tar.gz, one at a time; returns the members that
+    hit and the number of files. Key-file names need no check here: the packer's
+    excludes keep every one of them out of the archive."""
+    import tarfile
+    hit_members, count = [], 0
+    with tarfile.open(path, "r|gz", encoding="utf-8", errors="surrogateescape") as tf:
+        for m in tf:
+            count += not m.isdir()
+            if not m.isreg():
+                continue
+            before = len(hits)
+            scan_stream(hits, m.name, tf.extractfile(m))
+            if len(hits) > before:
+                hit_members.append(m.name)
+    return hit_members, count
+
+
+def read_listed(top, listed, p):
+    """A requested file below the git top level `top`, as (rel, bytes).
+
+    Opened one part at a time from the fd of the top level, never through a
+    symlink, and read from the fd that was checked: nothing can swap the file
+    between the check and the read. Returns (None, None) for a path that is
+    not a regular file inside the top level (missing, a symlink in any part,
+    an empty, "." or ".." part), (rel, None) for one git does not list, and
+    (rel, bytes) for a listed one. Every fd is closed here."""
+    import stat
+    RD = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    NOFOLLOW, NONBLOCK, DIRECTORY = (getattr(os, f, 0) for f in ("O_NOFOLLOW", "O_NONBLOCK", "O_DIRECTORY"))
+    try:
+        # The name opened is the name sent: a part that is empty, "." or ".." is
+        # refused, never tidied away, or "x/." would open x under another name.
+        parts = os.fsencode(p).replace(os.fsencode(os.sep), b"/").split(b"/")
+        while len(parts) > 1 and parts[0] == b".":
+            parts = parts[1:]
+        if any(c in (b"", b".", b"..") for c in parts):
+            return None, None
+        rel = b"/".join(parts)
+        if os.open not in os.supports_dir_fd:
+            # shortcut: no dir_fd (Windows python), so the whole path is checked for any link or
+            # junction and then opened, a window for someone rewriting the checkout mid-call;
+            # upgrade if it gains dir_fd.
+            full = os.path.join(os.fsencode(top), *parts)
+            if os.path.realpath(full) != os.path.normpath(full):
+                return None, None
+            before = os.stat(full)
+            fd = os.open(full, RD | NONBLOCK)
+            after = os.fstat(fd)
+            if (after.st_ino, after.st_dev) != (before.st_ino, before.st_dev):
+                os.close(fd)
+                return None, None
+        else:
+            dfd = os.open(top, RD)
+            try:
+                for c in parts[:-1]:
+                    sub = os.open(c, RD | NOFOLLOW | DIRECTORY, dir_fd=dfd)
+                    os.close(dfd)
+                    dfd = sub
+                fd = os.open(parts[-1], RD | NOFOLLOW | NONBLOCK, dir_fd=dfd)
+            finally:
+                os.close(dfd)
+    except (OSError, ValueError):
+        return None, None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None, None
+        if rel not in listed:
+            return rel, None
+        with open(fd, "rb", closefd=False) as f:
+            return rel, f.read()
+    except OSError:
+        return None, None
+    finally:
+        os.close(fd)
+
+
 def shown(hits):
     hits = list(dict.fromkeys(hits))
     return hits[:12] + (["... and %d more" % (len(hits) - 12)] if len(hits) > 12 else [])
 
+
+def main(argv):
+    if os.environ.get("OHMYBUG_TEST_SCAN_RAISE"):
+        raise RuntimeError("forced by the test")
+    hits = []
+    if argv[:1] == ["--payload"] and len(argv) == 2:
+        with open(argv[1], "rb") as f:
+            scan_payload(hits, json.loads(f.read().decode("utf-8")))
+    elif argv[:1] == ["--snapshot"] and len(argv) == 3:
+        members, count = scan_snapshot(hits, argv[1])
+        print(count)
+        if members:
+            with open(argv[2], "wb") as f:
+                f.write(b"".join(n.encode("utf-8", "surrogateescape") + b"\0" for n in members))
+    else:
+        raise SystemExit(2)
+    if hits:
+        sys.stderr.buffer.write(("".join("  - %s\n" % h for h in shown(hits))).encode("utf-8", "replace"))
+        return 3
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except SystemExit:
+        raise
+    except BaseException:
+        sys.exit(2)
