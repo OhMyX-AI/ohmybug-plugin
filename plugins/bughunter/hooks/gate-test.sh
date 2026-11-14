@@ -33,7 +33,12 @@ SCRATCH=".ohmybug-gate-test-scratch.$$"
 # `git add -N` is what makes the file visible to `git diff`, and it leaves an
 # index entry behind — so the cleanup has to undo both, or this test dirties the
 # repository it just finished testing.
-cleanup_scratch() { rm -f "$SCRATCH"; git reset -q -- "$SCRATCH" 2>/dev/null || true; }
+# The working diff reaches the rows' python in a file, read as the shell's $(...)
+# would hand it over (no trailing newlines). Never in an environment string:
+# Linux caps one at 128 KiB, and this repository's own branch diff can be
+# larger, which failed every stamp row on CI while macOS stayed green.
+export OMB_DIFF_FILE=$(mktemp)
+cleanup_scratch() { rm -f "$SCRATCH" "$OMB_DIFF_FILE"; git reset -q -- "$SCRATCH" 2>/dev/null || true; }
 trap 'cleanup_scratch' EXIT
 # What the tree looked like before we touched anything. A test that runs against
 # the real repository has to leave it exactly as it found it: this file once put
@@ -270,7 +275,7 @@ post() { # tool, done?, review id, envelope -> runs stamp-hunt.sh
   # The ENVELOPE is a parameter because it is not ours to choose: the client
   # decides how a tool response reaches a hook, and reading only one spelling of
   # it is what let a clean hunt go unrecorded.
-  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
   python3 -c "import json,os,sys;
 body={'review_id':sys.argv[4],'status':'done' if sys.argv[2]=='1' else 'running'}
 parts=[{'type':'text','text':json.dumps(body)}]
@@ -281,7 +286,7 @@ resp={'content':parts} if sys.argv[5]=='content' else (
       'ohmybug: upstream said no' if sys.argv[5]=='garbage' else json.dumps(body)))))
 print(json.dumps({
     'tool_name':'mcp__plugin_bughunter_ohmybug__'+sys.argv[1],
-    'tool_input':{'review_id':sys.argv[4],'diff':os.environ.get('OMB_DIFF','')},
+    'tool_input':{'review_id':sys.argv[4],'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
     'tool_response':resp,
     'cwd':sys.argv[3]}))" "$1" "$2" "$PWD" "${3:-rev_x}" "${4:-content}" \
   | bash "$G/stamp-hunt.sh"
@@ -388,27 +393,27 @@ else
   # them. The server's field decides; an older server that lacks it is judged by
   # the pair it was derived from; an ERROR decides nothing at all.
   postx() { # tool, review id, extra body fields (JSON object), [envelope] -> rc
-    OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+    git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
     python3 -c "import json,os,sys;
 body={'review_id':sys.argv[2]}; body.update(json.loads(sys.argv[3]))
 parts=[{'type':'text','text':json.dumps(body)}]
 resp={'content':parts,'isError':True} if sys.argv[4]=='error' else (body if sys.argv[4]=='raw' else {'content':parts})
 print(json.dumps({
     'tool_name':'mcp__plugin_bughunter_ohmybug__'+sys.argv[1],
-    'tool_input':{'review_id':sys.argv[2],'diff':os.environ.get('OMB_DIFF','')},
+    'tool_input':{'review_id':sys.argv[2],'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
     'tool_response':resp,'hook_event_name':'PostToolUse',
     'cwd':os.getcwd()}))" "$1" "$2" "$3" "${4:-content}" \
     | bash "$G/stamp-hunt.sh" >/dev/null 2>&1; echo $?
   }
   postxo() { # same payload as postx -> the hook's stdout
-    OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+    git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
     python3 -c "import json,os,sys;
 body={'review_id':sys.argv[2]}; body.update(json.loads(sys.argv[3]))
 parts=[{'type':'text','text':json.dumps(body)}]
 resp={'content':parts,'isError':True} if sys.argv[4]=='error' else (body if sys.argv[4]=='raw' else {'content':parts})
 print(json.dumps({
     'tool_name':sys.argv[5]+sys.argv[1],
-    'tool_input':{'review_id':sys.argv[2],'diff':os.environ.get('OMB_DIFF','')} if sys.argv[1]!='submit_review' else {'diff':os.environ.get('OMB_DIFF',''), **(json.loads(sys.argv[6]) if sys.argv[6] else {})},
+    'tool_input':{'review_id':sys.argv[2],'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')} if sys.argv[1]!='submit_review' else {'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n'), **(json.loads(sys.argv[6]) if sys.argv[6] else {})},
     'tool_response':resp,'hook_event_name':'PostToolUse',
     'cwd':os.getcwd()}))" "$1" "$2" "$3" "${4:-content}" "${5:-mcp__plugin_bughunter_ohmybug__}" "${6:-}" \
     | bash "$G/stamp-hunt.sh" 2>/dev/null
@@ -656,10 +661,10 @@ fi
 # what tells the script a PreToolUse fired. Wiring both events to the same
 # command line is one thing that cannot be half-installed.
 pre() { # tool -> what the PreToolUse hook sees, before anyone allows or refuses
-  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
   python3 -c "import json,os,sys;print(json.dumps({
     'tool_name':'mcp__plugin_bughunter_ohmybug__'+sys.argv[1],
-    'tool_input':{'diff':os.environ.get('OMB_DIFF','')},
+    'tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
     'cwd':sys.argv[2]}))" "$1" "$PWD" | bash "$G/stamp-hunt.sh"
 }
 reset_state
@@ -780,10 +785,10 @@ if [ -n "$ID" ]; then
   # The positional field protocol carries three free-text fields before the two
   # flags, and review_id is model-authored: one newline in it made a PostToolUse
   # read as a PreToolUse, so the finished review could never promote.
-  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
   python3 -c "import json,os,sys;print(json.dumps({
     'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
-    'tool_input':{'review_id':'rev_nl\n1','diff':os.environ.get('OMB_DIFF','')},
+    'tool_input':{'review_id':'rev_nl\n1','diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
     'tool_response':{'review_id':'rev_nl','status':'running'},
     'cwd':sys.argv[1]}))" "$PWD" | bash "$G/stamp-hunt.sh"
   [ -n "$(ls -A "$(ohmybug_hunt_dir).pending" 2>/dev/null)" ] || {
@@ -876,16 +881,16 @@ fi
 # (The pending record itself needs the id the SERVER minted, and an empty
 # answer carries none: nothing to file, and the hook says so.)
 reset_state
-OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
 python3 -c "import json,os,sys;print(json.dumps({
   'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
-  'tool_input':{'diff':os.environ.get('OMB_DIFF','')},
+  'tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
   'cwd':sys.argv[1]}))" "$PWD" | bash "$G/stamp-hunt.sh" >/dev/null 2>&1
 ohmybug_attempted "$ID" || { printf 'FAIL the PreToolUse offer left no attempt record\n'; fails=$((fails + 1)); }
-OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
 python3 -c "import json,os,sys;print(json.dumps({
   'tool_name':'mcp__plugin_bughunter_ohmybug__submit_review',
-  'tool_input':{'diff':os.environ.get('OMB_DIFF','')},
+  'tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
   'tool_response':{},
   'cwd':sys.argv[1]}))" "$PWD" | bash "$G/stamp-hunt.sh" 2>/dev/null >"$HOME/hook.out"
 ohmybug_attempted "$ID" && { printf 'FAIL an empty tool_response was read as PreToolUse: the attempt record survived the call\n'; fails=$((fails + 1)); }
@@ -1889,12 +1894,13 @@ if git worktree add -q --detach "$WT" HEAD 2>/dev/null; then
   # submit_review carrying the worktree's diff, reported with the MAIN checkout
   # as cwd — the exact shape that recorded nothing.
   wpost() { # tool, done?, cwd, diff-text
-    python3 -c "import json,sys;print(json.dumps({
+    printf '%s' "$4" > "$OMB_DIFF_FILE"  # a builtin: no argument limit (see OMB_DIFF_FILE above)
+    python3 -c "import json,os,sys;print(json.dumps({
       'tool_name':'mcp__plugin_bughunter_ohmybug__'+sys.argv[1],
-      'tool_input':{'diff':sys.argv[4]},
+      'tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read()},
       'tool_response':{'content':[{'type':'text','text':json.dumps(
          {'review_id':'rev_wt','status':'done' if sys.argv[2]=='1' else 'running'})}]},
-      'cwd':sys.argv[3]}))" "$1" "$2" "$3" "$4" | bash "$G/stamp-hunt.sh"
+      'cwd':sys.argv[3]}))" "$1" "$2" "$3" | bash "$G/stamp-hunt.sh"
   }
   wpost submit_review 0 "$PWD" "$WT_DIFF" >/dev/null 2>&1
   wpost get_findings 1 "$PWD" "$WT_DIFF"
@@ -2368,12 +2374,12 @@ esac
 # clean hunt" that was never its hunt. The record now carries who wrote
 # it, so these rows pin the three states apart: mine, nobody's, somebody else's.
 sess() { # tool, done?, review id, session id -> runs stamp-hunt.sh with a session
-  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) \
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
   python3 -c "import json,os,sys;
 body={'review_id':sys.argv[3],'status':'done' if sys.argv[2]=='1' else 'running'}
 print(json.dumps({
     'tool_name':'mcp__plugin_bughunter_ohmybug__'+sys.argv[1],
-    'tool_input':{'review_id':sys.argv[3],'diff':os.environ.get('OMB_DIFF','')},
+    'tool_input':{'review_id':sys.argv[3],'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
     'tool_response':{'content':[{'type':'text','text':json.dumps(body)}]},
     'session_id':sys.argv[4],
     'cwd':sys.argv[5]}))" "$1" "$2" "$3" "$4" "$PWD" \
@@ -3136,12 +3142,12 @@ KNOWN
 # A routed step 1 is a hunt of record that may not be the answer: the gate takes
 # the last hunt of the chain. These rows walk each route_state through the stamp.
 post_r() { # tool, status, review id, extra body fields as JSON
-  OMB_DIFF=$(git diff "$(ohmybug_base)" 2>/dev/null) python3 -c 'import json,os,sys
+  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; python3 -c 'import json,os,sys
 tool, status, rid, extra, cwd = sys.argv[1:6]
 body = {"review_id": rid, "review_of_record": True}
 if status: body["status"] = status
 body.update(json.loads(extra))
-inp = {"diff": os.environ.get("OMB_DIFF", "")} if tool == "submit_review" else {"review_id": rid}
+inp = {"diff": open(os.environ["OMB_DIFF_FILE"], errors="surrogateescape").read().rstrip("\n")} if tool == "submit_review" else {"review_id": rid}
 print(json.dumps({"tool_name": "mcp__plugin_bughunter_ohmybug__" + tool, "tool_input": inp,
   "tool_response": {"content": [{"type": "text", "text": json.dumps(body)}]}, "cwd": cwd}))' "$1" "$2" "$3" "${4:-"{}"}" "$PWD" \
   | bash "$G/stamp-hunt.sh"
