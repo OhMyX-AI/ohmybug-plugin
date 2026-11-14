@@ -26,12 +26,7 @@ set -euo pipefail
 
 [ -n "${PLUGIN_DATA:-}" ] && exit 0
 
-# A user who also added the OhMyBug server with `claude mcp add` gets that server's
-# tools under another name (mcp__ohmybug__* by the README's line): Claude Code
-# hides the plugin server of the same URL. The hooks, the permission advice and the
-# merge gate know only the plugin's tool names, so that setup is not supported; a
-# restart does not change it, removing the added server does.
-NOTE='First thing this session: confirm the OhMyBug MCP tools (mcp__plugin_bughunter_ohmybug__*) are present. If they are not, but OhMyBug tools are there under another server name (mcp__ohmybug__*, or any mcp__<name>__submit_review beside get_findings and confirm_findings), the user added the OhMyBug server themselves and Claude Code hides the plugin server of the same URL: tell the user once, now, that the plugin hooks, permission advice and merge gate do not recognise those tools, and that claude mcp remove <that name> and a restart bring the plugin server back (a restart alone does not); then let the user decide and go on with what they asked. If no OhMyBug tools are there at all, tell the user once, now — a session that began without them will not get them, and a restart (claude -c) usually does — then let the user decide and go on with what they asked; do not leave the discovery to the merge gate hours later.'
+NOTE='First thing this session: confirm the OhMyBug MCP tools (mcp__plugin_bughunter_ohmybug__*) are present. If they are not, tell the user once, now — a session that began without them will not get them, and a restart (claude -c) usually does — then let the user decide and go on with what they asked; do not leave the discovery to the merge gate hours later.'
 
 python3 - "$NOTE" <<'PY' || exit 0
 import json, sys
