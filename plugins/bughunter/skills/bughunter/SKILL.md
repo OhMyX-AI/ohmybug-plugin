@@ -508,9 +508,10 @@ the same call with an empty `diff` changes nothing. Measured twice.
 
 1. **Say it once**, in one line: the hunt tools are refused in this environment,
    and what would change that is the user's own step – in Claude Code the rule
-   `/permissions` → the name of the OhMyBug tool you called with its last part
-   replaced by `*` (`mcp__plugin_bughunter_ohmybug__*` for the plugin's own
-   server); in Codex, approving
+   `/permissions` → `mcp__plugin_bughunter_ohmybug__*` (if your OhMyBug tools
+   carry another name, a second server hides the plugin's: the merge gate does
+   not count rules for it, so tell the user to remove that server and use the
+   plugin's key file, as the README says); in Codex, approving
    `mcp__ohmybug__*` at the tool-approval prompt or in their Codex MCP config.
    It is the user's own click in their own settings – never add it yourself,
    never ask for it to be widened

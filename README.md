@@ -141,9 +141,10 @@ Authorization header disables the OAuth flow. With the plugin installed, use
 the plugin's key file instead (see Install (Claude Code)). A second server at
 the same URL, added this way or from an `ohmybug` entry in a project
 `.mcp.json`, can hide the plugin's own. The tools then carry that server's name
-(`mcp__ohmybug__*` for a server named `ohmybug`), and the plugin's permission
-advice and merge gate follow that name, as long as the name contains
-`ohmybug`. To go back to the plugin's own server: write the key file, remove
+(`mcp__ohmybug__*` for a server named `ohmybug`), and the plugin's merge gate
+counts permission rules for the plugin's own server only
+(`mcp__plugin_bughunter_ohmybug__*`), so remove the second server. To go back
+to the plugin's own server: write the key file, remove
 the second server (`claude mcp remove ohmybug`, or its `.mcp.json` entry if
 only Claude Code reads that file), restart Claude Code, and move any
 `mcp__ohmybug__*` permission rule to `mcp__plugin_bughunter_ohmybug__*`.)

@@ -98,7 +98,17 @@ say, ctx = None, None
 # One mark per server name: the plugin server keeps the old name, so a machine that
 # heard it once is not told again; a second server gets one notice of its own.
 mark = "permission-notice-v1" + ("" if P == "mcp__plugin_bughunter_ohmybug" else "-" + P)
-if not mentioned:
+if P != "mcp__plugin_bughunter_ohmybug":
+    # A second server at the same URL hides the plugin server. The merge gate counts
+    # rules for the plugin server only, so a rule for this name is never advised:
+    # it would let the tools run while the gate reads them as not permitted.
+    if once(mark):
+        say = ("OhMyBug: these tools come from a second OhMyBug server you added (" + P + "),\n"
+               "and it hides the plugin server. The plugin merge gate counts permission rules\n"
+               "for the plugin server only. To go back: write your key to ~/.ohmybug/api-key,\n"
+               "remove the second server (claude mcp remove, or its entry in a project\n"
+               ".mcp.json), restart, and allow mcp__plugin_bughunter_ohmybug__* .")
+elif not mentioned:
     if once(mark):
         say = ("OhMyBug: the hunt runs in our cloud, so its tools send code off this machine.\n"
                "In auto mode the permission classifier reviews each of those calls, and it\n"

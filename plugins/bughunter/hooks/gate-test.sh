@@ -716,62 +716,6 @@ if [ -n "$ID" ]; then
   # one aborted submit opened the merge for the attempt's whole TTL.
   rc=$(mk "$V" "$PWD" | PLUGIN_DATA=/x bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
   [ "$rc" = 2 ] || { printf 'FAIL under Codex a bare attempt stood the gate down (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
-  # The attempt carries the server name the call went through. A second server
-  # at the same URL hides the plugin's, and its tools are mcp__ohmybug__*: the
-  # allow check and the advice follow that name, and a rule for the other name
-  # says nothing about it (a stale rule hard-blocked; a right one warned through).
-  prek() {
-    git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null; \
-    python3 -c "import json,os,sys;print(json.dumps({
-      'tool_name':'mcp__ohmybug__submit_review',
-      'tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},
-      'cwd':sys.argv[1]}))" "$PWD" | bash "$G/stamp-hunt.sh"
-  }
-  krow() { # name, settings json ('' = none), want rc
-    if [ -n "$2" ]; then printf '%s\n' "$2" > "$HOME/.claude/settings.json"; else rm -f "$HOME/.claude/settings.json"; fi
-    rc=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
-    [ "$rc" = "$3" ] || { printf 'FAIL live name: %s: rc=%s, want %s\n' "$1" "$rc" "$3"; fails=$((fails + 1)); }
-  }
-  prek
-  [ "$(ohmybug_attempt_prefix "$ID")" = mcp__ohmybug ] || { printf 'FAIL live name: the attempt did not keep its server name\n'; fails=$((fails + 1)); }
-  # The verdict reads the user's settings alone, never the record (the agent
-  # can write it): a rule under either name blocks, no rule warns. The record
-  # only names the rule in the advice.
-  krow "key server, a plugin rule: block" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}' 2
-  krow "key server, no rule: warn" '' 0
-  out=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" 2>&1 >/dev/null)
-  case "$out" in *"/permissions -> mcp__ohmybug__*"*) ;; *) printf 'FAIL live name: the warn named another rule: %s\n' "$out"; fails=$((fails + 1)) ;; esac
-  krow "key server, its own rule: block" '{"permissions":{"allow":["mcp__ohmybug__*"]}}' 2
-  krow "key server, submit_review alone: block" '{"permissions":{"allow":["mcp__ohmybug__submit_review"]}}' 2
-  krow "plugin submit_review alone: block" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__submit_review"]}}' 2
-  krow "key server, its bare server rule: block" '{"permissions":{"allow":["mcp__ohmybug"]}}' 2
-  krow "key server, a lookalike name: warn" '{"permissions":{"allow":["mcp__ohmybugx__*"]}}' 0
-  krow "key server, a provide_files-only rule: warn" '{"permissions":{"allow":["mcp__ohmybug__provide_files"]}}' 0
-  # The commit-keyed attempt keeps the server name too.
-  python3 -c "import json,sys;print(json.dumps({'tool_name':'mcp__ohmybug__submit_review','tool_input':{'meta':{'ref':sys.argv[1]}},'cwd':sys.argv[2]}))" "$(git rev-parse HEAD)" "$PWD" | bash "$G/stamp-hunt.sh"
-  [ "$(ohmybug_attempt_prefix "ref:$(git rev-parse HEAD)")" = mcp__ohmybug ] || { printf 'FAIL live name: the ref attempt did not keep its server name\n'; fails=$((fails + 1)); }
-  pre submit_review
-  krow "plugin server, only the key rule: block" '{"permissions":{"allow":["mcp__ohmybug__*"]}}' 2
-  krow "plugin server, no rule: warn" '' 0
-  out=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" 2>&1 >/dev/null)
-  case "$out" in *"/permissions -> mcp__plugin_bughunter_ohmybug__*"*) ;; *) printf 'FAIL live name: the plugin warn named another rule: %s\n' "$out"; fails=$((fails + 1)) ;; esac
-  # A record from before the name was stored is the plugin server's.
-  : > "$(ohmybug_hunt_dir)/attempt:$ID"
-  krow "an old empty record, the plugin rule: block" '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}' 2
-  rm -f "$HOME/.claude/settings.json"
-  out=$(mk "$V" "$PWD" | bash "$G/pre-pr-gate.sh" 2>&1 >/dev/null)
-  case "$out" in *"/permissions -> mcp__plugin_bughunter_ohmybug__*"*) ;; *) printf 'FAIL live name: an old record named another rule: %s\n' "$out"; fails=$((fails + 1)) ;; esac
-  # A record that is not one whole name reads as the plugin server in the advice.
-  for junk in 'mcp__../x' 'mcp__x
-evil' 'mcp__'; do
-    printf '%s' "$junk" > "$(ohmybug_hunt_dir)/attempt:$ID"
-    [ "$(ohmybug_attempt_prefix "$ID")" = mcp__plugin_bughunter_ohmybug ] || { printf 'FAIL live name: record [%s] read as a name\n' "$junk"; fails=$((fails + 1)); }
-  done
-  # A Codex call writes no name: the directory is shared, and a Codex name is no Claude Code rule.
-  git diff "$(ohmybug_base)" > "$OMB_DIFF_FILE" 2>/dev/null
-  python3 -c "import json,os,sys;print(json.dumps({'tool_name':'mcp__ohmybug__submit_review','hook_event_name':'PreToolUse','tool_input':{'diff':open(os.environ['OMB_DIFF_FILE'],errors='surrogateescape').read().rstrip('\n')},'cwd':sys.argv[1]}))" "$PWD" | PLUGIN_DATA=/x bash "$G/stamp-hunt.sh"
-  [ "$(ohmybug_attempt_prefix "$ID")" = mcp__plugin_bughunter_ohmybug ] || { printf 'FAIL live name: a Codex attempt kept a name\n'; fails=$((fails + 1)); }
-  rm -f "$HOME/.claude/settings.json"
   # ...and a Codex-shaped payload: tool_name spelled out, hook_event_name set,
   # and the command handed over as argv. A parser that dies on the list is read
   # as "no verdict", and that branch OPENS the gate.
@@ -2236,11 +2180,13 @@ kpre() { printf '{"hook_event_name":"PreToolUse","tool_name":"mcp__ohmybug__%s",
 printf '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}\n' > "$FR/.claude/settings.json"
 # The plugin server's call consumed its own mark; the second server's notice is its own.
 pre get_balance default p0 >/dev/null
-fr_row "key server beside a plugin rule: the notice names the key server" "$(kpre get_balance k1)" 'Add rule ->\\nmcp__ohmybug__\* \. One tool'
+fr_row "key server beside a plugin rule: the notice gives the way back" "$(kpre get_balance k1)" 'second OhMyBug server you added \(mcp__ohmybug\).*hides the plugin server.*api-key'
+case "$(rm -rf "$FR/state"; kpre get_balance k9)" in *"Add rule ->"*"mcp__ohmybug__*"*) printf 'FAIL first-run: advised a rule the gate cannot read\n'; fails=$((fails + 1)) ;; esac
 fr_row "key server beside a plugin rule: the provide_files hint names its tool" "$(kpre provide_files k1)" 'Add rule -> mcp__ohmybug__provide_files'
 rm -rf "$FR/state"
 printf '{"permissions":{"allow":["mcp__ohmybug__*"]}}\n' > "$FR/.claude/settings.json"
-fr_row "key server with its own rule: no notice on a fresh machine" "$(kpre get_balance k2)" ''
+fr_row "key server with its own rule: still told the way back" "$(kpre get_balance k2)" 'hides the plugin server'
+fr_row "key server: the way back is told once" "$(kpre get_balance k3)" ''
 fr_row "key server with its own rule: no provide_files hint" "$(kpre provide_files k2)" ''
 rm -rf "$FR/state" "$FR/.claude"
 # A machine that heard the old notice is not told again on the plugin server.

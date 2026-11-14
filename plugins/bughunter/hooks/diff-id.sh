@@ -264,27 +264,12 @@ ohmybug_hunted() {
 # finished hunt. The gate needs the distinction because "never tried" and "tried
 # and was refused" are different facts and only the first deserves a block.
 #
-# An id-less record would be a file that answers every lookup, so the empty
-# guard comes first. The file holds the server name the call went through (the
-# client's tool_name minus its last `__<tool>`): the plugin server, or a second
-# server at the same URL that hides it. It names the rule in the gate's advice
-# and nothing else: the file is the agent's to write, so it never decides.
+# The empty guard is repeated rather than inherited: `attempt:` prepended to
+# nothing is a non-empty string, so the guard inside ohmybug_record_hunt can no
+# longer fire — and an id-less record would be a file that answers every lookup.
 ohmybug_record_attempt() {
-  local dir
   [ -n "${1:-}" ] || return 1
-  dir=$(ohmybug_hunt_dir) || return 1
-  mkdir -p "$dir" && printf '%s' "${2:-}" > "$dir/attempt:$1"
-}
-
-# The server name an attempt was made through, for the advice text only; the
-# plugin server for a record from before the name was stored, or for anything
-# that is not one whole name.
-ohmybug_attempt_prefix() {
-  local dir p=
-  dir=$(ohmybug_hunt_dir) && [ -n "${1:-}" ] && p=$(head -c 200 "$dir/attempt:$1" 2>/dev/null)
-  case "$p" in mcp__?*) ;; *) p= ;; esac
-  case "${p#mcp__}" in *[!A-Za-z0-9_-]*) p= ;; esac
-  printf '%s' "${p:-mcp__plugin_bughunter_ohmybug}"
+  ohmybug_record_hunt "attempt:$1"
 }
 
 # Attempts EXPIRE. A refusal is a statement about the environment right now; a
@@ -350,19 +335,13 @@ ohmybug_tools_allowed() {
     "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/settings.json" \
     "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/settings.local.json" <<'PY' 2>/dev/null
 import json, sys
-# A rule that lets submit_review run, under either name the tools can carry:
-# the plugin server, or a second server named ohmybug that hides it. The bare
-# name, all its tools, or that tool; a rule for another tool alone does not.
-# Only the user's settings decide: never the attempt record, which the agent
-# can write.
-ok = {p + s for p in ("mcp__plugin_bughunter_ohmybug", "mcp__ohmybug") for s in ("", "__*", "__submit_review")}
 for path in sys.argv[1:]:
     try:
         data = json.load(open(path))
     except Exception:
         continue
     rules = (data.get("permissions") or {}).get("allow") or []
-    if any(str(r) in ok for r in rules):
+    if any("bughunter_ohmybug" in str(r) for r in rules):
         sys.exit(0)
 sys.exit(1)
 PY
