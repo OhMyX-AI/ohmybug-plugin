@@ -71,6 +71,9 @@ patch_in() { printf 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1
 export HOME="$ROOT/home"; mkdir -p "$HOME"; HOME=$(cd "$HOME" && pwd -P)
 SMUDGED="$ROOT/smudged"
 export GIT_CONFIG_GLOBAL="$ROOT/gitconfig"
+# No system config either: a CI image that sets safe.directory = * there would
+# turn the ownership row below into a pass for the wrong repository.
+export GIT_CONFIG_NOSYSTEM=1
 printf '[filter "marker"]\n\tsmudge = touch %s; cat\n\tclean = cat\n' "$SMUDGED" > "$GIT_CONFIG_GLOBAL"
 
 # ---- 1. Secret-list parity --------------------------------------------------
