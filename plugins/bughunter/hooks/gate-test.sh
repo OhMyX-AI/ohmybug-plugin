@@ -2763,60 +2763,73 @@ if not all(t in m for t in ("submit_review", "confirm_findings", "get_balance"))
     sys.exit(1)
 PY2
 
-# THE UPLOAD RECIPE, RUN — not read. It used to write the diff and the payload
-# to fixed names in /tmp: on a shared machine any other user could read them
-# (the file mode follows the umask, usually 0644), and two reviews at once
-# overwrote each other. The block in SKILL.md is executed here with a curl stub
-# that reports the payload's path and modes; it must be a private 0700
-# directory of its own, a file nobody else can read, gone after the run, and a
-# different directory each time.
+# THE UPLOAD BLOCK, RUN – not read. SKILL.md's block is executed with the
+# script it calls replaced by a stub that reports its arguments and the diff
+# file's path and modes. The diff must sit in a private 0700 directory of its
+# own, in a file nobody else can read, gone after the run, a different
+# directory each time (a fixed name in /tmp was readable by every user and
+# shared by two reviews at once); and a failed `git diff` must stop the block
+# before the script runs, so an empty or partial diff is never sent.
 UP=$(mktemp -d)
-mkdir -p "$UP/bin" "$UP/repo"
-cat > "$UP/bin/curl" <<'SH'
-#!/bin/sh
-for a; do case $a in @*) f=${a#@} ;; esac; done
-python3 - "$f" >> "$UPLOG" <<'PY'
+mkdir -p "$UP/skills/bughunter" "$UP/bin" "$UP/repo"
+cat > "$UP/skills/bughunter/omb-upload.sh" <<'SH'
+python3 - "$@" >> "$UPLOG" <<'PY'
 import os, stat, sys
-f = sys.argv[1]
-print(f"{oct(stat.S_IMODE(os.stat(os.path.dirname(f)).st_mode))} {oct(stat.S_IMODE(os.stat(f).st_mode))} {os.path.dirname(f)}")
+url, mode, f = sys.argv[1:4]
+print(oct(stat.S_IMODE(os.stat(os.path.dirname(f)).st_mode)), oct(stat.S_IMODE(os.stat(f).st_mode)), url, mode, os.path.dirname(f))
 PY
-cp "$f" "$UPLOG.payload"
-echo '{"ok":true}'
+cp "$3" "$UPLOG.diff"
 SH
-chmod +x "$UP/bin/curl"
+printf '#!/bin/sh\n[ "$1" = diff ] && exit 1\nexec %s "$@"\n' "$(command -v git)" > "$UP/bin/git"
+chmod +x "$UP/bin/git"
 git -C "$UP/repo" init -q && printf 'a\n' > "$UP/repo/a.txt" && git -C "$UP/repo" add a.txt \
-  && git -C "$UP/repo" -c user.email=t@t -c user.name=t commit -qm base && printf 'b\n' >> "$UP/repo/a.txt"
-RECIPE=$(python3 - plugins/bughunter/skills/bughunter/SKILL.md <<'PY'
+  && git -C "$UP/repo" -c user.email=t@t -c user.name=t commit -qm base \
+  && git -C "$UP/repo" update-ref refs/remotes/origin/main HEAD && printf 'b\n' >> "$UP/repo/a.txt"
+upload_block() { # SKILL.md's upload block, its placeholders filled
+  python3 - plugins/bughunter/skills/bughunter/SKILL.md "$1" <<'PY'
 import re, sys
 s = open(sys.argv[1]).read()
-m = re.search(r"Build the payload with a script.*?```bash\n(.*?)```", s, re.S)
-print(m.group(1).replace("<upload_url>", "http://upload.invalid/u/tok") if m else "")
+m = re.search(r"```bash\n(\([^`]*?omb-upload\.sh[^`]*?)```", s, re.S)
+print(m.group(1).replace("<skill_dir>", sys.argv[2] + "/skills/bughunter").replace("<upload_url>", "https://mcp.ohmybug.ai/u/tok")
+      .replace("<snapshot>", "required").replace("<base_branch>", "main") if m else "")
 PY
-)
+}
+RECIPE=$(upload_block "$UP")
 if [ -z "$RECIPE" ]; then
-  echo "FAIL upload recipe: the bash block after 'Build the payload with a script' is gone from SKILL.md"; fails=$((fails + 1))
+  echo "FAIL upload block: the bash block that runs omb-upload.sh is gone from SKILL.md"; fails=$((fails + 1))
 else
-  for run in 1 2; do
-    (cd "$UP/repo" && BASE=HEAD UPLOG="$UP/log" PATH="$UP/bin:$PATH" bash -c "$RECIPE") > /dev/null 2>&1 \
-      || { echo "FAIL upload recipe: run $run exited non-zero"; fails=$((fails + 1)); }
-  done
-  python3 - "$UP/log" <<'PY' || fails=$((fails + 1))
-import json, os, sys
-log = sys.argv[1]
-rows = [l.split(" ", 2) for l in open(log).read().splitlines()] if os.path.exists(log) else []
+  for sh in bash zsh; do
+    command -v "$sh" >/dev/null 2>&1 || continue
+    rm -f "$UP/log" "$UP/log.diff"
+    for run in 1 2; do
+      (cd "$UP/repo" && UPLOG="$UP/log" "$sh" -c "$RECIPE") > /dev/null 2>&1 \
+        || { echo "FAIL upload block ($sh): run $run exited non-zero"; fails=$((fails + 1)); }
+    done
+    python3 - "$UP/log" "$sh" <<'PY' || fails=$((fails + 1))
+import os, sys
+log, sh = sys.argv[1], sys.argv[2]
+rows = [l.split(" ", 4) for l in open(log).read().splitlines()] if os.path.exists(log) else []
 bad = []
-if len(rows) != 2: bad.append(f"curl saw {len(rows)} uploads, want 2")
-for dmode, fmode, d in rows:
-    if dmode != "0o700": bad.append(f"payload directory mode {dmode}, want 0o700")
-    if int(fmode, 8) & 0o077: bad.append(f"payload file mode {fmode} is readable by others")
-    if os.path.exists(d): bad.append(f"payload directory {d} left behind")
-if len(rows) == 2 and rows[0][2] == rows[1][2]: bad.append("two runs shared one payload directory")
-p = json.load(open(log + ".payload")) if os.path.exists(log + ".payload") else {}
-if "+b" not in p.get("diff", ""): bad.append("the payload does not carry the working diff")
-for b in bad: print("FAIL upload recipe: " + b)
+if len(rows) != 2: bad.append(f"the script ran {len(rows)} times, want 2")
+for dmode, fmode, url, mode, d in rows:
+    if dmode != "0o700": bad.append(f"diff directory mode {dmode}, want 0o700")
+    if int(fmode, 8) & 0o077: bad.append(f"diff file mode {fmode} is readable by others")
+    if os.path.exists(d): bad.append(f"diff directory {d} left behind")
+    if (url, mode) != ("https://mcp.ohmybug.ai/u/tok", "required"): bad.append(f"the script got {url} {mode}")
+if len(rows) == 2 and rows[0][4] == rows[1][4]: bad.append("two runs shared one directory")
+if "+b" not in (open(log + ".diff").read() if os.path.exists(log + ".diff") else ""): bad.append("the script did not get the working diff")
+for b in bad: print(f"FAIL upload block ({sh}): " + b)
 sys.exit(1 if bad else 0)
 PY
+  done
+  rm -f "$UP/log"
+  (cd "$UP/repo" && UPLOG="$UP/log" PATH="$UP/bin:$PATH" bash -c "$RECIPE") > /dev/null 2>&1 \
+    && { echo "FAIL upload block: a failed git diff did not fail the block"; fails=$((fails + 1)); }
+  [ -e "$UP/log" ] && { echo "FAIL upload block: the script ran after git diff failed"; fails=$((fails + 1)); }
 fi
+for gone in "instruction gives" "as it stands, before the payload"; do
+  grep -qF "$gone" plugins/bughunter/skills/bughunter/SKILL.md && { echo "FAIL SKILL.md still says [$gone]: the skill runs no command a tool answer hands it"; fails=$((fails + 1)); }
+done
 rm -rf "$UP"
 
 # THE NO-BRANCH LADDER, RUN — not read. Its rungs reach files no branch diff
@@ -2914,15 +2927,17 @@ if [ ! -e "$DD/marker-diff.evil.command" ] || [ ! -e "$DD/marker-diff.external" 
 fi
 rm -f "$DD"/marker-*
 printf '%s\n' "${LADDER:-}" > "$DD/ladder.sh"
-# The upload recipe (RECIPE, read from SKILL.md above) with a curl that keeps the payload.
-mkdir -p "$DD/bin"; printf '#!/bin/sh\nfor a; do case $a in @*) cp "${a#@}" "$UPLOG" ;; esac; done\n' > "$DD/bin/curl"; chmod +x "$DD/bin/curl"
+# SKILL.md's upload block, with a stand-in script that keeps the diff it is given.
+mkdir -p "$DD/up/skills/bughunter"
+printf '#!/bin/sh\ncp "$3" "$UPLOG"\n' > "$DD/up/skills/bughunter/omb-upload.sh"
+DRECIPE=$(upload_block "$DD/up")
 dd_run() { # repo -> each spelling's bytes, one file per spelling, under $DD/out-<repo>
   local r=$1 o="$DD/out-$(basename "$1")"
   mkdir -p "$o"
   ( cd "$r" && . "$G/diff-id.sh" && ohmybug_diff_raw > "$o/raw" && ohmybug_sig_id > "$o/sig" )
   ( cd "$r" && export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t && . "$DD/ladder.sh" \
       && omb_diff HEAD > "$o/omb_diff" && omb_commits 2 > "$o/omb_commits" )
-  ( cd "$r" && BASE=HEAD~1 UPLOG="$o/default" PATH="$DD/bin:$PATH" bash -c "$RECIPE" ) >/dev/null 2>&1
+  ( cd "$r" && UPLOG="$o/default" bash -c "$DRECIPE" ) >/dev/null 2>&1
 }
 dd_run "$DD/a"; dd_run "$DD/b"
 for f in raw sig omb_diff omb_commits default; do

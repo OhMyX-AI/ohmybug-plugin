@@ -20,7 +20,7 @@ free, first review free.
 - **Fast review** · $4 · finds 72.4% of known bugs on our [OMBench](https://ohmybug.ai/bench/) benchmark · up to 15 minutes
 - **Deep review** · $12 ($24 on a wide change) · finds 86.1% of known bugs on our [OMBench](https://ohmybug.ai/bench/) benchmark · up to 2 hours
 
-Pick a mode for one hunt with `/bughunter:review lite` (or `snap`, `fast`); without one, on a pushed commit the service may start with a first step (snap, or lite on accounts set to lite), and a fast review follows when that step finds no medium or worse bug ([how it works](https://ohmybug.ai/modes/#route)); uncommitted work, an uploaded diff and a change the first step cannot take get the fast review. Lite and snap read the repository, so they need a pushed GitHub commit the service can read, and snap a diff under 1 MB. `/bughunter:stats` lists the modes the service runs for your key.
+Pick a mode for one hunt with `/bughunter:review lite` (or `snap`, `fast`); without one, on a pushed commit the service may start with a first step (snap, or lite on accounts set to lite), and a fast review follows when that step finds no medium or worse bug ([how it works](https://ohmybug.ai/modes/#route)); uncommitted work, a payload hunt (diff + snapshot by upload) and a change the first step cannot take get the fast review. Lite and snap read the repository, so they need a pushed GitHub commit the service can read, and snap a diff under 1 MB. `/bughunter:stats` lists the modes the service runs for your key.
 
 See the bug species our hunts keep finding in the [Bugarium](https://mcp.ohmybug.ai/bugs).
 
@@ -174,8 +174,9 @@ repository per week, and is not a merge gate.
   local review. Before every `gh pr merge`, a gate is the safety net: it checks
   the final diff was hunted (skip once with `SKIP_BUGHUNT=1`; review fixes
   change the diff and re-arm the gate).
-- `/bughunter:review` (or just ask to "hunt bugs") sends your diff + selected
-  context to OhMyBug's cloud. You see the exact file manifest before upload.
+- `/bughunter:review` (or just ask to "hunt bugs") hunts the pushed commit
+  with nothing uploaded, or sends the diff with a snapshot of the working
+  copy; one line says what leaves the machine and what is left out.
 - An orchestrated fleet of adversarial reviewers hunts on OhMyBug's models.
   Only findings that survive triage come back.
 - Your own agent verifies each finding against your codebase and reports
@@ -185,16 +186,32 @@ repository per week, and is not a merge gate.
   and so is a real medium you already deferred or accepted in your own ticket, once your agent marks it known
   (a hunt billed on CI, or one already billed at its deadline, stays charged).
 - `/bughunter:stats` shows your record: bugs found, reviews run, balance.
-- Before a diff or file contents leave your machine (`submit_review`,
-  `provide_files`), a secret scan refuses a payload that carries a credential
-  (vendor-prefixed tokens, private keys, key files) and says which file and
-  line, with the value masked. A payload it cannot read is refused too. It
-  lets a payload through unscanned in four cases only: submits that send no
-  payload (repo + ref) have nothing to scan; without `python3` it cannot run,
-  and says so in a system message; it does not run on Windows; the out-of-band
-  upload for very large diffs is not scanned. Set
+- Before a diff or file contents leave your machine, a secret scan looks for
+  credentials (vendor-prefixed tokens, private keys, key files) and names the
+  file and line, with the value masked. A payload hunt sends the diff and a
+  snapshot of the working copy (without ignored files, secret-named files such
+  as `.env*`, `*.pem`, `.npmrc` or `.ssh/`, and submodules); the upload script
+  scans both before anything is sent. A credential in the diff refuses the
+  upload; a snapshot file that carries one is left out and named, and
+  secret-named files are left out of the diff too. A payload it cannot read is
+  refused too, and without `python3` nothing is uploaded. The same scan refuses
+  a `submit_review` or `provide_files` that carries a credential; there,
+  without `python3`, it cannot run and lets the call through unscanned (an
+  inline diff-mode submit, a `provide_files` answer), saying so in a system
+  message. Not scanned: submits that send no payload (repo + ref) have
+  nothing to scan; it does not run on Windows; and a key the patterns miss,
+  under a name off the list, is sent. The account's diff mode on
+  `/me/policy` sends the diff without the snapshot. Set
   `OHMYBUG_SECRET_SCAN=0` (in the `env` block of `settings.json`) to turn the
   scan off.
+- The upload script's boundary: POSIX sh (dash, bash 3.2+, busybox ash),
+  git >= 2.25, python3 >= 3.7, curl, gzip, on macOS or Linux. Anything else
+  is unsupported: where the script can tell (python3 missing or older than
+  3.7, no curl) it refuses with one sentence, and it never sends what it did
+  not scan, unless the scan is turned off. The secret-name list is best
+  effort. Stated, not handled: a hard kill leaves its private temporary folder behind, a full temporary folder sends
+  nothing, and a working copy near the 1 GiB ceiling may not fit the agent's
+  600 s shell call on a slow machine.
 
 ### What runs where
 
@@ -256,11 +273,11 @@ Turn the mod off with
 
 | Tool | In | Out |
 |---|---|---|
-| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}`, `mode?` (`lite`, `snap` or `fast`; absent: fast, or a routed first step that may go on to fast, see above) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}` |
+| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}`, `upload?` (send the payload out of band), `mode?` (`lite`, `snap` or `fast`; absent: fast, or a routed first step that may go on to fast, see above) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}`; with `upload: true`, also `upload_url` and `snapshot` (`required`: POST the repository snapshot to `<upload_url>/repo` first, then `{diff, files}` to `upload_url`; `off`: diff mode, the payload alone) |
 | `get_findings` | `review_id` | `{status: running\|needs_files\|done\|failed, findings[{finding_id, severity, file, line?, title, failure_scenario, suggested_fix?}]}` |
 | `provide_files` | `review_id`, `paths[]` (Claude Code: the plugin's hook reads them from disk) or `files[{path, content}]` | `{status, delivered}` |
 | `confirm_findings` | `review_id`, `verdicts[{finding_id, verdict: REAL\|NOT_REAL\|UNCLEAR, reason, severity?, known?: {kind: deferred\|accepted, ref}}]` | `{confirmed, minor_confirmed, marked_known?, billed_usd, free_review_used, balance_usd, receipt_id}` |
 | `get_balance` | — | `{balance_usd, free_reviews_left, confirmed_total, stats{…}, modes[{mode, price_usd}]}` |
 
-Errors: `mode_unavailable`, `mode_needs_repo`, `mode_too_large`, `mode_with_deep` (the mode cannot run; nothing started or charged), `payment_required` (top up), `pending_verdicts` (resolve previous
+Errors: `snapshot_required` (an inline diff outside diff mode, or a payload before its snapshot: nothing started or charged), `mode_unavailable`, `mode_needs_repo`, `mode_too_large`, `mode_with_deep` (the mode cannot run; nothing started or charged), `payment_required` (top up), `pending_verdicts` (resolve previous
 review's verdicts first).

@@ -3,7 +3,7 @@ description: Hunt bugs in your code via OhMyBug cloud review – a branch, uncom
 ---
 
 Run the OhMyBug bug hunt on the current changes, following the `bughunter`
-skill end to end: scope the diff, show the upload manifest, submit for cloud
+skill end to end: scope the diff, show what leaves the machine, submit for cloud
 review, wait for the terminal result, verify every finding honestly against
 this codebase, report verdicts via `confirm_findings` BEFORE fixing, show the
 user the bill, fix confirmed bugs, and obtain server-backed merge evidence.
@@ -32,5 +32,5 @@ send it as `submit_review`'s `mode`, following the skill's "Hunt modes"
 section; with none, send no `mode`: on a pushed commit the service may start with a first step
 (`snap`, or `lite` on accounts set to lite) and go on with a fast hunt of the same commit (the
 skill's routed hunt: the service decides from the step's findings and, when it asks, your verdicts);
-uncommitted work, an uploaded diff and a change the first step cannot take (such as one over
+uncommitted work, a payload hunt (diff + snapshot by upload) and a change the first step cannot take (such as one over
 snap's 1 MB) get the fast hunt. A mode does not go with `deep`: when the user names both, ask which one they want.

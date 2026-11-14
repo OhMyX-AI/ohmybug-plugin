@@ -224,7 +224,72 @@ fillrun "$FX" '["outside.ts"]'
 check "paths: outside any repository nothing is sent" "$rc:$out" "2:"
 case "$err" in *"not inside one"*) echo "ok   paths: ...and the agent is told to send contents";; *) echo "FAIL paths: no-repo message: $err"; fails=$((fails + 1));; esac
 
+# The detector's file mode: the two files skills/bughunter/omb-upload.sh
+# posts, scanned before any POST.
+CORE="$G/omb_scan.py"
 FM="$FX/filemode"; mkdir -p "$FM"
+fm() { # name, want exit, mode, file, (unused), [text in stderr]
+  local err rc
+  rm -f "$FM/hits"
+  if [ "$3" = payload ]; then err=$(python3 -I "$CORE" --payload "$4" 2>&1 >/dev/null); rc=$?
+  else err=$(python3 -I "$CORE" "--$3" "$4" "$FM/hits" 2>&1 >/dev/null); rc=$?; fi
+  if [ "$rc" != "$2" ]; then echo "FAIL $1: exit $rc, want $2: $err"; fails=$((fails + 1)); return; fi
+  if [ -n "${6:-}" ] && ! printf '%s' "$err" | LC_ALL=C grep -qF -- "$6"; then echo "FAIL $1: message lacks '$6': $err"; fails=$((fails + 1)); return; fi
+  echo "ok   $1"
+}
+tgz() { # out, then name=content pairs
+  python3 - "$@" <<'PY2'
+import io, sys, tarfile
+out, pairs = sys.argv[1], sys.argv[2:]
+with tarfile.open(out, "w:gz", format=tarfile.PAX_FORMAT, encoding="utf-8") as t:
+    for p in pairs:
+        n, c = p.split("=", 1)
+        b = c.encode("utf-8")
+        i = tarfile.TarInfo(n); i.size = len(b)
+        t.addfile(i, io.BytesIO(b))
+PY2
+}
+j "{'diff':'+++ b/app.py\n@@ -1,1 +1,2 @@\n x\n+k = \"$AWS\"\n','files':[]}" > "$FM/hit.json"
+j "{'diff':'+++ b/app.py\n+print(1)\n','files':[{'path':'c.py','content':'x = 1'}]}" > "$FM/clean.json"
+j "{'diff':'+print(1)\n','files':[{'path':'c.py','content':'T=$GHP'}]}" > "$FM/ctx.json"
+printf 'not json' > "$FM/bad.json"
+fm "--payload: a key in the diff"              3 payload "$FM/hit.json"   "" "app.py:2 AWS access key"
+fm "--payload: a key in a context file"        3 payload "$FM/ctx.json"   "" "c.py:1 GitHub token"
+fm "--payload: clean"                          0 payload "$FM/clean.json"
+fm "--payload: unreadable refuses"             2 payload "$FM/bad.json"
+fm "--payload: a missing file refuses"         2 payload "$FM/none.json"
+err=$(python3 -I "$CORE" --payload "$FM/hit.json" 2>&1)
+printf '%s' "$err" | LC_ALL=C grep -qF "$AWS" && { echo "FAIL --payload: the full key reached the message"; fails=$((fails + 1)); } || echo "ok   --payload: the key is masked"
+tgz "$FM/hit.tgz" "src/ok.ts=x = 1" "conf/leak.yml=k: $AWS" "docs/a.md=fine"
+tgz "$FM/clean.tgz" "src/ok.ts=x = 1"
+fm "--snapshot: a key in a member"             3 snapshot "$FM/hit.tgz"   "" "conf/leak.yml:1 AWS access key"
+check "--snapshot: the hit members are written, NUL-separated" "$(tr '\0' '|' < "$FM/hits")" "conf/leak.yml|"
+fm "--snapshot: clean"                         0 snapshot "$FM/clean.tgz" ""
+check "--snapshot: clean writes no hit list" "$([ -s "$FM/hits" ] && echo yes || echo no)" no
+head -c 40 "$FM/hit.tgz" > "$FM/cut.tgz"
+fm "--snapshot: a truncated gzip refuses"      2 snapshot "$FM/cut.tgz"   ""
+fm "--snapshot: not a gzip refuses"            2 snapshot "$FM/bad.json"  ""
+OHMYBUG_TEST_SCAN_RAISE=1 fm "--snapshot: an error inside the scan refuses" 2 snapshot "$FM/clean.tgz" ""
+fm "a mode it does not know refuses"           2 nonsense "$FM/clean.tgz"
+# A member is read in chunks with a bounded line buffer: a key past the first
+# chunk, and one inside a single line longer than a chunk, are both found.
+python3 - "$FM/big.tgz" "$AWS" <<'PY2'
+import io, sys, tarfile
+out, key = sys.argv[1], sys.argv[2]
+members = {"big/lines.txt": ("x = 1\n" * 400000 + "k = " + key + "\n").encode(),
+           # The key straddles the second chunk edge: only the kept tail joins its halves.
+           "big/oneline.min.js": ("a" * (2 * 1048576 - 11) + " " + key + " " + "b" * 10).encode()}
+with tarfile.open(out, "w:gz") as t:
+    for n, b in members.items():
+        i = tarfile.TarInfo(n); i.size = len(b); t.addfile(i, io.BytesIO(b))
+PY2
+fm "--snapshot: keys past a chunk edge and in a very long line" 3 snapshot "$FM/big.tgz" "" "big/lines.txt:400001 AWS access key"
+check "--snapshot: ...both members named" "$(tr '\0' '|' < "$FM/hits")" "big/lines.txt|big/oneline.min.js|"
+for lc in en_US.ISO8859-1 ja_JP.eucJP zh_CN.GBK; do
+  tgz "$FM/u.tgz" "$(printf '\346\227\245')/k.md=$(printf '\346\227\245') k=$AWS" "a.ts=x"
+  LC_ALL=$lc LANG=$lc PYTHONUTF8=0 PYTHONIOENCODING= fm "--snapshot: a key in a non-ASCII member under $lc" 3 snapshot "$FM/u.tgz" "" "/k.md:1 AWS access key"
+  check "--snapshot: the member's bytes survive under $lc" "$(od -An -tx1 < "$FM/hits" | tr -d ' \n')" "e697a52f6b2e6d6400"
+done
 # One detector: the hook carries no second copy of the shapes.
 grep -q 'SHAPES = \[' "$G/secret-scan.sh" && { echo "FAIL the hook carries its own copy of the shapes"; fails=$((fails + 1)); } || echo "ok   one detector, beside the hook"
 # Not installed beside the skill (a skill-only install moved the hook), the hook refuses.
