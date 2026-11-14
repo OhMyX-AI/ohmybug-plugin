@@ -508,6 +508,11 @@ case "$TOOL" in
       if [ "$TREEOK" = 0 ] && [ "$REFOK" = 0 ] && [ -n "$SENT" ]; then
         say "ohmybug: the payload does not match this working tree, so the merge gate will not recognise this tree as hunted. Commit, push, and submit with no payload and meta.ref set to the pushed head commit sha; or, in diff mode, send the full working diff verbatim"
       fi
+      # An upload the server fetched itself hunted the pushed commit; with
+      # uncommitted work here its ref: line is never honoured.
+      if [ -z "$SENT" ] && [ "${UPLOAD:-0}" = 1 ] && { [ "$REFOK" = 0 ] || [ -n "$(git status --porcelain 2>/dev/null)" ]; }; then
+        say "ohmybug: the server hunted the pushed commit, not the uncommitted work in this tree, so the merge gate will still block it. To record this tree: commit, push, and submit with meta.ref = the pushed head sha and no payload."
+      fi
     else
       rm -f "$PENDING.tmp"
       # Nothing identifiable was sent. Say so: this used to exit silently, and a

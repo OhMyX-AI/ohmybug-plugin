@@ -43,6 +43,7 @@ cp "$f" "$STUB/$door.$n.sent"
 # whatever files were there before, as curl does.
 if [ "$code" = 000 ]; then printf 000; exit 7; fi
 # A transfer cut after its status line: curl prints the status and fails.
+case $code in *!) printf '%s' "$body" > "$o"; printf 'HTTP/1.1 %s X\r\n' "${code%!}" > "$h"; printf '%s' "${code%!}"; exit 55 ;; esac
 if [ "$code" = cut ]; then printf '%s' "$body" > "$o"; printf 'HTTP/1.1 200 X\r\n' > "$h"; printf 200; exit 18; fi
 printf '%s' "$body" > "$o"
 { printf 'HTTP/1.1 %s X\r\n' "$code"; [ -n "$ra" ] && printf 'Retry-After: %s\r\n' "$ra"; } > "$h"
@@ -195,16 +196,6 @@ refused "a project that is the home folder names the opt-in" "$H4" "$H4" "OMB_SN
 fresh; out=$(cd "$H4" && HOME="$H4" OMB_SNAPSHOT_HOME_OK=1 PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 0 ] && [ "$(calls)" = 2 ] && ok "OMB_SNAPSHOT_HOME_OK=1 lets the home-folder project through" || fail "home opt-in: rc $rc $out"
 
-# ---- 3. Path list ----------------------------------------------------------
-R="$ROOT/fx3"; fixture "$R" 1
-printf 'src/deep/a.ts\n.env.production\nsec2\n' > "$ROOT/paths"
-fresh; out=$(cd "$R" && OMB_SNAPSHOT_PATHS="$ROOT/paths" PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
-[ "$(names | tr '\n' ' ')" = "src/deep/a.ts " ] && ok "path list: only the listed files, a listed secret still left out" || fail "path list: got [$(names | tr '\n' ' ')] $out"
-printf '%s' "$out" | grep -q 'snapshot 1 of [0-9]* files (path list)' && ok "manifest: the path-list variant" || fail "manifest: path list: $out"
-: > "$ROOT/empty-paths"
-fresh; out=$(cd "$R" && OMB_SNAPSHOT_PATHS="$ROOT/empty-paths" PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
-[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "an empty path list refuses, never packs everything" || fail "empty path list: rc $rc calls $(calls)"
-
 # ---- 4. Scan before any POST -----------------------------------------------
 R="$ROOT/scan"; mkdir -p "$R"; g -C "$R" init -q; printf 'a\n' > "$R/a.txt"; g -C "$R" add -A; g -C "$R" commit -qm one
 KP="$ROOT/key.patch"; patch_in "$KP" "k = \"$AWS\""
@@ -222,7 +213,13 @@ n=$(names | tr '\n' ' ')
 if [ "$rc" = 0 ] && [ "$(calls)" = 2 ] && [ "$n" = "a.txt conf/ok.yml " ]; then ok "a key in a snapshot file leaves that file out, and the hunt goes on"
 else fail "key in snapshot: rc $rc [$n] $out"; fi
 printf '%s' "$out" | grep -q 'credential match: conf/leak.yml' && ok "manifest: the left-out file is named" || fail "manifest: leak.yml not named: $out"
-python3 "$G/../skills/bughunter/omb_scan.py" --snapshot "$STUB/repo.1.sent" "$ROOT/hits" 2>/dev/null && ok "the snapshot sent is the one scanned clean" || fail "the snapshot sent does not scan clean"
+python3 "$G/../skills/bughunter/omb_scan.py" --snapshot "$STUB/repo.1.sent" "$ROOT/hits" >/dev/null 2>&1 && ok "the snapshot sent is the one scanned clean" || fail "the snapshot sent does not scan clean"
+# Two dropped files are two names; a control byte inside a name becomes "?", and the manifest stays one line.
+cp "$R/conf/leak.yml" "$R/conf/$(printf 'two\033.yml')"
+fresh; run "$R" "$URL" required "$P"
+first=$(grep '^OhMyBug upload' "$STUB/transcript")
+case $first in *'credential match: conf/leak.yml, conf/two?.yml.') [ "$(names | tr '\n' ' ')" = "a.txt conf/ok.yml " ] && ok "manifest: two left-out files are two names, control bytes replaced" || fail "two drops: packed [$(names | tr '\n' ' ')]" ;; *) fail "two drops glued or split: $first" ;; esac
+rm -f "$R/conf/$(printf 'two\033.yml')"
 fresh; out=$(cd "$R" && OHMYBUG_SECRET_SCAN=0 PATH="$BIN:$PATH" sh "$UP" "$URL" required "$KP" 2>&1); rc=$?
 [ "$rc" = 0 ] && [ "$(calls)" = 2 ] && printf '%s' "$out" | grep -q 'Credential scan: off (OHMYBUG_SECRET_SCAN=0)' && ok "OHMYBUG_SECRET_SCAN=0: sent, and the manifest says scan off" || fail "scan off: rc $rc $out"
 tar -tzf "$STUB/repo.1.sent" | grep -qx conf/leak.yml && ok "scan off: nothing is dropped either" || fail "scan off: leak.yml dropped"
@@ -261,6 +258,13 @@ done
 # A repository git refuses to read is not packed as a folder without git.
 fresh; out=$(cd "$R" && GIT_TEST_ASSUME_DIFFERENT_OWNER=1 PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "a repository git cannot read (ownership) is refused, not packed without .gitignore" || fail "dubious ownership: rc $rc calls $(calls) $out"
+
+# A json.py in the repository is never imported, by the payload builder or by
+# the reader of a 409 answer (the script runs with the repository as cwd).
+printf 'open("%s", "w").close()\nraise SystemExit(9)\n' "$ROOT/imported" > "$R/json.py"
+fresh; plan repo '409|{"code":"snapshot_taken"}|'; run "$R" "$URL" required "$P"
+[ "$rc" = 0 ] && [ "$(calls)" = 2 ] && [ ! -e "$ROOT/imported" ] && ok "a json.py in the repository is not imported" || fail "repo json.py: rc $rc calls $(calls) imported=$([ -e "$ROOT/imported" ] && echo yes || echo no) $out"
+rm -f "$R/json.py" "$ROOT/imported"
 
 # ---- 5. Order, bytes, the private directory --------------------------------
 fresh; run "$R" "$URL" required "$P"
@@ -346,10 +350,6 @@ import json, sys
 sys.exit(0 if json.load(open(sys.argv[1]))["files"] == [] else 1)
 PY
 rm -f "$R/c.txt" "$R/latin.txt" "$ROOT/viaroot"
-# A path list written on Windows (CRLF) still matches; a path that matches nothing is named, not fatal.
-printf 'a.txt\r\nno/such.txt\r\n' > "$ROOT/crpaths"
-fresh; out=$(cd "$R" && OMB_SNAPSHOT_PATHS="$ROOT/crpaths" PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
-[ "$rc" = 0 ] && [ "$(names | tr '\n' ' ')" = "a.txt " ] && printf '%s' "$out" | grep -q 'listed paths not in the working copy: no/such.txt' && ok "path list: CR trimmed, an unmatched path named" || fail "path list CR/unmatched: rc $rc [$(names | tr '\n' ' ')] $out"
 # The masked hits of a snapshot file are shown, not discarded.
 mkdir -p "$R/conf"; printf 'k = "%s"\n' "$AWS" > "$R/conf/leak.yml"
 fresh; run "$R" "$URL" required "$P"
@@ -373,23 +373,6 @@ fresh; run "$R" "$URL" required "$ROOT/ctl.patch"
 first=$(head -n 1 "$STUB/transcript")
 case $first in *'secret-named: .env?X?Y.'*'Credential scan'*) ok "control bytes in a name are replaced; the manifest is one line" ;; *) fail "control bytes: $first" ;; esac
 printf '%s' "$first" | grep -q 'diff 1 KB (1 file)' && ok "...and its numbers are not shifted" || fail "shifted manifest: $first"
-# The path list: a listed file dropped for a credential is named as that, never as
-# "not in the working copy"; a list whose every path is dropped refuses truly.
-mkdir -p "$R/conf"; printf 'k = "%s"\n' "$AWS" > "$R/conf/leak.yml"
-printf 'conf/leak.yml\na.txt\n' > "$ROOT/pl2"; printf 'conf/leak.yml\n' > "$ROOT/pl1"
-fresh; out=$(cd "$R" && OMB_SNAPSHOT_PATHS="$ROOT/pl2" PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
-if [ "$rc" = 0 ] && [ "$(names | tr '\n' ' ')" = "a.txt " ] && printf '%s' "$out" | grep -q 'credential match: conf/leak.yml' && ! printf '%s' "$out" | grep -q 'not in the working copy'; then
-  ok "path list: a dropped file is named as dropped, the hunt goes on"; else fail "path list drop: rc $rc [$(names | tr '\n' ' ')] $out"; fi
-fresh; out=$(cd "$R" && OMB_SNAPSHOT_PATHS="$ROOT/pl1" PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
-[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'every path in OMB_SNAPSHOT_PATHS was left out for a credential match' && ok "path list: all dropped refuses with the true sentence" || fail "path list all dropped: rc $rc $out"
-rm -rf "$R/conf"
-printf 'no/such\n' > "$ROOT/pl0"
-fresh; out=$(cd "$R" && OMB_SNAPSHOT_PATHS="$ROOT/pl0" PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
-[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'none of the paths' && ok "path list: no listed path in the working copy refuses" || fail "path list none: rc $rc $out"
-mkdir -p "$R/sub"; printf 'a.txt\n' > "$R/sub/rel.list"
-fresh; out=$(cd "$R/sub" && OMB_SNAPSHOT_PATHS=rel.list PATH="$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
-[ "$rc" = 0 ] && [ "$(names | tr '\n' ' ')" = "a.txt " ] && ok "path list: a relative list read from a subfolder" || fail "relative path list: rc $rc $out"
-rm -rf "$R/sub"
 # python3 older than 3.7 refuses in one sentence.
 OP="$ROOT/oldpy"; mkdir -p "$OP"
 printf '#!/bin/sh\ncase "$*" in *"version_info < (3, 7)"*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v python3)" > "$OP/python3"; chmod +x "$OP/python3"
@@ -481,6 +464,7 @@ st "repo 200, payload 200: done" 0 '' '' required "repo payload "
 st "repo 409 snapshot_taken: go on" 0 '409|{"code":"snapshot_taken"}|' '' required "repo payload "
 st "repo 409 of another kind: stop" 1 '409|{"code":"other"}|' '' required "repo "
 st "repo 413: stop, the body printed" 1 '413|{"code":"snapshot_too_large","error":"use /me/policy"}|' '' required "repo " "/me/policy"
+st "repo 413, then the upload breaks (curl 55): the status is kept, no retry" 1 '413!|{"code":"snapshot_too_large"}|' '' required "repo " "refused (HTTP 413"
 st "repo 400: stop" 1 '400|{"code":"not_gzip"}|' '' required "repo "
 st "repo 404: the ticket is gone, the payload not sent" 1 '404|{}|' '' required "repo " "the payload was not sent"
 st "repo 410: the ticket is gone" 1 '410|{}|' '' required "repo " "get_findings"
@@ -490,6 +474,8 @@ st "repo 429 five times: exit 75 after 4 retries" 75 "$(printf '429|{}|99\n%.0s'
 [ "$(tr '\n' ' ' < "$STUB/sleeps")" = "30 30 30 30 " ] && ok "Retry-After clamped to 30, 4 waits" || fail "clamp: slept $(tr '\n' ' ' < "$STUB/sleeps")"
 st "Retry-After 0 is clamped to 1" 0 '429|{}|0' '' required "repo repo payload "
 [ "$(cat "$STUB/sleeps")" = 1 ] && ok "Retry-After floor 1" || fail "floor: slept $(cat "$STUB/sleeps")"
+st "a Retry-After too long for shell arithmetic is still clamped" 0 '429|{}|99999999999999999999' '' required "repo repo payload "
+[ "$(cat "$STUB/sleeps")" = 30 ] && ok "Retry-After of 20 digits: 30" || fail "huge Retry-After: slept $(cat "$STUB/sleeps")"
 st "no Retry-After: 30" 0 '502|{}|' '' required "repo repo payload "
 [ "$(cat "$STUB/sleeps")" = 30 ] && ok "default wait 30" || fail "default wait: slept $(cat "$STUB/sleeps")"
 st "curl failure: retried" 0 '000|x|' '' required "repo repo payload "
@@ -499,15 +485,24 @@ st "a failed attempt does not reread the last one's Retry-After" 75 "$(printf '4
 st "the last Retry-After is passed on" 75 "$(printf '429|{}|7\n%.0s' 1 2 3 4 5)" '' required "repo repo repo repo repo " "in about 7 seconds"
 grep -q -- '--connect-timeout 10 --max-time ' "$STUB/args" && ! grep -q -- '--speed-' "$STUB/args" && ok "curl has a connect timeout and a time limit, no stall limit" || fail "curl limits: $(head -n 1 "$STUB/args")"
 st "a transfer cut after its status line is retried" 0 'cut|{"ok":true}|1' '' required "repo repo payload "
-# The retries stop at the time budget, inside the skill's 600 s Bash call. A
-# clock that moves STEP seconds per read: at 300 one attempt runs and its 30 s
-# wait would cross the budget; at 470 not even one attempt has 30 s left.
+# The time budget, inside the skill's 600 s Bash call. Two clocks. JUMP: the
+# local work takes JUMP seconds and the network none. STEP: every read of the
+# clock is STEP seconds later.
 DB="$ROOT/datebin"; mkdir -p "$DB"
-printf '#!/bin/sh\nn=$(cat "$STUB/clock" 2>/dev/null || echo 1000); echo $((n + STEP)) > "$STUB/clock"; echo "$n"\n' > "$DB/date"; chmod +x "$DB/date"
-fresh; plan repo '429|{}|30'; out=$(cd "$R" && STEP=300 PATH="$DB:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+printf '#!/bin/sh\nif [ -n "${JUMP:-}" ]; then [ -e "$STUB/clock" ] && echo $((1000 + JUMP)) || { : > "$STUB/clock"; echo 1000; }; exit 0; fi\nn=$(cat "$STUB/clock" 2>/dev/null || echo 1000); echo $((n + STEP)) > "$STUB/clock"; echo "$n"\n' > "$DB/date"; chmod +x "$DB/date"
+# 460 s of local work: the network budget starts after it, so the upload still goes.
+fresh; out=$(cd "$R" && JUMP=460 PATH="$DB:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+[ "$rc" = 0 ] && [ "$(calls)" = 2 ] && ok "the network budget starts after the local work" || fail "budget after local work: rc $rc calls $(calls) $out"
+grep -q -- '--max-time 110 ' "$STUB/args" && ok "...and ends with the 600 s call" || fail "budget cap: $(head -n 1 "$STUB/args")"
+# 520 s of local work leaves no time to send: its own sentence and status, no request, never "busy".
+fresh; out=$(cd "$R" && JUMP=520 PATH="$DB:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+[ "$rc" = 5 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'took 520 s' && ! printf '%s' "$out" | grep -q 'busy\|OhMyBug upload' && ok "local work past the call: exit 5, nothing sent, not called busy" || fail "local overrun: rc $rc calls $(calls) $out"
+# STEP 200: one attempt runs and its 30 s wait would cross the budget. STEP 150:
+# one attempt and one wait, then under 30 s are left for a second attempt.
+fresh; plan repo '429|{}|30'; out=$(cd "$R" && STEP=200 PATH="$DB:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 75 ] && [ "$(calls)" = 1 ] && [ ! -e "$STUB/sleeps" ] && ok "no wait past the time budget" || fail "budget wait: rc $rc calls $(calls) slept $(cat "$STUB/sleeps" 2>/dev/null) $out"
-fresh; out=$(cd "$R" && STEP=470 PATH="$DB:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
-[ "$rc" = 75 ] && [ "$(calls)" = 0 ] && ok "no attempt with under 30 s of budget left" || fail "budget attempt: rc $rc calls $(calls) $out"
+fresh; plan repo '429|{}|30'; out=$(cd "$R" && STEP=150 PATH="$DB:$BIN:$PATH" sh "$UP" "$URL" required "$P" 2>&1); rc=$?
+[ "$rc" = 75 ] && [ "$(calls)" = 1 ] && [ "$(cat "$STUB/sleeps" 2>/dev/null)" = 30 ] && ok "no attempt with under 30 s of budget left" || fail "budget attempt: rc $rc calls $(calls) $out"
 st "payload 409 snapshot_required in diff mode: stop, rerun with required" 1 '' '409|{"code":"snapshot_required"}|' off "payload " "required in place of off"
 st "payload 409 after a snapshot was sent: stop, no loop" 1 '' '409|{"code":"snapshot_required"}|' required "repo payload "
 st "payload 400: stop" 1 '' '400|{"code":"diff_not_a_diff"}|' required "repo payload " "diff_not_a_diff"

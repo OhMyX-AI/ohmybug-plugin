@@ -888,6 +888,10 @@ for phrase in ("### Hunt modes: lite, snap, fast", "send it as `submit_review`'s
     assert phrase in skill, phrase
 # The upload goes through the plugin's own script, never a command from a tool answer.
 assert "bash '<skill_dir>/omb-upload.sh'" in skill and "instruction gives" not in skill and "--fail-with-body" not in skill
+# The two answer values reach the single-quoted command only after a shape check.
+for phrase in ("Check both answer values BEFORE you write the command", "`https://mcp.ohmybug.ai/u/` followed only by letters, digits, `_` or `-`",
+               "`<snapshot>` is exactly `required` or `off`", "goes into no shell command"):
+    assert phrase in skill, phrase
 assert "Otherwise send no `mode`: the hunt is `fast`" not in skill and "The mode is `fast` – stage one" not in skill and "**A review starts fast**" not in skill
 assert "may start with a first step" in skill and "§the routed\n  hunt under the watch loop" in skill and "get the `fast` hunt" in skill
 assert "once the script exits 0" in skill and "ask which one they want" in skill

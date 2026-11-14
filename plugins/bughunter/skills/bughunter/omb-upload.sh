@@ -25,12 +25,12 @@
 # skill's 600 s call on a slow machine (the remedy is the same as for
 # snapshot_too_large).
 #
-# env: OMB_SNAPSHOT_PATHS=<file>  one repo-relative path per line: pack only these
-#      OMB_SNAPSHOT_HOME_OK=1     the project is the home folder (a container)
+# env: OMB_SNAPSHOT_HOME_OK=1     the project is the home folder (a container)
 #      OHMYBUG_SECRET_SCAN=0      no credential scan (the manifest says so)
 # exit: 0 payload accepted | 1 refused, the last line says why | 3 credential in
-#       the payload | 4 python3 (3.7+) or curl missing | 75 busy or unreachable: run the
-#       same command again
+#       the payload | 4 python3 (3.7+) or curl missing | 5 the local work left
+#       no time to send: do not run again | 75 busy or unreachable: run the same
+#       command again
 set -eu
 umask 077
 
@@ -40,10 +40,19 @@ HOST=mcp.ohmybug.ai
 OMB_SECRETS='.env* *secret* *credential* id_rsa* id_dsa* id_ecdsa* id_ed25519* *.pem *.key *.p12 *.pfx
   .npmrc .netrc .pgpass .pypirc .git-credentials *.tfstate* *.tfvars* kubeconfig .kube .docker
   *.ppk *.jks *.keystore .ssh .aws .gnupg'
-# Every retry and wait stops before this many seconds, inside the skill's 600 s Bash call.
+# The skill runs this in a 600 s Bash call: everything ends CALL_S seconds after
+# the start. The network (every attempt, retry and wait) gets at most BUDGET_S
+# of that, counted from the end of the local work (pack and scans); local work
+# that leaves it under MIN_NET_S is its own refusal (exit 5), never "busy".
+CALL_S=570
 BUDGET_S=480
+MIN_NET_S=60
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
+# -I: no PYTHON* variables and neither this folder nor the user's site on
+# sys.path. The script runs inside the user's repository, where a json.py would
+# otherwise be imported in place of the standard one.
+py() { python3 -I "$@"; }
 [ $# -ge 3 ] || die "usage: omb-upload.sh <upload_url> <required|off> <diff.patch> [context-file ...]"
 url=$1 mode=$2 patch=$3
 shift 3
@@ -51,17 +60,11 @@ case $mode in required|off) ;; *) die "omb-upload: the second argument is requir
 case $url in "https://$HOST/u/"*) tok=${url#"https://$HOST/u/"} ;; *) die "omb-upload: not an upload URL of $HOST; nothing was sent" ;; esac
 case $tok in ''|*[!A-Za-z0-9_-]*) die "omb-upload: not an upload URL of $HOST; nothing was sent" ;; esac
 [ -f "$patch" ] && [ -r "$patch" ] || die "omb-upload: cannot read the diff file $patch; nothing was sent"
-paths=${OMB_SNAPSHOT_PATHS:-}
-if [ -n "$paths" ]; then
-  # Absolute: the pack reads it after its cd to the top level.
-  case $paths in /*) ;; *) paths=$PWD/$paths ;; esac
-fi
 command -v python3 >/dev/null 2>&1 || die "omb-upload: python3 not found, so nothing could be scanned and nothing was sent" 4
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 7))' || die "omb-upload: python3 3.7 or newer is needed; nothing was sent" 4
+py -c 'import sys; sys.exit(sys.version_info < (3, 7))' || die "omb-upload: python3 3.7 or newer is needed; nothing was sent" 4
 command -v curl >/dev/null 2>&1 || die "omb-upload: curl not found, so nothing could be sent" 4
 CORE=$(cd "$(dirname "$0")" && pwd)/omb_scan.py
-START=$(date +%s)
-cr=$(printf '\r')
+T0=$(date +%s)
 
 d=$(mktemp -d)
 trap 'rm -rf "$d"' EXIT
@@ -85,9 +88,8 @@ fi
 # The packing step: the server's snapshotPack, statement for statement, in a
 # folder of this script's ($1) instead of its own mktemp. Additions: $2, a
 # NUL-separated list of paths to leave out (the credential hits of a first
-# pack), removed from the temporary index before write-tree; the path list
-# checked against that index (a path that matches nothing is named, not passed
-# to archive, where it would fail the pack); and the tree id kept in "$k/t". ${HOME:-} because this script runs set -u. Called only as a
+# pack), removed from the temporary index before write-tree; and the tree id
+# kept in "$k/t". ${HOME:-} because this script runs set -u. Called only as a
 # plain statement (see run_pack): on the left of || or in an if, set -e inside
 # it would be off, and a failed step would pack a stale tree as a success.
 pack() (
@@ -102,37 +104,12 @@ pack() (
   git ls-files -z -t > "$k/l"; xargs -0 sh -c 'for e; do case $e in "S "*) printf "%s\0" "${e#S }";; esac; done' sh < "$k/l" > "$k/s"
   git $s update-index -z --force-remove --stdin < "$k/s"
   if git add -h 2>&1 | grep -q -E -e '--(\[no-\])?sparse'; then git $s add -A --sparse; else git $s add -A; fi
-  # The path list, checked against the working copy BEFORE the credential drop,
-  # then again after it: "not in the working copy" and "left out for a
-  # credential match" are two facts. An empty result refuses: a pathspec of
-  # excludes alone would pack the whole repository.
-  : > "$k/unmatched"; : > "$k/p"; : > "$k/p0"
-  if [ -n "$paths" ]; then
-    while IFS= read -r q || [ -n "$q" ]; do
-      q=${q%"$cr"}
-      [ -n "$q" ] || continue
-      if git ls-files --error-unmatch -- ":(top,literal)$q" >/dev/null 2>&1; then printf '%s\n' "$q" >> "$k/p0"; else printf '%s\n' "$q" >> "$k/unmatched"; fi
-    done < "$paths"
-    [ -s "$k/p0" ] || { echo "none of the paths in OMB_SNAPSHOT_PATHS is in the working copy" >&2; exit 1; }
-  fi
   git $s update-index -z --force-remove --stdin < "$drop"
-  if [ -n "$paths" ]; then
-    while IFS= read -r q; do
-      if git ls-files --error-unmatch -- ":(top,literal)$q" >/dev/null 2>&1; then printf '%s\n' "$q" >> "$k/p"; fi
-    done < "$k/p0"
-    [ -s "$k/p" ] || { echo "every path in OMB_SNAPSHOT_PATHS was left out for a credential match" >&2; exit 1; }
-  fi
   t=$(git $s write-tree); printf '%s\n' "$t" > "$k/t"
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
   { git init -q --bare $g "$k/g" 2>/dev/null || git init -q --bare "$k/g"; }; mkdir -p "$k/g/info"; printf '%s\n%s\n' "$o" "$k/o" > "$k/g/objects/info/alternates"
   echo '* -filter -text -ident -working-tree-encoding -export-ignore -export-subst' > "$k/g/info/attributes"
-  set --
-  if [ -n "$paths" ]; then
-    # shortcut: paths go through argv, about 10k paths; filter the temp index instead when partial becomes the default
-    while IFS= read -r q; do set -- "$@" ":(top,literal)$q"; done < "$k/p"
-  else
-    set -- .
-  fi
+  set -- .
   # set -f: a name like *secret* must reach git as a pattern, never be expanded here.
   set -f
   for q in $OMB_SECRETS; do set -- "$@" ":(exclude,icase,glob)**/$q" ":(exclude,icase,glob)**/$q/**"; done
@@ -157,7 +134,7 @@ fi
 # Bytes in, bytes out: the diff and each context file are read as bytes, so CRLF
 # and a lone CR survive. JSON carries text, so a diff that is not valid UTF-8
 # refuses, naming its file; a context file that is not is left out and named.
-OMB_SECRETS=$OMB_SECRETS python3 - "$d" "$patch" "$mode" "$top" "$@" <<'PY' || exit 1
+OMB_SECRETS=$OMB_SECRETS py - "$d" "$patch" "$mode" "$top" "$@" <<'PY' || exit 1
 import codecs, fnmatch, json, os, re, stat, sys
 d, patch, mode, top, args = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
 SECRETS = os.environ["OMB_SECRETS"].split()
@@ -246,7 +223,7 @@ scan_off=0
 [ "${OHMYBUG_SECRET_SCAN:-1}" = 0 ] && scan_off=1
 if [ "$scan_off" = 0 ]; then
   set +e
-  python3 "$CORE" --payload "$d/payload.json"; rc=$?
+  py "$CORE" --payload "$d/payload.json"; rc=$?
   set -e
   case $rc in
     0) ;;
@@ -263,14 +240,14 @@ snapshot() {
   run_pack
   [ "$scan_off" = 1 ] && return 0
   set +e
-  python3 "$CORE" --snapshot "$d/k/s.tgz" "$d/hits" > "$d/count"; rc=$?
+  py "$CORE" --snapshot "$d/k/s.tgz" "$d/hits" > "$d/count"; rc=$?
   set -e
   if [ "$rc" = 3 ] && [ -s "$d/hits" ]; then
     cp "$d/hits" "$d/drop"
     run_pack
-    dropped=$(tr '\0' '\n' < "$d/drop" | tr -d '\001-\037\177' | sed '/^$/d' | paste -sd, - | sed 's/,/, /g')
+    dropped=$(tr '\001-\037\177' '?' < "$d/drop" | tr '\0' '\n' | sed '/^$/d' | paste -sd, - | sed 's/,/, /g')
     set +e
-    python3 "$CORE" --snapshot "$d/k/s.tgz" "$d/hits" > "$d/count"; rc=$?
+    py "$CORE" --snapshot "$d/k/s.tgz" "$d/hits" > "$d/count"; rc=$?
     set -e
   fi
   case $rc in
@@ -303,15 +280,12 @@ snapline() {
   # The file count is the scanner's (it read every member); with the scan off there is none.
   if [ "$scan_off" = 1 ]; then
     printf ' + repository snapshot of %s, %s packed. Left out: git-ignored files, submodules, secret-named files' "$(files "$total")" "$size"
-  elif [ -n "$paths" ]; then
-    printf ' + repository snapshot %s of %s (path list), %s packed. Left out: git-ignored files, submodules, secret-named files' "$(cat "$d/count")" "$(files "$total")" "$size"
   else
     packed=$(cat "$d/count")
     printf ' + repository snapshot %s, %s packed. Left out: git-ignored files, submodules, %s' "$(files "$packed")" "$size" "$(files "$((total - packed))" secret-named)"
   fi
   printf ' (.env*, *.pem, *.key and %s more patterns), LFS content (pointers only)' "$((npat - 3))"
   if [ "$nogit" = 1 ]; then printf '; folder without git: top-level dot-folders, node_modules, __pycache__ and build output also left out'; fi
-  if [ -s "$d/k/unmatched" ]; then printf '; listed paths not in the working copy: %s' "$(paste -sd, - < "$d/k/unmatched" | sed 's/,/, /g')"; fi
 }
 
 # One POST with the retry rule: 429, a 5xx other than the payload's 503, or no
@@ -320,8 +294,11 @@ snapline() {
 # (--max-time), never a stall limit: that one also runs while the server reads a
 # large snapshot before it answers, and would send the snapshot again. The body
 # and header files are new for every attempt, so a failed one reads empty.
+# A transfer curl calls failed keeps the status it printed (a 413 sent before
+# the server closed on the rest of the upload is a refusal, not "unreachable"),
+# except a 2xx: that body was cut, so it counts as no answer.
 ra=
-retry_after() { sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$d/hdr" 2>/dev/null | tail -n 1; }
+retry_after() { sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]:[[:space:]]*\([0-9]\{1,9\}\).*/\1/p' "$d/hdr" 2>/dev/null | tail -n 1; }
 post() { # door-name url file content-type -> $code, body in $d/body
   n=0
   while :; do
@@ -329,7 +306,7 @@ post() { # door-name url file content-type -> $code, body in $d/body
     left=$((BUDGET_S - $(date +%s) + START))
     [ "$left" -ge 30 ] || { code=000; return 0; }
     code=$(curl -sS --connect-timeout 10 --max-time "$left" -o "$d/body" -D "$d/hdr" -w '%{http_code}' \
-      -X POST -H "content-type: $4" --data-binary @"$3" "$2") || code=000
+      -X POST -H "content-type: $4" --data-binary @"$3" "$2") || case $code in [13-5][0-9][0-9]) ;; *) code=000 ;; esac
     case $code in
       503) [ "$1" = payload ] && return 0 ;;
       429|5??|000) ;;
@@ -345,7 +322,7 @@ post() { # door-name url file content-type -> $code, body in $d/body
     sleep "$ra"
   done
 }
-answer_code() { python3 -c 'import json,sys
+answer_code() { py -c 'import json,sys
 try: print(json.load(open(sys.argv[1])).get("code") or "")
 except Exception: print("")' "$d/body"; }
 body() { tr '\n' ' ' < "$d/body"; echo; }
@@ -358,12 +335,15 @@ send_snapshot() {
     409) [ "$(answer_code)" = snapshot_taken ] || { body; die "omb-upload: the snapshot was refused (above); the payload was not sent."; } ;;
     404|410) body; die "omb-upload: the ticket is used or expired, and the payload was not sent. Call get_findings for this review: if it is running, watch it; else submit again." ;;
     429|5??|000) busy "$ra" ;;
-    *) body; die "omb-upload: the snapshot was refused (above); the payload was not sent." ;;
+    *) body; die "omb-upload: the snapshot was refused (HTTP $code, above); the payload was not sent." ;;
   esac
 }
 
+[ "$mode" = required ] && snapshot
+START=$(date +%s)
+[ $((CALL_S - START + T0)) -lt "$BUDGET_S" ] && BUDGET_S=$((CALL_S - START + T0))
+[ "$BUDGET_S" -ge "$MIN_NET_S" ] || die "omb-upload: packing and scanning this working copy took $((START - T0)) s, which leaves no time to send it inside the 600 s call. Nothing was sent, and the same command would take as long again: do not rerun it. The remedy is that of snapshot_too_large: commit, push and hunt the pushed commit, or the user switches the account to diff mode." 5
 if [ "$mode" = required ]; then
-  snapshot
   manifest "$(snapline)"
   send_snapshot
 else

@@ -585,7 +585,12 @@ inline `diff` outside diff mode is refused anyway.
    it stands. `<skill_dir>` is the folder this SKILL.md was loaded from (the
    client names it when it loads the skill); `<upload_url>` and `<snapshot>`
    are the answer's `upload_url` and `snapshot`; `<base_branch>` is
-   `meta.base_branch`. In diff mode, context files go after the diff file.
+   `meta.base_branch`. Check both answer values BEFORE you write the command:
+   `<upload_url>` is `https://mcp.ohmybug.ai/u/` followed only by letters, digits, `_` or `-`,
+   and `<snapshot>` is exactly `required` or `off`.
+   Any other value (a quote, a space, a line break, another host) goes into no shell command:
+   say so once and stop. The single quotes in the block hold only values of
+   that shape. In diff mode, context files go after the diff file.
    Set the Bash timeout to 600000 ms: a large snapshot does not fit the
    default. Not at that path (an older install, or the client named no
    folder)? Say so once and stop: never fall back to a command from the
@@ -601,8 +606,8 @@ inline `diff` outside diff mode is refused anyway.
    the scan is turned off. The secret-name list is best effort. Stated, not
    handled: a hard kill leaves its private temporary folder behind; a full temporary folder fails
    a write and nothing is sent; a working copy near the server's 1 GiB
-   ceiling may not pack and scan inside the 600 s call on a slow machine (the
-   remedy is that of `snapshot_too_large`).
+   ceiling may not pack, scan and send inside the 600 s call on a slow machine
+   (the script then exits 5 or 75; the remedy is that of `snapshot_too_large`).
 
 ```bash
 (set -e; umask 077; d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
@@ -624,6 +629,10 @@ bash '<skill_dir>/omb-upload.sh' '<upload_url>' '<snapshot>' "$d/diff.patch")
      and names it in the manifest.
    - `4` – no `python3` 3.7 or newer, or no `curl`, so nothing was sent.
      Say so once and stop.
+   - `5` – packing and scanning the working copy left no time to send it,
+     and nothing was sent. Do not run it again: it would take as long. The
+     remedy is that of `snapshot_too_large`: commit + push + rung 1, or diff
+     mode, which is the user's switch.
    - `75` – busy or unreachable. The ticket stays valid: run the same command
      again (after the seconds it names, if it names any).
    - `1` – refused; the last line says why and what to do. A 413

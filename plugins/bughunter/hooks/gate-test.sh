@@ -1690,10 +1690,11 @@ mkrepo "$UREPO"
 printf 'big unpushed work\n' >> "$UREPO/a.ts"
 UHUNTS=$(cd "$UREPO" && . "$G/diff-id.sh" && ohmybug_hunt_dir)
 # A deep upload the server fetched itself (status running, no upload_url) from a
-# DIRTY tree: its ref: line is written but not honoured on a dirty tree, and it
-# is not told the ticket sentence, which is about tickets only.
+# DIRTY tree: its ref: line is written but not honoured on a dirty tree. It is
+# told so at submit time, and not in the ticket sentence, which is about tickets only.
 usub "$UREPO" rev_fd running >"$HOME/hook.out"; out=$(ctx <"$HOME/hook.out")
 case "$out" in *"not recorded for the merge gate"*) printf 'FAIL a fetched upload was told it is not recorded: %s\n' "$out"; fails=$((fails + 1)) ;; esac
+case "$out" in *"hunted the pushed commit, not the uncommitted work in this tree, so the merge gate will still block it"*) ;; *) printf 'FAIL a fetched upload from a dirty tree was not told the gate will block: %s\n' "$out"; fails=$((fails + 1)) ;; esac
 grep -qx "ref:$(git -C "$UREPO" rev-parse HEAD)" "$UHUNTS.pending/rev_fd" 2>/dev/null \
   || { printf 'FAIL a fetched upload did not record its ref\n'; fails=$((fails + 1)); }
 ppost get_findings done "$UREPO" "" rev_fd >/dev/null 2>&1
@@ -1736,7 +1737,8 @@ rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
 [ "$rc" = 2 ] || { printf 'FAIL a duplicate, status-less, upload_url-carrying or not-running upload answer was credited through its ref (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
 # A deep submit the server fetched itself answers `running`, not a ticket: it
 # hunted repo@ref, so the ref keeps its credit on a clean checkout...
-usub "$UREPO" rev_up3 running >/dev/null
+usub "$UREPO" rev_up3 running >"$HOME/hook.out"; out=$(ctx <"$HOME/hook.out")
+case "$out" in *"merge gate will still block"*) printf 'FAIL a fetched upload from a clean checkout at its ref was told the gate will block: %s\n' "$out"; fails=$((fails + 1)) ;; esac
 ppost get_findings done "$UREPO" "" rev_up3
 rc=$(mk "$V" "$UREPO" | bash "$G/pre-pr-gate.sh" >/dev/null 2>&1; echo $?)
 [ "$rc" = 0 ] || { printf 'FAIL a deep upload the server fetched itself lost its ref credit (rc=%s)\n' "$rc"; fails=$((fails + 1)); }
