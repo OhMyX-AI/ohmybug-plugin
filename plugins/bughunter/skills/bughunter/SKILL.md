@@ -354,10 +354,18 @@ Work down the list and stop at the first rung that yields code:
 2. **Uncommitted work, new files included** – `--head`, or `--all` before
    the first commit.
 3. **Recent commits** – `--commits 10`; with 10 or fewer commits it is the
-   whole history.
+   whole history. A shallow clone that holds 10 or fewer commits is refused
+   instead: fetch more history (`git fetch --deepen=10`) or use a smaller N.
 4. **Not a git repository** – `--all`, run in the folder; add `--only src/`
    (and more `--only`) when it also holds generated, vendored or binary
    files.
+
+`--only` narrows the diff only. When the ticket asks for the repository
+snapshot, the snapshot is still the whole folder minus ignored and
+secret-named files, whatever `--only` says; only diff mode keeps the other
+files on this machine. In a partial clone (`--filter`), git may fetch the
+trees and blobs the diff needs from the user's remote into the local object
+store, on a dry run too.
 
 Before `submit_review`, see what the rung holds with a dry run, which sends
 nothing and prints the manifest line and one file name per line (new,
@@ -398,7 +406,8 @@ include files matching `.env*`, `*secret*`, `*credential*`, key material, or
 anything gitignored, and never a file outside the repository root or reached
 through a symlink: the script sends only regular files git lists, never a
 symlink and never a file reached through a symlinked folder inside the
-repository (give the file by its own path), and names any it skips.
+repository (give the file by its own path, without `..`), and names any it
+skips.
 
 The manifest is the upload script's: before anything is sent it prints one
 line saying what leaves the machine (the diff's size, the snapshot's file

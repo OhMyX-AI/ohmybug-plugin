@@ -629,7 +629,7 @@ fresh; run "$BR" "$URL" off --base
 printf 'out\n' > "$ROOT/outside.txt"
 fresh; run "$R" "$URL" off "$P" ../outside.txt "$ROOT/outside.txt"
 python3 -I -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["files"] == [] else 1)' "$STUB/payload.1.sent" 2>/dev/null \
-  && printf '%s' "$out" | grep -q "Not sent.*\.\./outside.txt, $ROOT/outside.txt" && ok "context outside the repository (relative, absolute): not sent, named" || fail "outside context: $out"
+  && printf '%s' "$out" | grep -q "Not sent (secret-named, .*): $ROOT/outside.txt\. Not sent (a path with '..'; .*): \.\./outside.txt\." && ok "context outside the repository (absolute; relative with '..'): not sent, each named with its reason" || fail "outside context: $out"
 # A context file whose name is not UTF-8: skipped and named, no traceback (where the file system allows such names).
 NU="$R/$(printf 'n\351.txt')"
 if { printf 'x\n' > "$NU"; } 2>/dev/null && [ -e "$NU" ]; then
@@ -649,7 +649,6 @@ for at in "$BW" "$BW/sub"; do
 done
 
 # ---- 6c. The diff is git's, written with no settings, read by path -------
-# Each row names the finding it covers (T1-T12 of the design).
 payload_diff() { python3 -I -c 'import json, sys; sys.stdout.write(json.load(open(sys.argv[1]))["diff"])' "$STUB/payload.1.sent"; }
 # A reference diff of the same two states, by a git with no settings at all.
 refdiff() { # repo from [to]: to = the working copy when absent
@@ -657,7 +656,7 @@ refdiff() { # repo from [to]: to = the working copy when absent
       git -c core.quotePath=true diff --no-color --no-ext-diff --no-textconv -M --submodule=short "$2" ${3:+"$3"} ); }
 mkdir -p "$ROOT/nohome"
 
-# T1: a file without a final newline, changed on both sides: git's own markers, no filter.
+# a file without a final newline, changed on both sides: git's own markers, no filter.
 # Same size and the same mtime as when it was added, and the index file of
 # that same second: git sees the edit only through its racy-entry check,
 # which a copied index keeps only when the copy keeps the index's mtime.
@@ -665,9 +664,9 @@ T1="$ROOT/t1"; mkdir -p "$T1"; g -C "$T1" init -q; printf 'x' > "$T1/nonl.txt"; 
 printf 'y' > "$T1/nonl.txt"; touch -t 202001010000 "$T1/nonl.txt" "$T1/.git/index"
 fresh; run "$T1" "$URL" off --head
 [ "$rc" = 0 ] && [ "$(payload_diff | grep -c '^\\ No newline at end of file')" = 2 ] && [ "$(payload_diff)" = "$(refdiff "$T1" HEAD)" ] \
-  && ok "T1 no final newline on both sides: both markers, the diff is git's" || fail "T1 no newline: rc $rc $out / $(payload_diff)"
+  && ok "no final newline on both sides: both markers, the diff is git's" || fail "no newline: rc $rc $out / $(payload_diff)"
 
-# T2: --base reads the working copy as a commit would: a never-added file is in,
+# --base reads the working copy as a commit would: a never-added file is in,
 # an ignored one is out, and the user's index and status do not move.
 T2="$ROOT/t2"; mkdir -p "$T2"; g -C "$T2" init -q; printf 'a\n' > "$T2/a.txt"; printf 'ign.log\n' > "$T2/.gitignore"; g -C "$T2" add -A; g -C "$T2" commit -qm one
 g -C "$T2" update-ref refs/remotes/origin/main HEAD
@@ -676,18 +675,18 @@ st0=$(git -C "$T2" status --porcelain); ix0=$(sha "$T2/.git/index")
 fresh; run "$T2" "$URL" off --base main
 [ "$rc" = 0 ] && payload_diff | grep -q '^+++ b/never.txt' && ! payload_diff | grep -q 'ign.log' \
   && [ "$st0" = "$(git -C "$T2" status --porcelain)" ] && [ "$ix0" = "$(sha "$T2/.git/index")" ] \
-  && ok "T2 --base: a never-added file is in, an ignored one out; index and status untouched" || fail "T2 --base untracked: rc $rc $out"
-printf '%s' "$out" | grep -q 'The diff includes 1 untracked file git does not ignore: never.txt' && ok "T2 ...and the manifest names the untracked file" || fail "T2 manifest untracked: $out"
+  && ok "--base: a never-added file is in, an ignored one out; index and status untouched" || fail "--base untracked: rc $rc $out"
+printf '%s' "$out" | grep -q 'The diff includes 1 untracked file git does not ignore: never.txt' && ok "...and the manifest names the untracked file" || fail "manifest untracked: $out"
 fresh; run "$T2" --dry-run off --base main
 [ "$rc" = 0 ] && [ "$(calls)" = 0 ] && printf '%s\n' "$out" | grep -qx 'never.txt (new, untracked)' && printf '%s\n' "$out" | grep -qx 'a.txt' \
-  && ok "T2 --dry-run lists the untracked file as new, sends nothing" || fail "T2 dry-run: rc $rc calls $(calls) $out"
+  && ok "--dry-run lists the untracked file as new, sends nothing" || fail "dry-run: rc $rc calls $(calls) $out"
 for i in 1 2 3 4 5 6; do printf 'u\n' > "$T2/u$i.txt"; done
 fresh; run "$T2" --dry-run off --base main
 printf '%s' "$out" | grep -q 'The diff includes 7 untracked files git does not ignore: never.txt, u1.txt, u2.txt, u3.txt, u4.txt and 2 more' \
-  && ok "T2 ...many untracked files: the first five named, then and N more" || fail "T2 many untracked: $out"
+  && ok "...many untracked files: the first five named, then and N more" || fail "many untracked: $out"
 rm -f "$T2"/u?.txt
 
-# T3: every setting that changes git's diff format, set in the repository, in
+# every setting that changes git's diff format, set in the repository, in
 # the user's config and in the environment, run from a subfolder: the payload
 # is byte-equal to the clean run. A moved submodule, a rename and a quoted name.
 T3="$ROOT/t3"; mkdir -p "$T3/src"; g -C "$T3" init -q
@@ -700,7 +699,7 @@ g -C "$T3" add -A; g -C "$T3" commit -qm base
 printf 'a\nb\nc\n\nd\nE\nf\ng\n' > "$T3/a.txt"; g -C "$T3" mv ren.txt ren2.txt; printf 'r6\n' >> "$T3/ren2.txt"; printf 'Q\n' > "$T3/src/sp ace.txt"
 fresh; run "$T3/src" "$URL" off --head; ref=$(payload_diff)
 [ "$rc" = 0 ] && printf '%s' "$ref" | grep -q '^rename from ren.txt' && printf '%s' "$ref" | grep -q '^+Subproject commit' && printf '%s' "$ref" | grep -q '^diff --git a/a.txt b/a.txt' \
-  || fail "T3 the clean run is not the expected git diff: rc $rc $out / $ref"
+  || fail "the clean run is not the expected git diff: rc $rc $out / $ref"
 HOSTILE="$ROOT/t3global"; cp "$GIT_CONFIG_GLOBAL" "$HOSTILE"
 for kv in diff.noprefix=true diff.mnemonicPrefix=true diff.submodule=log diff.relative=true color.ui=always color.diff=always \
           diff.suppressBlankEmpty=true diff.context=0 diff.interHunkContext=9 diff.renames=false diff.algorithm=patience \
@@ -712,18 +711,18 @@ git -C "$T3" config diff.evil.textconv 'sed s/a/ZZ/'; git -C "$T3" config diff.e
 printf '*.txt diff=evil\n' > "$T3/.git/info/attributes"
 fresh; out=$(cd "$T3/src" && GIT_CONFIG_GLOBAL="$HOSTILE" GIT_DIFF_OPTS=-u0 GIT_EXTERNAL_DIFF=/bin/false \
   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.noprefix GIT_CONFIG_VALUE_0=true PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" off --head 2>&1); rc=$?
-[ "$rc" = 0 ] && [ "$(payload_diff)" = "$ref" ] && ok "T3 hostile settings (repository, user, environment, subfolder): the payload is byte-equal to the clean run" \
-  || fail "T3 hostile: rc $rc $out / $(payload_diff | head -5)"
-# T3b: --only is below the current folder, as a literal path.
+[ "$rc" = 0 ] && [ "$(payload_diff)" = "$ref" ] && ok "hostile settings (repository, user, environment, subfolder): the payload is byte-equal to the clean run" \
+  || fail "hostile: rc $rc $out / $(payload_diff | head -5)"
+# --only is below the current folder, as a literal path.
 fresh; run "$T3/src" "$URL" off --head --only 'sp ace.txt'
 [ "$rc" = 0 ] && [ "$(payload_diff | grep -c '^diff --git')" = 1 ] && payload_diff | grep -q '^diff --git "a/src/sp ace.txt"\|^diff --git a/src/sp ace.txt' \
-  && ok "T3b --only from a subfolder: that file only, under its full path" || fail "T3b --only: rc $rc $(payload_diff | grep '^diff')"
+  && ok "--only from a subfolder: that file only, under its full path" || fail "--only: rc $rc $(payload_diff | grep '^diff')"
 for o in /etc/passwd ../a.txt 'src/../x' ''; do
   fresh; run "$T3/src" "$URL" off --head --only "$o"
-  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "T3b --only refuses [$o]" || fail "T3b --only [$o]: rc $rc"
+  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "--only refuses [$o]" || fail "--only [$o]: rc $rc"
 done
 
-# T4: a conflicted merge reads as the working file, markers and all; the user's
+# a conflicted merge reads as the working file, markers and all; the user's
 # index keeps its three stages.
 T4="$ROOT/t4"; mkdir -p "$T4"; g -C "$T4" init -q; printf 'a\nb\nc\n' > "$T4/m.txt"; g -C "$T4" add -A; g -C "$T4" commit -qm base
 b4=$(git -C "$T4" symbolic-ref --short HEAD)  # main, or master on git before 2.28
@@ -732,9 +731,9 @@ g -C "$T4" checkout -q "$b4"; printf 'a\nMINE\nc\n' > "$T4/m.txt"; g -C "$T4" co
 g -C "$T4" merge other >/dev/null 2>&1 || :
 fresh; run "$T4" "$URL" off --head
 [ "$rc" = 0 ] && payload_diff | grep -q '^+<<<<<<<' && ! payload_diff | grep -qi 'unmerged' && [ "$(git -C "$T4" ls-files -u | wc -l | tr -d ' ')" = 3 ] \
-  && ok "T4 unmerged: the working file with its markers, the index keeps 3 stages" || fail "T4 unmerged: rc $rc $out / $(payload_diff)"
+  && ok "unmerged: the working file with its markers, the index keeps 3 stages" || fail "unmerged: rc $rc $out / $(payload_diff)"
 
-# T5b: the real curl with a hostile ~/.curlrc (retry, follow, fail, an output
+# the real curl with a hostile ~/.curlrc (retry, follow, fail, an output
 # file): -q first ignores it, so one POST, 75, the body printed, no file.
 REALCURL=$(command -v curl)
 cat > "$ROOT/srv5.py" <<'PY'
@@ -762,20 +761,20 @@ printf 'retry = 3\nretry-delay = 0\nlocation\nfail\noutput = "%s/crc-out"\n' "$R
 out=$(cd "$R" && HOME="$ROOT/crc" CURL_HOME="$ROOT/crc" PATH="$ROOT/realbin5:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 kill "$srv5" 2>/dev/null; wait "$srv5" 2>/dev/null
 [ "$rc" = 75 ] && [ "$(grep -c '/repo$' "$ROOT/srvlog5" 2>/dev/null)" = 1 ] && printf '%s' "$out" | grep -q 'busy5' && [ ! -e "$ROOT/crc-out" ] \
-  && ok "T5b a hostile ~/.curlrc is ignored: one POST, 75, the body printed, no output file" || fail "T5b curlrc: rc $rc posts $(grep -c '/repo$' "$ROOT/srvlog5" 2>/dev/null) out-file $([ -e "$ROOT/crc-out" ] && echo yes) $out"
+  && ok "a hostile ~/.curlrc is ignored: one POST, 75, the body printed, no output file" || fail "curlrc: rc $rc posts $(grep -c '/repo$' "$ROOT/srvlog5" 2>/dev/null) out-file $([ -e "$ROOT/crc-out" ] && echo yes) $out"
 
-# T6b: a context file reached through a symlink, a folder or the file itself,
+# a context file reached through a symlink, a folder or the file itself,
 # inside the repository: skipped and named, nothing read.
 mkdir -p "$R/real"; printf 'ctx\n' > "$R/real/c.txt"; ln -s real "$R/linkdir"; ln -s real/c.txt "$R/linkfile.txt"; commit_in real linkdir linkfile.txt
 fresh; run "$R" "$URL" off "$P" linkdir/c.txt linkfile.txt
 python3 -I -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["files"] == [] else 1)' "$STUB/payload.1.sent" 2>/dev/null \
-  && printf '%s' "$out" | grep -q 'Not sent.*linkdir/c.txt, linkfile.txt' && ok "T6b context through an in-repository symlink (folder, file): skipped and named" || fail "T6b symlink context: $out"
+  && printf '%s' "$out" | grep -q 'Not sent.*linkdir/c.txt, linkfile.txt' && ok "context through an in-repository symlink (folder, file): skipped and named" || fail "symlink context: $out"
 fresh; run "$R" "$URL" off "$P" real/c.txt
 python3 -I -c 'import json, sys; sys.exit(0 if [f["path"] for f in json.load(open(sys.argv[1]))["files"]] == ["real/c.txt"] else 1)' "$STUB/payload.1.sent" 2>/dev/null \
-  && ok "T6b ...the same file by its own path is sent" || fail "T6b real path: $out"
+  && ok "...the same file by its own path is sent" || fail "real path: $out"
 uncommit real linkdir linkfile.txt
 
-# T7: secret names from a subfolder: none in the diff, all named; a listed .env context file is not sent.
+# secret names from a subfolder: none in the diff, all named; a listed .env context file is not sent.
 T7="$ROOT/t7"; mkdir -p "$T7/conf" "$T7/secrets" "$T7/src"; g -C "$T7" init -q
 printf 'K=1\n' > "$T7/.env"; printf 's\n' > "$T7/conf/My.Secret.yml"; printf 's\n' > "$T7/secrets/x.txt"; printf 'a\n' > "$T7/src/a.py"
 g -C "$T7" add -f -A; g -C "$T7" commit -qm base
@@ -785,41 +784,47 @@ d7=$(payload_diff)
 [ "$rc" = 0 ] && ! printf '%s' "$d7" | grep -qiE 'env|secret' && printf '%s' "$d7" | grep -q 'src/a.py' \
   && printf '%s' "$out" | grep -q 'secret-named: .env, conf/My.Secret.yml, secrets/x.txt' \
   && python3 -I -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["files"] == [] else 1)' "$STUB/payload.1.sent" \
-  && ok "T7 secret names from a subfolder: left out by git, named; a listed .env context file not sent" || fail "T7 secrets: rc $rc $out / $d7"
+  && printf '%s' "$out" | grep -q "Not sent (a path with '..'; .*): ../.env" \
+  && ok "secret names from a subfolder: left out by git, named; a context file given with '..' not sent, its own reason" || fail "secrets: rc $rc $out / $d7"
+# The same .env from the top, without '..': listed by git, still not sent, the secret-name reason.
+fresh; run "$T7" "$URL" off --head .env
+[ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'Not sent (secret-named, .*): .env' \
+  && python3 -I -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["files"] == [] else 1)' "$STUB/payload.1.sent" \
+  && ok "a listed .env context file from the top is not sent, named as secret-named" || fail "top .env context: rc $rc $out"
 
-# T8: a Latin-1 file is left out and named, the UTF-8 one goes; a Latin-1 file renamed and edited: both names out.
+# a Latin-1 file is left out and named, the UTF-8 one goes; a Latin-1 file renamed and edited: both names out.
 T8="$ROOT/t8"; mkdir -p "$T8"; g -C "$T8" init -q; printf 'caf\351\n' > "$T8/lat.txt"; printf 'ok\n' > "$T8/u.txt"; printf 'caf\351 1\n2\n3\n4\n' > "$T8/old.txt"
 g -C "$T8" add -A; g -C "$T8" commit -qm base
 printf 'caf\351 2\n' > "$T8/lat.txt"; printf 'ok2\n' >> "$T8/u.txt"
 fresh; run "$T8" "$URL" off --head
 [ "$rc" = 0 ] && payload_diff | grep -q 'b/u.txt' && ! payload_diff | grep -q 'lat.txt' && printf '%s' "$out" | grep -q 'not UTF-8 text: lat.txt' \
-  && ok "T8 a Latin-1 file is left out and named, the UTF-8 one sent" || fail "T8 latin: rc $rc $out"
+  && ok "a Latin-1 file is left out and named, the UTF-8 one sent" || fail "latin: rc $rc $out"
 g -C "$T8" mv old.txt new.txt; printf '5\n' >> "$T8/new.txt"
 fresh; run "$T8" "$URL" off --head
 [ "$rc" = 0 ] && ! payload_diff | grep -qE 'old.txt|new.txt' && printf '%s' "$out" | grep -q 'not UTF-8 text: .*new.txt' && printf '%s' "$out" | grep -q 'not UTF-8 text: .*old.txt' \
-  && ok "T8 a Latin-1 file renamed and edited: both names left out, exit 0" || fail "T8 rename: rc $rc $out / $(payload_diff | grep '^diff')"
+  && ok "a Latin-1 file renamed and edited: both names left out, exit 0" || fail "rename: rc $rc $out / $(payload_diff | grep '^diff')"
 
-# T9: a file name that is not UTF-8, made without the file system: the payload is JSON, the manifest one line.
+# a file name that is not UTF-8, made without the file system: the payload is JSON, the manifest one line.
 T9="$ROOT/t9"; mkdir -p "$T9"; g -C "$T9" init -q; printf 'a\n' > "$T9/a.txt"; g -C "$T9" add -A; g -C "$T9" commit -qm base
 b9=$(printf 'x\n' | git -C "$T9" hash-object -w --stdin)
 printf '100644 blob %s\tbad\377name.txt\0' "$b9" | git -C "$T9" update-index -z --add --index-info
 t9=$(git -C "$T9" write-tree); c9=$(git -C "$T9" -c user.name=t -c user.email=t@t commit-tree -p HEAD -m bad "$t9"); git -C "$T9" update-ref HEAD "$c9"
 fresh; run "$T9" "$URL" off --commits 1
 [ "$rc" = 0 ] && python3 -I -c 'import json, sys; json.load(open(sys.argv[1]))' "$STUB/payload.1.sent" && [ "$(grep -c '^OhMyBug upload' "$STUB/transcript")" = 1 ] \
-  && payload_diff | grep -qF '"a/bad\377name.txt"' && ok "T9 a non-UTF-8 file name: quoted by git, the payload is JSON, one manifest line" || fail "T9 bad name: rc $rc $out"
+  && payload_diff | grep -qF '"a/bad\377name.txt"' && ok "a non-UTF-8 file name: quoted by git, the payload is JSON, one manifest line" || fail "bad name: rc $rc $out"
 
-# T10: the third argument is a scope word; a diff file is no longer an input.
+# the third argument is a scope word; a diff file is no longer an input.
 printf 'diff --git a/a.txt b/a.txt\n' > "$ROOT/some.patch"
 for a3 in "$ROOT/some.patch" --whatever ''; do
   fresh; run "$R" "$URL" off "$a3"
-  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'the third argument is the scope' && ok "T10 a third argument [$a3] that is no scope refuses, nothing sent" || fail "T10 [$a3]: rc $rc $out"
+  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'the third argument is the scope' && ok "a third argument [$a3] that is no scope refuses, nothing sent" || fail "[$a3]: rc $rc $out"
 done
 
-# T11: the scopes that replaced the ladder functions, ported row for row: a
+# the scopes that replaced the ladder functions, ported row for row: a
 # repository with secret names at every depth, a staged file, a non-ASCII name,
 # from the root and a subfolder, and a folder with no git.
 dnames() { printf '%s\n' "$out" | sed -n '/^OhMyBug upload/,$p' | sed 1d | sed 's/ (new, untracked)$//' | sort | tr '\n' ' '; }
-dry() { fresh; run "$1" --dry-run off "${@:2}"; [ "$(calls)" = 0 ] || fail "T11 --dry-run made a request"; }
+dry() { fresh; run "$1" --dry-run off "${@:2}"; [ "$(calls)" = 0 ] || fail "--dry-run made a request"; }
 LD="$ROOT/t11/r"; mkdir -p "$LD"; g -C "$LD" init -q
 ( cd "$LD" && mkdir -p deploy sub secrets config/credentials src/solver
   for f in .env .env.local .envrc .env-production sub/.ENV id_rsa id_dsa id_ecdsa id_ed25519 deploy/id_ed25519 \
@@ -827,54 +832,57 @@ LD="$ROOT/t11/r"; mkdir -p "$LD"; g -C "$LD" init -q
            config/credentials/gcp.json src/.env; do printf 's\n' > "$f"; done
   printf 'a\n' > a.py; printf 'm\n' > src/solver/m.py )
 dry "$LD" --all
-[ "$(dnames)" = "a.py src/solver/m.py " ] && ok "T11 --all before the first commit: code only, no secret at any depth" || fail "T11 unborn: [$(dnames)] $out"
+[ "$(dnames)" = "a.py src/solver/m.py " ] && ok "--all before the first commit: code only, no secret at any depth" || fail "unborn: [$(dnames)] $out"
 g -C "$LD" add -A; g -C "$LD" commit -qm base
 dry "$LD" --all --only src/solver/
-[ "$(dnames)" = "src/solver/m.py " ] && ok "T11 --all --only a folder: the folder only" || fail "T11 folder: [$(dnames)]"
+[ "$(dnames)" = "src/solver/m.py " ] && ok "--all --only a folder: the folder only" || fail "folder: [$(dnames)]"
 printf 'b\n' >> "$LD/a.py"; g -C "$LD" add a.py; printf 'n\n' > "$LD/sub/new.py"; printf 'r\n' > "$LD/résumé.py"
 st11=$(git -C "$LD" status --porcelain); ix11=$(sha "$LD/.git/index")
 dry "$LD" --head
-[ "$(dnames)" = "a.py résumé.py sub/new.py " ] && ok "T11 --head: staged, unstaged and new files, a non-ASCII name too" || fail "T11 head: [$(dnames)]"
-[ "$st11" = "$(git -C "$LD" status --porcelain)" ] && [ "$ix11" = "$(sha "$LD/.git/index")" ] && ok "T11 ...the user's index does not move" || fail "T11 index moved"
+[ "$(dnames)" = "a.py résumé.py sub/new.py " ] && ok "--head: staged, unstaged and new files, a non-ASCII name too" || fail "head: [$(dnames)]"
+[ "$st11" = "$(git -C "$LD" status --porcelain)" ] && [ "$ix11" = "$(sha "$LD/.git/index")" ] && ok "...the user's index does not move" || fail "index moved"
 git clone -q "$LD" "$ROOT/t11/h" 2>/dev/null
 ( cd "$ROOT/t11/h" && printf 'c1\n' > c1.py && g add c1.py && g commit -qm c1 && printf 'c2\n' > src/solver/c2.py && g add src/solver/c2.py && g commit -qm c2 \
   && printf 'dirty\n' >> c1.py && printf 'u\n' > untracked.py )
-dry "$ROOT/t11/h" --commits 1; [ "$(dnames)" = "src/solver/c2.py " ] && ok "T11 --commits 1: the last commit, no working-copy edit" || fail "T11 last1: [$(dnames)]"
-dry "$ROOT/t11/h" --commits 2; [ "$(dnames)" = "c1.py src/solver/c2.py " ] && ok "T11 --commits 2: both commits only" || fail "T11 last2: [$(dnames)]"
-dry "$ROOT/t11/h" --commits 9; [ "$(dnames)" = "a.py c1.py src/solver/c2.py src/solver/m.py " ] && ok "T11 --commits 9 on 3 commits: the whole history, secrets out" || fail "T11 last9: [$(dnames)]"
-dry "$LD" --commits 9; [ "$(dnames)" = "a.py src/solver/m.py " ] && ok "T11 --commits 9 here: the committed history only" || fail "T11 commits9: [$(dnames)]"
+dry "$ROOT/t11/h" --commits 1; [ "$(dnames)" = "src/solver/c2.py " ] && ok "--commits 1: the last commit, no working-copy edit" || fail "last1: [$(dnames)]"
+dry "$ROOT/t11/h" --commits 2; [ "$(dnames)" = "c1.py src/solver/c2.py " ] && ok "--commits 2: both commits only" || fail "last2: [$(dnames)]"
+dry "$ROOT/t11/h" --commits 9; [ "$(dnames)" = "a.py c1.py src/solver/c2.py src/solver/m.py " ] && ok "--commits 9 on 3 commits: the whole history, secrets out" || fail "last9: [$(dnames)]"
+dry "$LD" --commits 9; [ "$(dnames)" = "a.py src/solver/m.py " ] && ok "--commits 9 here: the committed history only" || fail "commits9: [$(dnames)]"
 printf 's\n' > "$LD/.env.new"; printf 's\n' > "$LD/secrets/new.yml"; printf 's\n' > "$LD/sub/id_rsa"
-dry "$LD/src" --head; [ "$(dnames)" = "a.py résumé.py sub/new.py " ] && ok "T11 --head from a subfolder: the whole repository, new secrets out" || fail "T11 sub head: [$(dnames)]"
-dry "$LD/src" --all; [ "$(dnames)" = "a.py résumé.py src/solver/m.py sub/new.py " ] && ok "T11 --all from a subfolder: the whole repository" || fail "T11 sub all: [$(dnames)]"
-dry "$LD/src" --all --only solver/; [ "$(dnames)" = "src/solver/m.py " ] && ok "T11 --all --only from a subfolder: below it" || fail "T11 sub folder: [$(dnames)]"
+dry "$LD/src" --head; [ "$(dnames)" = "a.py résumé.py sub/new.py " ] && ok "--head from a subfolder: the whole repository, new secrets out" || fail "sub head: [$(dnames)]"
+dry "$LD/src" --all; [ "$(dnames)" = "a.py résumé.py src/solver/m.py sub/new.py " ] && ok "--all from a subfolder: the whole repository" || fail "sub all: [$(dnames)]"
+dry "$LD/src" --all --only solver/; [ "$(dnames)" = "src/solver/m.py " ] && ok "--all --only from a subfolder: below it" || fail "sub folder: [$(dnames)]"
 NGT="$ROOT/t11/ng"; mkdir -p "$NGT/k"; printf 'q\n' > "$NGT/q.py"; printf 's\n' > "$NGT/.env"; printf 's\n' > "$NGT/k/a.pem"
-dry "$NGT" --all; [ "$(dnames)" = "q.py " ] && [ ! -e "$NGT/.git" ] && ok "T11 a folder without git, --all: code only, no .git left" || fail "T11 nogit: [$(dnames)] $out"
+dry "$NGT" --all; [ "$(dnames)" = "q.py " ] && [ ! -e "$NGT/.git" ] && ok "a folder without git, --all: code only, no .git left" || fail "nogit: [$(dnames)] $out"
 fresh; run "$NGT" "$URL" off --head
-[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'only --all applies' && ok "T11 a folder without git refuses another scope" || fail "T11 nogit head: rc $rc $out"
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'only --all applies' && ok "a folder without git refuses another scope" || fail "nogit head: rc $rc $out"
 for nn in 0 01 1000 x ''; do
   fresh; run "$LD" "$URL" off --commits "$nn"
-  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "T11 --commits [$nn] refuses" || fail "T11 --commits [$nn]: rc $rc"
+  [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "--commits [$nn] refuses" || fail "--commits [$nn]: rc $rc"
 done
 
-# T12: git older than 2.25: exit 4, the version found and the fix named, nothing sent.
+# git older than 2.25: exit 4, the version found and the fix named, nothing sent.
 OG="$ROOT/oldgit"; mkdir -p "$OG"
 printf '#!/bin/sh\n[ "$1" = version ] && { echo "git version 2.24.0"; exit 0; }\nexec %s "$@"\n' "$(command -v git)" > "$OG/git"; chmod +x "$OG/git"
 fresh; out=$(cd "$R" && PATH="$OG:$BIN:$PATH" "$TSH" "$UP" "$URL" required "$P" 2>&1); rc=$?
 [ "$rc" = 4 ] && [ "$(calls)" = 0 ] && [ "$out" = "omb-upload: git 2.24.0 found, 2.25 or newer is needed: update git; nothing was sent" ] \
-  && ok "T12 git 2.24: exit 4, the version found and the fix, nothing sent" || fail "T12 old git: rc $rc $out"
+  && ok "git 2.24: exit 4, the version found and the fix, nothing sent" || fail "old git: rc $rc $out"
 
 # ---- 6d. Partial and shallow clones, many files, snapshot of HEAD, arguments
 # A blobless partial clone: --base needs a blob the clone never fetched; the
-# one cat-file read in the real repository fetches it.
-PS="$ROOT/pc-src"; mkdir -p "$PS"; g -C "$PS" init -q; printf 'v1\n' > "$PS/a.txt"; g -C "$PS" add -A; g -C "$PS" commit -qm one
-c1=$(git -C "$PS" rev-parse HEAD); printf 'v2\n' > "$PS/a.txt"; g -C "$PS" commit -qam two; g -C "$PS" config uploadpack.allowFilter true
+# real repository fetches it before the bare one diffs. (allowAnySHA1InWant:
+# git 2.25 fetches a missing object over file:// only with it.)
+PS="$ROOT/pc-src"; mkdir -p "$PS/secrets"; g -C "$PS" init -q; printf 'v1\n' > "$PS/a.txt"; printf 's1\n' > "$PS/secrets/x.txt"; g -C "$PS" add -A; g -C "$PS" commit -qm one
+c1=$(git -C "$PS" rev-parse HEAD); printf 'v2\n' > "$PS/a.txt"; printf 's2\n' > "$PS/secrets/x.txt"; g -C "$PS" commit -qam two; g -C "$PS" config uploadpack.allowFilter true; g -C "$PS" config uploadpack.allowAnySHA1InWant true
 PC="$ROOT/pc"; g clone -q --filter=blob:none "file://$PS" "$PC" 2>/dev/null
 g -C "$PC" update-ref refs/remotes/origin/main "$c1"; printf 'v3\n' > "$PC/a.txt"
 git -C "$PC" rev-list --objects --missing=print "$c1" 2>/dev/null | grep -q "^?" \
   || fail "partial clone: the old blob is already present, so the row proves nothing"
 fresh; run "$PC" "$URL" off --base main
 [ "$rc" = 0 ] && payload_diff | grep -q '^-v1' && payload_diff | grep -q '^+v3' && ok "a blobless partial clone: --base reaches an unfetched blob, exit 0" || fail "partial clone: rc $rc $out"
-# 2000 small files and one Latin-1 file: one cat-file read, a fixed number of diff runs.
+# 2000 small files and one Latin-1 file: one cat-file read, and 8 diff runs
+# whatever the file count (3 in the real repository, then in the bare one:
+# every name, the kept names, the one candidate's own diff, the diff, its names).
 MF="$ROOT/many"; mkdir -p "$MF/f"; g -C "$MF" init -q
 python3 -I -c 'import sys
 for i in range(2000): open("%s/f/%04d.txt" % (sys.argv[1], i), "w").write("x%d\n" % i)
@@ -883,7 +891,7 @@ GW="$ROOT/gitwrap"; mkdir -p "$GW"; : > "$ROOT/gitcalls"
 printf '#!/bin/sh\necho "$*" >> %s\nexec %s "$@"\n' "$ROOT/gitcalls" "$(command -v git)" > "$GW/git"; chmod +x "$GW/git"
 fresh; out=$(cd "$MF" && PATH="$GW:$BIN:$PATH" "$TSH" "$UP" "$URL" off --all 2>&1); rc=$?
 ncat=$(grep -c 'cat-file --batch' "$ROOT/gitcalls"); ndt=$(grep -c 'diff-tree' "$ROOT/gitcalls")
-[ "$rc" = 0 ] && [ "$ncat" = 1 ] && [ "$ndt" -le 6 ] && printf '%s' "$out" | grep -q 'not UTF-8 text: latin.txt' && printf '%s' "$out" | grep -q '(2000 files)' \
+[ "$rc" = 0 ] && [ "$ncat" = 1 ] && [ "$ndt" = 8 ] && printf '%s' "$out" | grep -q 'not UTF-8 text: latin.txt' && printf '%s' "$out" | grep -q '(2000 files)' \
   && ok "2000 files and one Latin-1 file: one cat-file read, $ndt diff runs, the Latin-1 file named" || fail "many files: rc $rc cat-file $ncat diff-tree $ndt $(printf '%s' "$out" | head -c 300)"
 # --commits with a snapshot: the snapshot is HEAD's tree, not the dirty working copy.
 SH5="$ROOT/snaphead"; mkdir -p "$SH5"; g -C "$SH5" init -q; printf 'one\n' > "$SH5/a.txt"; g -C "$SH5" add -A; g -C "$SH5" commit -qm one
@@ -894,7 +902,7 @@ fresh; run "$SH5" "$URL" required --commits 1
 # A shallow clone with fewer commits than asked: refused, never the whole tree as new.
 g clone -q --depth 1 "file://$PS" "$ROOT/shallow" 2>/dev/null
 fresh; run "$ROOT/shallow" "$URL" off --commits 3
-[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'this clone is shallow and holds fewer than 3 commits: fetch more history (git fetch --deepen=3)' \
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'this clone is shallow and holds 3 or fewer commits: fetch more history (git fetch --deepen=3)' \
   && ok "a shallow clone and --commits 3: refused, nothing sent" || fail "shallow: rc $rc $out"
 # A context file name that starts with '-' is refused; one from a subfolder is sent under its full path.
 fresh; run "$R" "$URL" off "$P" -x.txt
@@ -907,6 +915,93 @@ uncommit sub
 # --only . at the top with another --only: no narrowing at all.
 fresh; run "$T3" "$URL" off --head --only . --only a.txt
 [ "$rc" = 0 ] && payload_diff | grep -q 'ren2.txt' && ok "--only . at the top with another --only: the whole repository" || fail "--only . plus: rc $rc $(payload_diff | grep '^diff')"
+
+# A treeless clone (--filter=tree:0): the trees too are fetched in the real
+# repository before the bare one diffs, a secret-named folder's as well (the
+# bare one lists every name to say which were left out).
+fresh; g clone -q --filter=tree:0 "file://$PS" "$ROOT/tc" 2>/dev/null
+g -C "$ROOT/tc" update-ref refs/remotes/origin/main "$c1"; printf 'v3\n' > "$ROOT/tc/a.txt"
+run "$ROOT/tc" "$URL" off --base main
+[ "$rc" = 0 ] && payload_diff | grep -q '^-v1' && payload_diff | grep -q '^+v3' && printf '%s' "$out" | grep -q 'secret-named: secrets/x.txt' \
+  && ok "a treeless partial clone: --base, exit 0, the secret-named folder left out and named" || fail "treeless clone: rc $rc $out"
+# 50 unfetched blobs and a changed symlink in a blobless clone: ONE fetch for
+# all of them (counted by a wrapped upload-pack on the remote side).
+P50="$ROOT/p50-src"; mkdir -p "$P50"; g -C "$P50" init -q
+for i in $(seq 1 50); do printf 'old %d\n' "$i" > "$P50/f$i.txt"; done; ln -s f1.txt "$P50/ln"
+g -C "$P50" add -A; g -C "$P50" commit -qm one; b50=$(git -C "$P50" rev-parse HEAD)
+for i in $(seq 1 50); do printf 'new %d\n' "$i" > "$P50/f$i.txt"; done; rm "$P50/ln"; ln -s f2.txt "$P50/ln"
+g -C "$P50" add -A; g -C "$P50" commit -qm two
+g -C "$P50" config uploadpack.allowFilter true; g -C "$P50" config uploadpack.allowAnySHA1InWant true
+printf '#!/bin/sh\necho fetch >> %s\nexec git-upload-pack "$@"\n' "$ROOT/p50-count" > "$ROOT/p50-up"; chmod +x "$ROOT/p50-up"
+g clone -q --filter=blob:none --upload-pack="$ROOT/p50-up" "file://$P50" "$ROOT/p50" 2>/dev/null
+g -C "$ROOT/p50" config remote.origin.uploadpack "$ROOT/p50-up"; g -C "$ROOT/p50" update-ref refs/remotes/origin/main "$b50"
+miss=$(git -C "$ROOT/p50" rev-list --objects --missing=print "$b50" | grep -c '^?')
+: > "$ROOT/p50-count"; fresh; run "$ROOT/p50" "$URL" off --base main
+nf=$(wc -l < "$ROOT/p50-count" | tr -d ' ')
+[ "$rc" = 0 ] && [ "$miss" = 51 ] && [ "$nf" = 1 ] && payload_diff | grep -q '^-f1.txt' && payload_diff | grep -q '^+f2.txt' && [ "$(payload_diff | grep -c '^+new ')" = 50 ] \
+  && ok "a blobless clone, 51 unfetched blobs (a symlink's among them): one fetch, the link's change in the diff" || fail "one fetch: rc $rc missing $miss fetches $nf $out"
+# The remote is gone: the read fails with a sentence, never a traceback.
+g -C "$ROOT/p50" remote set-url origin "file://$ROOT/no-such-remote"; g -C "$ROOT/p50" config --unset remote.origin.uploadpack
+fresh; g clone -q --filter=blob:none "file://$P50" "$ROOT/p50b" 2>/dev/null; g -C "$ROOT/p50b" update-ref refs/remotes/origin/main "$b50"
+g -C "$ROOT/p50b" remote set-url origin "file://$ROOT/no-such-remote"
+run "$ROOT/p50b" "$URL" off --base main
+# (git 2.25 stops at the listing, newer git at the blob read: the same partial-clone sentence.)
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'a partial clone whose remote is out of reach?); nothing was sent' && ! printf '%s' "$out" | grep -q Traceback \
+  && ok "a blobless clone whose remote is gone: one sentence, nothing sent" || fail "remote gone: rc $rc $out"
+# Non-UTF-8 bytes: only what reaches the diff counts. A Latin-1 byte far from
+# the edit is sent; one inside the hunk leaves its file out, named; a symlink
+# whose target is not UTF-8 is left out, named; a binary file (a NUL in its
+# first 8000 bytes) is sent as git writes it, not named.
+U8="$ROOT/u8"; mkdir -p "$U8"; g -C "$U8" init -q
+python3 -I -c 'import sys
+d = sys.argv[1]
+open(d + "/far.txt", "wb").write(b"caf\xe9\n" + b"".join(b"line %d\n" % i for i in range(30)))
+open(d + "/near.txt", "wb").write(b"caf\xe9\nend\n")
+open(d + "/bin.dat", "wb").write(b"\0\xe9\xff" + b"x" * 10)' "$U8"
+ln -s "$(printf 'caf\351')" "$U8/badlink"; ln -s ok "$U8/goodlink"
+g -C "$U8" add -A; g -C "$U8" commit -qm one
+printf 'line 29 edited\n' >> "$U8/far.txt"; printf 'end2\n' >> "$U8/near.txt"; printf 'y' >> "$U8/bin.dat"
+rm "$U8/badlink"; ln -s "$(printf 'caf\351 2')" "$U8/badlink"; rm "$U8/goodlink"; ln -s ok2 "$U8/goodlink"
+fresh; run "$U8" "$URL" off --head
+[ "$rc" = 0 ] && payload_diff | grep -q '^+line 29 edited' && payload_diff | grep -q 'Binary files a/bin.dat and b/bin.dat differ' && payload_diff | grep -q '^+ok2' \
+  && printf '%s' "$out" | grep -q 'not UTF-8 text: badlink, near.txt$\|not UTF-8 text: badlink, near.txt\.' && ! printf '%s' "$out" | grep -q 'UTF-8 text:.*\(far.txt\|bin.dat\|goodlink\)' \
+  && ok "non-UTF-8 bytes: far from the edit sent, in the hunk or a link target left out and named, a binary file sent" || fail "utf-8 precision: rc $rc $out / $(payload_diff | grep '^diff')"
+# More than 200 files whose changes are not UTF-8: refused, nothing sent.
+L2="$ROOT/l201"; mkdir -p "$L2"; g -C "$L2" init -q
+python3 -I -c 'import sys
+for i in range(201): open("%s/l%03d.txt" % (sys.argv[1], i), "wb").write(b"caf\xe9\n")' "$L2"
+fresh; run "$L2" "$URL" off --all
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'more than 200 changed files are not UTF-8 text' && ok "201 non-UTF-8 files: refused, nothing sent" || fail "201 latin: rc $rc $(printf '%s' "$out" | tail -c 300)"
+# 201 binary files whose bytes are not UTF-8: binary to git, so no candidates and no refusal.
+B2="$ROOT/b201"; mkdir -p "$B2"; g -C "$B2" init -q
+python3 -I -c 'import sys
+for i in range(201): open("%s/b%03d.bin" % (sys.argv[1], i), "wb").write(b"\0\xe9\xff%d" % i)' "$B2"
+fresh; run "$B2" "$URL" off --all
+[ "$rc" = 0 ] && [ "$(payload_diff | grep -c '^Binary files')" = 201 ] && ! printf '%s' "$out" | grep -q 'not UTF-8' && ok "201 binary files: sent as git writes them, none a candidate" || fail "201 binary: rc $rc $(printf '%s' "$out" | tail -c 300)"
+# Six non-UTF-8 and six secret-named files: each list in the manifest names five, then and 1 more.
+mkdir -p "$ROOT/cap"; python3 -I -c 'import sys
+for i in range(6):
+    open("%s/m%d.txt" % (sys.argv[1], i), "wb").write(b"caf\xe9\n")
+    open("%s/k%d.pem" % (sys.argv[1], i), "w").write("k\n")
+open(sys.argv[1] + "/ok.txt", "w").write("ok\n")' "$ROOT/cap"
+g -C "$ROOT/cap" init -q; fresh; run "$ROOT/cap" --dry-run off --all
+[ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'secret-named: k0.pem, k1.pem, k2.pem, k3.pem, k4.pem and 1 more\.' \
+  && printf '%s' "$out" | grep -q 'not UTF-8 text: m0.txt, m1.txt, m2.txt, m3.txt, m4.txt and 1 more\.' \
+  && ok "the manifest names five secret-named and five non-UTF-8 files, then and N more" || fail "manifest caps: rc $rc $out"
+# --commits with a snapshot in a sparse checkout: skip-worktree files are left
+# out of the snapshot, as for the working copy.
+SPC="$ROOT/spc"; g clone -q "$SRC" "$SPC" 2>/dev/null; g -C "$SPC" sparse-checkout init --cone 2>/dev/null; g -C "$SPC" sparse-checkout set src 2>/dev/null
+fresh; run "$SPC" "$URL" required --commits 1
+[ "$rc" = 0 ] && [ -n "$(git -C "$SPC" ls-files -t | grep '^S far/')" ] && ! tar -tzf "$STUB/repo.1.sent" | grep -q '^far/' && tar -tzf "$STUB/repo.1.sent" | grep -q '^src/deep/a.ts' \
+  && ok "--commits with a snapshot in a sparse checkout: skip-worktree files left out" || fail "commits sparse snapshot: rc $rc $out / $(tar -tzf "$STUB/repo.1.sent" 2>/dev/null | tr '\n' ' ')"
+# --only . and --only ./ from a subfolder: that folder; ./ at the top: the whole repository.
+for o in . ./; do
+  fresh; run "$T3/src" "$URL" off --head --only "$o"
+  [ "$rc" = 0 ] && [ "$(payload_diff | grep '^diff' | tr '\n' ' ')" = 'diff --git a/src/sp ace.txt b/src/sp ace.txt ' ] \
+    && ok "--only [$o] from a subfolder: that folder only" || fail "--only [$o] sub: rc $rc $(payload_diff | grep '^diff')"
+done
+fresh; run "$T3" "$URL" off --head --only ./
+[ "$rc" = 0 ] && payload_diff | grep -q 'ren2.txt' && payload_diff | grep -q 'sp ace' && ok "--only ./ at the top: the whole repository" || fail "--only ./ top: rc $rc $(payload_diff | grep '^diff')"
 
 # ---- 7. URL and arguments ------------------------------------------------------
 for bad in "https://evil.example/u/tok" "http://mcp.ohmybug.ai/u/tok" "https://mcp.ohmybug.ai/u/x; touch $ROOT/pwned" "https://mcp.ohmybug.ai/u/" "https://mcp.ohmybug.ai.evil/u/tok" "https://mcp.ohmybug.ai/u/a/../b"; do

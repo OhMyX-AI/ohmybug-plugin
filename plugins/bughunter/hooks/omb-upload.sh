@@ -5,7 +5,8 @@
 #          --head           HEAD to the working copy
 #          --all            nothing to the working copy (all of it is new code)
 #          --commits <N>    the last N commits, HEAD~N to HEAD (the whole history
-#                           when there are N or fewer)
+#                           when there are N or fewer; a shallow clone with N
+#                           or fewer refuses)
 #
 # Sends a payload hunt's bytes to its upload ticket: the repository snapshot
 # (with `required`), then {diff, files}. The script writes the diff itself.
@@ -18,7 +19,10 @@
 # git's own exclude pathspecs (the snapshot's list), and a file whose diff is
 # not UTF-8 is found by path and left out. --only limits the diff to a path
 # below the current folder. --dry-run does everything before the first
-# request, prints the manifest and the file names, and sends nothing.
+# request, prints the manifest and the file names, and sends nothing. In a
+# partial clone, git fetches the trees and blobs the diff needs into the
+# user's own object store (on --dry-run too): one batched request for the
+# blobs, read back with one `git cat-file --batch`.
 #
 # The skill runs this file; it never runs a command a tool answer hands it.
 # Only two values come from the server: the upload URL, whose host is pinned
@@ -55,7 +59,8 @@
 # scan and send inside the skill's 600 s call on a slow machine (the client
 # then stops the call, which counts as exit 75); a `-diff` or `binary`
 # attribute is not applied to the diff (git's own NUL-byte check still is);
-# an edit between the diff and the snapshot gives the two of two moments;
+# a file edited between the diff and the snapshot goes as it was at each
+# of the two moments;
 # more than 200 files that are not UTF-8 refuse instead of being left out.
 #
 # env: OMB_SNAPSHOT_HOME_OK=1     the project is the home folder (a container)
@@ -116,7 +121,7 @@ only=
 while [ "${1:-}" = --only ]; do
   [ $# -ge 2 ] || die "omb-upload: --only needs a path; nothing was sent"
   o=$2; shift 2
-  while case $o in ./*) true ;; *) false ;; esac; do o=${o#./}; done
+  case $o in ./*) while case $o in ./*) true ;; *) false ;; esac; do o=${o#./}; done; o=${o:-.} ;; esac
   case $o in
     ''|/*|..|../*|*/..|*/../*) die "omb-upload: --only takes a path below the current folder (no leading '/', no '..'), got '$o'; nothing was sent" ;;
     *[[:cntrl:]]*) die "omb-upload: --only got a path with a control character; nothing was sent" ;;
@@ -217,7 +222,7 @@ case $scope in
     to=$(git rev-parse -q --verify 'HEAD^{commit}') || die "omb-upload: there is no commit yet, so --commits has nothing to send: use --all; nothing was sent"
     from=$(git rev-parse -q --verify "HEAD~$ncommits^{commit}") || {
       [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" != true ] \
-        || die "omb-upload: this clone is shallow and holds fewer than $ncommits commits: fetch more history (git fetch --deepen=$ncommits) or use a smaller N; nothing was sent"
+        || die "omb-upload: this clone is shallow and holds $ncommits or fewer commits: fetch more history (git fetch --deepen=$ncommits) or use a smaller N; nothing was sent"
       from=$empty
     } ;;
 esac
@@ -303,57 +308,89 @@ def clean1(x):
 def names(extra, specs):
     return [n for n in git(extra + ["--name-only", "-z"], specs).split(b"\0") if n]
 
-every = names(["--no-renames"], ONLY)
-kept = names(["--no-renames"], ONLY + EXCL)
-keptset = set(kept)
-dropped = [n for n in every if n not in keptset]
 specs = ONLY + EXCL
 
-# Every blob the diff will read, read once, in the REAL repository: one
-# `git cat-file --batch`, which fetches what a partial clone lacks where git
-# can (the bare repository below cannot), and whose bytes tell which files
-# are not UTF-8 text, with no git call per file. Only object ids and blob
-# bytes are read here, so the user's own settings may apply.
-RENV = dict(os.environ)
+# First the REAL repository, before any diff in the bare one below (which
+# cannot fetch): there a partial clone fetches what it lacks, into the
+# user's own object store, on --dry-run too. Only object ids and blob bytes
+# are read here, so the user's settings may apply; the pathspec variables
+# that would read our pathspecs another way are dropped.
+RENV = {k: v for k, v in os.environ.items()
+        if k not in ("GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS")}
 if os.path.isdir(d + "/j/o"):
     RENV["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = d + "/j/o"
+# 1. Every tree the diff walks, secret-named folders too (a treeless clone
+#    fetches them here).
+p = subprocess.run(["git", "diff-tree", "-r", "--raw", "--no-renames", "-z", frm, to, "--"] + ONLY,
+                   env=RENV, stdout=subprocess.DEVNULL)
+if p.returncode:
+    say("git could not list the changed files (a partial clone whose remote is out of reach?)")
+# 2. One prefetch of every blob the diff reads, in one request: git's diff
+#    machinery fetches the missing blobs of a diff as one batch. Its exit
+#    status is not read; the blob read below decides.
+subprocess.run(["git"] + FLAGS + ["-p", frm, to, "--"] + specs, env=RENV, stdout=subprocess.DEVNULL)
+# 3. The blobs of the files the diff keeps (files and symlinks, both sides).
 p = subprocess.run(["git", "diff-tree", "-r", "--raw", "--no-abbrev", "--no-renames", "-z", frm, to, "--"] + specs,
                    env=RENV, stdout=subprocess.PIPE)
 if p.returncode:
     say("git could not list the changed files")
 f = p.stdout.split(b"\0")
 blobs = {}  # object id -> the paths it is a side of
-for meta, path in zip(f[0::2], f[1::2]):
+for meta, name in zip(f[0::2], f[1::2]):
     if not meta.startswith(b":"):
         continue
     om, nm, oid, nid = meta[1:].split(b" ")[:4]
     for mode, oid_ in ((om, oid), (nm, nid)):
-        if mode[:2] == b"10" and oid_.strip(b"0"):  # a file or a link, not a submodule or nothing
-            blobs.setdefault(oid_, []).append(path)
-notutf8 = []
+        if mode[:2] in (b"10", b"12") and oid_.strip(b"0"):  # a file (100644, 100755) or a symlink (120000)
+            blobs.setdefault(oid_, []).append(name)
+# 4. One `git cat-file --batch`, read one blob at a time: a text blob that is
+#    not UTF-8 makes its paths candidates. A blob with a NUL in its first
+#    8000 bytes is binary to git, whose diff then holds none of its bytes.
+cand = set()
 if blobs:
-    p = subprocess.run(["git", "cat-file", "--batch"], env=RENV, input=b"".join(o + b"\n" for o in blobs),
-                       stdout=subprocess.PIPE)
-    out, i, bad = p.stdout, 0, {}
-    for o in blobs:
-        j = out.index(b"\n", i)
-        head = out[i:j].split(b" ")
-        if p.returncode or len(head) != 3 or head[1] != b"blob":
-            say("git could not read a changed file (a partial clone whose remote is out of reach?)")
-        size = int(head[2])
-        data = out[j + 1:j + 1 + size]
-        i = j + 2 + size
-        if b"\0" in data[:8000]:
-            continue  # git writes "Binary files differ" for it: no bytes of it in the diff
-        try:
-            data.decode("utf-8")
-        except UnicodeDecodeError:
-            for path in blobs[o]:
-                bad[path] = 1
-    notutf8 = [n for n in kept if n in bad]
-if len(notutf8) > 200:
+    with open(d + "/oids", "wb") as o:
+        o.write(b"".join(x + b"\n" for x in blobs))
+    with open(d + "/oids", "rb") as o:
+        p = subprocess.Popen(["git", "cat-file", "--batch"], env=RENV, stdin=o, stdout=subprocess.PIPE)
+    try:
+        for x in blobs:
+            head = p.stdout.readline().split()
+            if len(head) != 3 or head[0] != x or head[1] != b"blob":
+                raise ValueError
+            data = p.stdout.read(int(head[2]) + 1)
+            if len(data) != int(head[2]) + 1:
+                raise ValueError
+            data = data[:-1]
+            if b"\0" in data[:8000]:
+                continue
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError:
+                cand.update(blobs[x])
+            data = None
+    except ValueError:
+        p.kill(); p.wait()
+        say("git could not read a changed file (a partial clone whose remote is out of reach?)")
+    if p.wait():
+        say("git could not read a changed file (a partial clone whose remote is out of reach?)")
+
+# Now the bare repository, every object at hand.
+every = names(["--no-renames"], ONLY)
+kept = names(["--no-renames"], specs)
+keptset = set(kept)
+dropped = [n for n in every if n not in keptset]
+cand = [n for n in kept if n in cand]
+if len(cand) > 200:
     say("more than 200 changed files are not UTF-8 text, too many to leave out. Narrow the diff with --only")
-specs = specs + [":(exclude,top,literal)" + n.decode("utf-8", "surrogateescape") for n in notutf8]
+# A candidate is left out only when its own diff is not UTF-8: a Latin-1
+# byte far from every change never reaches the diff.
+notutf8 = []
+for n in cand:
+    try:
+        git(["-p"], [":(top,literal)" + os.fsdecode(n)]).decode("utf-8")
+    except UnicodeDecodeError:
+        notutf8.append(n)
+specs = specs + [":(exclude,top,literal)" + os.fsdecode(n) for n in notutf8]
 try:
     diff = git(["-p"], specs).decode("utf-8")
 except UnicodeDecodeError:
@@ -364,7 +401,7 @@ final = names([], specs)
 untracked = set(x for x in open(d + "/untracked", "rb").read().split(b"\0") if x)
 new = [n for n in final if n in untracked]
 
-files, sent, skipped = [], [], []
+files, sent, skipped, dotdot = [], [], [], []
 if args:
     listed = set(open(d + "/listed", "rb").read().split(b"\0"))
     rtop = os.path.realpath(top)
@@ -377,7 +414,10 @@ if args:
             a2 = a
             while a2.startswith("./"):
                 a2 = a2[2:]
-            rel = prefix + a2  # as given: read_listed refuses a "..", "." or empty part
+            if ".." in a2.split("/"):
+                dotdot.append(a)
+                continue
+            rel = prefix + a2  # as given: read_listed refuses a "." or empty part
         else:
             full = os.path.normpath(a)
             for t in (top, rtop):
@@ -406,20 +446,21 @@ if args:
             files.append({"path": rel, "content": content})
             sent.append(rel)
 clean = lambda xs: [clean1(x) for x in xs]
+def cap(xs):  # the first five names, then how many more
+    xs = clean(xs)
+    return ", ".join(xs[:5]) + (" and %d more" % (len(xs) - 5) if len(xs) > 5 else "")
 json.dump({"diff": diff, "files": files}, open(d + "/payload.json", "w", encoding="utf-8"), ensure_ascii=False)
 with open(d + "/names", "w", encoding="utf-8") as f:
     for n in final:
         f.write(clean1(n) + (" (new, untracked)" if n in untracked else "") + "\n")
-newnames = clean(new)
 newline = ""
-if newnames:
-    newline = "%d untracked file%s git does not ignore: %s" % (len(newnames), "" if len(newnames) == 1 else "s",
-              ", ".join(newnames[:5]) + (" and %d more" % (len(newnames) - 5) if len(newnames) > 5 else ""))
+if new:
+    newline = "%d untracked file%s git does not ignore: %s" % (len(new), "" if len(new) == 1 else "s", cap(new))
 with open(d + "/meta", "w", encoding="utf-8") as f:
-    f.write("\n".join([str(len(final)), ", ".join(clean(sent)), ", ".join(clean(skipped)), ", ".join(clean(dropped)),
-                       str(len(diff.encode("utf-8"))), ", ".join(clean(notutf8)), newline]) + "\n")
+    f.write("\n".join([str(len(final)), ", ".join(clean(sent)), ", ".join(clean(skipped)), cap(dropped),
+                       str(len(diff.encode("utf-8"))), cap(notutf8), newline, ", ".join(clean(dotdot))]) + "\n")
 PY
-{ IFS= read -r nfiles; IFS= read -r ctx_sent; IFS= read -r ctx_skipped; IFS= read -r diff_dropped; IFS= read -r diff_bytes; IFS= read -r diff_notutf8; IFS= read -r diff_new; } < "$d/meta" || :
+{ IFS= read -r nfiles; IFS= read -r ctx_sent; IFS= read -r ctx_skipped; IFS= read -r diff_dropped; IFS= read -r diff_bytes; IFS= read -r diff_notutf8; IFS= read -r diff_new; IFS= read -r ctx_dotdot; } < "$d/meta" || :
 
 scan_off=0
 [ "${OHMYBUG_SECRET_SCAN:-1}" = 0 ] && scan_off=1
@@ -441,7 +482,8 @@ fi
 # kept in "$k/t"; and the archive is of a commit of that tree with a fixed
 # author, committer and date, not of the tree, so its bytes (mtimes, the pax
 # header) do not depend on the time it was packed. With --commits the tree
-# is HEAD's (the diff is commits only, so is the snapshot). Called only as a
+# is HEAD's (the diff is commits only, so is the snapshot), skip-worktree
+# entries left out as for the working copy. Called only as a
 # plain statement (see run_pack): on the left of || or in an if, set -e inside
 # it would be off, and a failed step would pack a stale tree as a success.
 pack() (
@@ -450,13 +492,10 @@ pack() (
   home_check pack
   o=$(cd "$(git rev-parse --git-path objects)" && pwd); rm -rf "$k"; mkdir "$k"
   cp -p "$(git rev-parse --git-path index)" "$k/i" 2>/dev/null || :; f=$(git rev-parse --show-object-format 2>/dev/null) || :; case $f in sha1|sha256) g=--object-format=$f;; *) g=;; esac; mkdir -p "$k/o/info"; printf '%s\n' "$o" > "$k/o/info/alternates"; export GIT_INDEX_FILE="$k/i" GIT_OBJECT_DIRECTORY="$k/o"; s='-c splitIndex.maxPercentChange=100'
-  if [ "$scope" = commits ]; then
-    git $s read-tree HEAD
-  else
-    git ls-files -z -t > "$k/l"; xargs -0 sh -c 'for e; do case $e in "S "*) printf "%s\0" "${e#S }";; esac; done' sh < "$k/l" > "$k/s"
-    git $s update-index -z --force-remove --stdin < "$k/s"
-    add_all $s
-  fi
+  git ls-files -z -t > "$k/l"; xargs -0 sh -c 'for e; do case $e in "S "*) printf "%s\0" "${e#S }";; esac; done' sh < "$k/l" > "$k/s"
+  [ "$scope" = commits ] && git $s read-tree "$to"
+  git $s update-index -z --force-remove --stdin < "$k/s"
+  [ "$scope" = commits ] || add_all $s
   git $s update-index -z --force-remove --stdin < "$drop"
   t=$(git $s write-tree); printf '%s\n' "$t" > "$k/t"
   c=$(GIT_AUTHOR_NAME=omb GIT_AUTHOR_EMAIL=omb GIT_AUTHOR_DATE='946684800 +0000' GIT_COMMITTER_NAME=omb GIT_COMMITTER_EMAIL=omb GIT_COMMITTER_DATE='946684800 +0000' git commit-tree --no-gpg-sign -m omb "$t")
@@ -511,6 +550,7 @@ manifest() { # $1: what the snapshot part says
   [ -n "$diff_notutf8" ] && line="$line. Left out of the diff as not UTF-8 text: $diff_notutf8"
   [ -n "$diff_new" ] && line="$line. The diff includes $diff_new"
   [ -n "$ctx_skipped" ] && line="$line. Not sent (secret-named, not listed by git, outside the repository, not a regular file, through a symlink, or not UTF-8): $ctx_skipped"
+  [ -n "$ctx_dotdot" ] && line="$line. Not sent (a path with '..'; give it below the current folder, or as a full path): $ctx_dotdot"
   if [ "$scan_off" = 1 ]; then
     line="$line. Credential scan: off (OHMYBUG_SECRET_SCAN=0)."
   elif [ -n "$dropped" ]; then

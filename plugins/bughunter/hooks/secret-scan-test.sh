@@ -193,13 +193,13 @@ SWAP_TOP="$FX/swap" SWAP_TO="$FX/away" PYTHONPATH="$FX/swapper" PATH="$FX/nodi/b
 check "paths: a directory swapped for a link mid-call sends the checked file" \
   "$rc:$(field "[(f['path'], f['content']) for f in o['updatedInput']['files']]")" "0:[('sub/d.ts', 'here\\n')]"
 check "paths: ...and the swap really happened under the walk" "$([ -L "$FX/swap/sub" ] && [ -d "$FX/swap/sub.real" ] && echo yes)" yes
-# Every fd is closed as the walk goes: a long list under a small fd limit loses nothing.
 # Line endings: the file is read as text with universal newlines, as before
 # the read moved into omb_scan.read_listed: CRLF and a lone CR become LF.
 printf 'a\r\nb\rc\n' > "$FX/repo/crlf.ts"
 fillrun "$FX/repo" '["crlf.ts"]'
 check "paths: CRLF and a lone CR are read as LF" "$rc:$(field "[f['content'] for f in o['updatedInput']['files']]")" "0:['a\\nb\\nc\\n']"
 rm -f "$FX/repo/crlf.ts"
+# Every fd is closed as the walk goes: a long list under a small fd limit loses nothing.
 many=$(python3 -c "import json; print(json.dumps(['sub/d.ts'] * 100 + ['.git/config'] * 50))")
 check "paths: 150 paths under a 32-fd limit, every listed one filled" \
   "$(ulimit -n 32; fillrun "$FX/repo" "$many"; field "len(o['updatedInput']['files'])")" 100
