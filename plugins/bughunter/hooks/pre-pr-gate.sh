@@ -29,7 +29,7 @@
 
 INPUT=$(cat)
 
-DECIDE=$(printf '%s' "$INPUT" | python3 -c '
+DECIDE=$(printf '%s' "$INPUT" | python3 -I -c '
 import json, re, shlex, sys
 
 MERGERS = (("gh", "pr", "merge"), ("glab", "mr", "merge"))

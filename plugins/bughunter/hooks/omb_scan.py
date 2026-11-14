@@ -1,7 +1,8 @@
 """The credential detector: the one copy of the shapes.
 
-hooks/secret-scan.sh imports it. It lives in the skill folder so that every
-install that has the skill has the detector.
+secret-scan.sh, beside it, imports it. It lives in hooks/, not in the skill
+folder: the merge gate treats skills/ as prose, and an edit to the detector
+must count as a code change.
 
 Only high-signal shapes: a token with a vendor prefix, a private-key block, a
 file whose name says it holds keys. A false refusal costs a rerun and teaches

@@ -22,7 +22,7 @@ INPUT=$(cat 2>/dev/null) || exit 0
 # cannot know anything, and a hook that cannot know anything must stand down:
 # it fires at the end of EVERY turn, so a false block is far more expensive
 # than a missed reminder.
-FIELDS=$(printf '%s' "$INPUT" | python3 -c '
+FIELDS=$(printf '%s' "$INPUT" | python3 -I -c '
 import json, sys
 try:
     d = json.load(sys.stdin)

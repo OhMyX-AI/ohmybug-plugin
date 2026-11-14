@@ -331,7 +331,7 @@ ohmybug_tools_allowed() {
   # permission surface Codex does not have. So Codex answers "allowed": the
   # tools work there, and an unfinished hunt is the thing to finish.
   [ -n "${PLUGIN_DATA:-}" ] && return 0
-  python3 - "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json" \
+  python3 -I - "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json" \
     "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/settings.json" \
     "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/settings.local.json" <<'PY' 2>/dev/null
 import json, sys

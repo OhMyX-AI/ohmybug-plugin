@@ -3263,5 +3263,53 @@ if [ "$(git status --porcelain | grep -v "$SCRATCH" || true)" != "$TREE_BEFORE" 
   fails=$((fails + 1))
 fi
 
+# PLANTED MODULES NEVER RUN. Every hook starts python inside the user's
+# repository, where a json.py, re.py, shlex.py or hashlib.py would be imported
+# in place of the standard one: code of the repository's choosing inside the
+# gate, the recorder and the notices. Every hook call is `python3 -I`. Here a
+# repository carries those modules, each leaving a mark; every hook runs with
+# that repository as its working directory, must still do its job, and must
+# leave no mark. Payloads are built before the cd: the test's own python is
+# not what is on trial.
+PLD=$(mktemp -d); PL="$PLD/repo"; mkrepo "$PL"
+for m in json re shlex hashlib; do printf 'open("%s", "w").close()\nraise ImportError("planted")\n' "$PLD/ran" > "$PL/$m.py"; done
+printf 'dirty\n' >> "$PL/a.ts"
+plj() { python3 -c 'import json,sys; print(json.dumps(json.loads(sys.argv[1].replace("@PL@", sys.argv[2]))))' "$1" "$PL"; }
+plrow() { # name, want, got
+  local ran=no; [ -e "$PLD/ran" ] && ran=imported; rm -f "$PLD/ran"
+  [ "$3:$ran" = "$2:no" ] || { printf 'FAIL planted modules: %s: got %s (a planted module: %s), want %s\n' "$1" "$3" "$ran" "$2"; fails=$((fails + 1)); }
+}
+IN=$(plj '{"tool_input":{"command":"gh pr merge 5 --squash"},"cwd":"@PL@"}')
+plrow "pre-pr-gate.sh still blocks the unhunted merge" 2 "$(printf '%s' "$IN" | (cd "$PL" && bash "$G/pre-pr-gate.sh" >/dev/null 2>&1); echo $?)"
+IN=$(plj '{"tool_name":"mcp__plugin_bughunter_ohmybug__submit_review","tool_input":{"diff":"+junk"},"tool_response":{"content":[{"type":"text","text":"{\"review_id\":\"rev_pl\",\"status\":\"running\"}"}]},"cwd":"@PL@"}')
+out=$(printf '%s' "$IN" | (cd "$PL" && bash "$G/stamp-hunt.sh" 2>/dev/null))
+plrow "stamp-hunt.sh still records and speaks" yes "$(case "$out" in *"does not match this working tree"*) [ -e "$(cd "$PL" && ohmybug_hunt_dir).pending/rev_pl" ] && echo yes ;; esac)"
+IN=$(plj '{"hook_event_name":"Stop","stop_hook_active":false,"cwd":"@PL@"}')
+plrow "pending-nudge.sh still holds the turn on the unread hunt" 2 "$(printf '%s' "$IN" | (cd "$PL" && bash "$G/pending-nudge.sh" >/dev/null 2>&1); echo $?)"
+mkdir -p "$PLD/h0/.claude"; printf '{"permissions":{"allow":["mcp__plugin_bughunter_ohmybug__*"]}}\n' > "$PLD/h0/.claude/settings.json"
+plrow "diff-id.sh still reads the permission rule" 0 "$(cd "$PL" && HOME="$PLD/h0" CLAUDE_PROJECT_DIR="$PL" PLUGIN_DATA= ohmybug_tools_allowed; echo $?)"
+IN=$(plj '{"tool_name":"mcp__plugin_bughunter_ohmybug__get_balance","tool_response":{"content":[{"type":"text","text":"{\"bugarium\":{\"vote\":{\"url\":\"https://example.invalid/bugs/vote/7\",\"closes_at\":\"2026-09-28T04:00:00.000Z\"}}}"}]}}')
+plrow "bugarium-notice.sh still hands the vote over" yes "$(printf '%s' "$IN" | (cd "$PL" && bash "$G/bugarium-notice.sh" 2>/dev/null) | grep -q 'example.invalid/bugs/vote/7' && echo yes)"
+plrow "first-run.sh still gives its notice" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s1" HOME="$PLD/h1" CLAUDE_PROJECT_DIR="$PLD/p1" PLUGIN_DATA= bash "$G/first-run.sh" </dev/null 2>/dev/null | grep -q . && echo yes)"
+plrow "scan-hint.sh still names the commands" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s2" HOME="$PLD/h2" PLUGIN_DATA= bash "$G/scan-hint.sh" 2>/dev/null | grep -q '/bughunter:scan' && echo yes)"
+plrow "tools-check.sh still asks for the tools check" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s3" HOME="$PLD/h3" PLUGIN_DATA= bash "$G/tools-check.sh" 2>/dev/null | grep -q 'additionalContext' && echo yes)"
+rm -rf "$(cd "$PL" && ohmybug_hunt_dir)" "$(cd "$PL" && ohmybug_hunt_dir).pending" "$PLD"
+
+# THE DETECTOR IS CODE. The gate's sig: id leaves prose out, and skills/ is
+# prose: a detector kept there could be edited after the hunt without
+# re-arming the gate. It lives in hooks/, inside the sig: pathspec.
+git ls-files -- $OHMYBUG_SKIP_GLOBS | grep -qx 'plugins/bughunter/hooks/omb_scan.py' \
+  || { echo "FAIL detector: hooks/omb_scan.py is not a file the sig: id reads"; fails=$((fails + 1)); }
+SGD=$(mktemp -d); SG="$SGD/repo"; mkrepo "$SG"
+mkdir -p "$SG/plugins/bughunter/hooks" "$SG/plugins/bughunter/skills/bughunter"
+printf 'SHAPES = []\n' > "$SG/plugins/bughunter/hooks/omb_scan.py"; printf 'prose\n' > "$SG/plugins/bughunter/skills/bughunter/SKILL.md"
+git -C "$SG" add -A && git -C "$SG" commit -qm detector && git -C "$SG" update-ref refs/remotes/origin/main HEAD
+printf 'more prose\n' >> "$SG/plugins/bughunter/skills/bughunter/SKILL.md"
+sig0=$(cd "$SG" && ohmybug_sig_id)
+printf 'SHAPES = [1]\n' > "$SG/plugins/bughunter/hooks/omb_scan.py"
+sig1=$(cd "$SG" && ohmybug_sig_id)
+[ -n "$sig1" ] && [ "$sig0" != "$sig1" ] || { echo "FAIL detector: an edit to hooks/omb_scan.py did not change sig: ($sig0 / $sig1)"; fails=$((fails + 1)); }
+rm -rf "$SGD"
+
 rm -rf "$HOME"
 if [ "$fails" = 0 ]; then echo "gate+stamp: ok"; else echo "gate+stamp: $fails failing"; exit 1; fi

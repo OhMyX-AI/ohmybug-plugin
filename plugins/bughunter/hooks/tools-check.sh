@@ -28,7 +28,7 @@ set -euo pipefail
 
 NOTE='First thing this session: confirm the OhMyBug MCP tools (mcp__plugin_bughunter_ohmybug__*) are present. If they are not, tell the user once, now — a session that began without them will not get them, and a restart (claude -c) usually does — then let the user decide and go on with what they asked; do not leave the discovery to the merge gate hours later.'
 
-python3 - "$NOTE" <<'PY' || exit 0
+python3 -I - "$NOTE" <<'PY' || exit 0
 import json, sys
 print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": sys.argv[1]}}))
 PY

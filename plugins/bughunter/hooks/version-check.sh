@@ -9,7 +9,7 @@ STATE=${OMB_VERSION_STATE_DIR:-${OMB_STATE_DIR:-$HOME/.ohmybug}}
 URL=${OMB_VERSION_URL:-https://raw.githubusercontent.com/OhMyX-AI/ohmybug-plugin/main/plugins/bughunter/.codex-plugin/plugin.json}
 CLIENT=${OMB_VERSION_CLIENT:-}
 
-installed=$(python3 - "$MANIFEST" <<'PY'
+installed=$(python3 -I - "$MANIFEST" <<'PY'
 import json, sys
 try:
     value = json.load(open(sys.argv[1])).get('version', '')
@@ -20,10 +20,10 @@ PY
 ) || exit 0
 [ -n "$installed" ] || exit 0
 
-latest=$(curl -fsSL --max-time 2 "$URL" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", ""))' 2>/dev/null) || exit 0
+latest=$(curl -fsSL --max-time 2 "$URL" 2>/dev/null | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("version", ""))' 2>/dev/null) || exit 0
 [ -n "$latest" ] || exit 0
 
-is_newer=$(python3 - "$installed" "$latest" <<'PY'
+is_newer=$(python3 -I - "$installed" "$latest" <<'PY'
 import re, sys
 
 def ver(s):
@@ -49,7 +49,7 @@ if [ "$CLIENT" = codex ]; then
 else
   NOTE="OhMyBug: bughunter $latest is available (you have $installed). Update Claude Code with: /plugin update bughunter. Then restart the session."
 fi
-python3 - "$NOTE" <<'PY'
+python3 -I - "$NOTE" <<'PY'
 import json, sys
 note = sys.argv[1]
 print(json.dumps({

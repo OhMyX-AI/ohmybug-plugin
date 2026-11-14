@@ -6,7 +6,7 @@
 # does — Claude Code of any version, and Codex — so the same diff is refused
 # everywhere, headless runs included (a refusal, never a dialog nobody answers).
 #
-# The detector itself is skills/bughunter/omb_scan.py, the one copy of the
+# The detector itself is omb_scan.py beside this hook, the one copy of the
 # shapes: high-signal ones only, every value masked. This hook reads the call.
 #
 # It reads whatever payload the call carries: submit_review's diff and files,
@@ -56,8 +56,8 @@ command -v python3 >/dev/null 2>&1 || {
 # -I: no PYTHON* variables, and neither the session's folder nor the user's site
 # on sys.path. The hook runs inside the user's repository, where a json.py
 # would otherwise be imported in place of the standard one. -B: no bytecode
-# written into the skill folder (-I ignores PYTHONDONTWRITEBYTECODE).
-OUT=$(printf '%s' "$INPUT" | OMB_SCAN_DIR="$(dirname "$0")/../skills/bughunter" python3 -I -B -c '
+# written into the plugin folder (-I ignores PYTHONDONTWRITEBYTECODE).
+OUT=$(printf '%s' "$INPUT" | OMB_SCAN_DIR="$(dirname "$0")" python3 -I -B -c '
 import json, os, re, sys
 d = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
 if os.environ.get("OHMYBUG_TEST_SCAN_RAISE"):

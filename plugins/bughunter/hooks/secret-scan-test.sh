@@ -150,8 +150,15 @@ check "paths: skipped ones are named to the agent" "$(field "o['additionalContex
   " (missing, unreadable, not a regular file, a symlink, under .git or outside the repository): alias.ts, nope.ts, sub, .git/config, out.ts, ../outside.ts, lnk/d.ts."
 # Where python has no dir_fd (Windows): os.open refuses dir_fd as it does there, so
 # a run that took the dir_fd branch fails; links are refused by the realpath check.
+# The hook runs python3 -I, which ignores PYTHONPATH: this row and the next one
+# run a python3 that drops the -I, so their shims load, and each shim leaves a
+# mark to prove it did. The rows are about the walk, not the flag.
+mkdir -p "$FX/nodi/bin" && printf '#!/bin/sh\n[ "$1" = -I ] && shift\nexec %s "$@"\n' "$(command -v python3)" > "$FX/nodi/bin/python3" && chmod +x "$FX/nodi/bin/python3"
 mkdir -p "$FX/nodirfd" && cat > "$FX/nodirfd/sitecustomize.py" <<'PY'
 import os
+# fillrun's own python loads this file too: only the hook's interpreter, which has the detector's folder, leaves the mark.
+if os.environ.get("OMB_SCAN_DIR"):
+    open(os.environ["SHIM_MARK"], "w").close()
 _open = os.open
 def _no_dir_fd(path, flags, mode=0o777, *, dir_fd=None):
     if dir_fd is not None:
@@ -160,7 +167,8 @@ def _no_dir_fd(path, flags, mode=0o777, *, dir_fd=None):
 os.open = _no_dir_fd
 os.supports_dir_fd = set()
 PY
-PYTHONPATH="$FX/nodirfd" fillrun "$FX/repo" '["a.ts","alias.ts","out.ts","sub/d.ts","lnk/d.ts"]'
+SHIM_MARK="$FX/nodirfd.loaded" PYTHONPATH="$FX/nodirfd" PATH="$FX/nodi/bin:$PATH" fillrun "$FX/repo" '["a.ts","alias.ts","out.ts","sub/d.ts","lnk/d.ts"]'
+check "paths: the no-dir_fd shim really loaded in the hook's python" "$([ -e "$FX/nodirfd.loaded" ] && echo yes)" yes
 check "paths: without dir_fd links are still refused" \
   "$rc:$(field "[f['path'] for f in o['updatedInput']['files']]")" "0:['a.ts', 'sub/d.ts']"
 # The bytes come from the fd that was checked: a directory swapped for a link to
@@ -181,10 +189,7 @@ def _swap(path, flags, mode=0o777, *, dir_fd=None):
 os.open = _swap
 os.supports_dir_fd.add(_swap)
 PY
-# The hook runs python3 -I, which ignores PYTHONPATH: this row's python3 drops
-# the -I, so the swapper loads. The row is about the walk, not the flag.
-mkdir -p "$FX/swapper/bin" && printf '#!/bin/sh\n[ "$1" = -I ] && shift\nexec %s "$@"\n' "$(command -v python3)" > "$FX/swapper/bin/python3" && chmod +x "$FX/swapper/bin/python3"
-SWAP_TOP="$FX/swap" SWAP_TO="$FX/away" PYTHONPATH="$FX/swapper" PATH="$FX/swapper/bin:$PATH" fillrun "$FX/swap" '["sub/d.ts"]'
+SWAP_TOP="$FX/swap" SWAP_TO="$FX/away" PYTHONPATH="$FX/swapper" PATH="$FX/nodi/bin:$PATH" fillrun "$FX/swap" '["sub/d.ts"]'
 check "paths: a directory swapped for a link mid-call sends the checked file" \
   "$rc:$(field "[(f['path'], f['content']) for f in o['updatedInput']['files']]")" "0:[('sub/d.ts', 'here\\n')]"
 check "paths: ...and the swap really happened under the walk" "$([ -L "$FX/swap/sub" ] && [ -d "$FX/swap/sub.real" ] && echo yes)" yes
@@ -221,16 +226,17 @@ case "$err" in *"not inside one"*) echo "ok   paths: ...and the agent is told to
 
 FM="$FX/filemode"; mkdir -p "$FM"
 # One detector: the hook carries no second copy of the shapes.
-grep -q 'SHAPES = \[' "$G/secret-scan.sh" && { echo "FAIL the hook carries its own copy of the shapes"; fails=$((fails + 1)); } || echo "ok   one detector, in the skill folder"
+grep -q 'SHAPES = \[' "$G/secret-scan.sh" && { echo "FAIL the hook carries its own copy of the shapes"; fails=$((fails + 1)); } || echo "ok   one detector, beside the hook"
 # Not installed beside the skill (a skill-only install moved the hook), the hook refuses.
 mkdir -p "$FM/lone"; cp "$G/secret-scan.sh" "$FM/lone/"
 rc=$(printf '%s' "{\"tool_name\":\"mcp__plugin_bughunter_ohmybug__submit_review\",\"tool_input\":{\"diff\":\"+print(1)\"}}" | OHMYBUG_TEST_STAMP="$STUB/stamp.sh" bash "$FM/lone/secret-scan.sh" >/dev/null 2>&1; echo $?)
 check "a hook that cannot find the detector refuses" "$rc" 2
-# A json.py in the session's folder (the user's repository) is never imported:
-# it would run inside the hook, and could pass a payload unscanned.
+# A json.py or re.py in the session's folder (the user's repository) is never
+# imported: it would run inside the hook, and could pass a payload unscanned.
 mkdir -p "$FM/repo"; printf 'open("%s", "w").close()\nloads = lambda *a, **k: {}\n' "$FM/imported" > "$FM/repo/json.py"
+printf 'open("%s", "w").close()\nraise ImportError("planted")\n' "$FM/imported" > "$FM/repo/re.py"
 rc=$(printf '%s' "{\"tool_name\":\"mcp__plugin_bughunter_ohmybug__submit_review\",\"tool_input\":{\"diff\":\"+k = $AWS\"}}" | (cd "$FM/repo" && bash "$G/secret-scan.sh" >/dev/null 2>&1); echo $?)
-check "a json.py in the session folder is not imported, and the key is still refused" "$rc:$([ -e "$FM/imported" ] && echo imported || echo no)" "2:no"
-[ -e "$G/../skills/bughunter/__pycache__" ] && { echo "FAIL the scan wrote bytecode into the skill folder"; fails=$((fails + 1)); } || echo "ok   no bytecode in the skill folder"
+check "a json.py or re.py in the session folder is not imported, and the key is still refused" "$rc:$([ -e "$FM/imported" ] && echo imported || echo no)" "2:no"
+[ -e "$G/__pycache__" ] && { echo "FAIL the scan wrote bytecode into the plugin folder"; fails=$((fails + 1)); } || echo "ok   no bytecode in the plugin folder"
 
 [ "$fails" = 0 ] && echo "secret-scan: all rows pass" || { echo "secret-scan: $fails failing"; exit 1; }

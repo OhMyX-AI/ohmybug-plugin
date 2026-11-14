@@ -21,7 +21,7 @@ set -u
 
 INPUT=$(cat 2>/dev/null) || exit 0
 
-FIELDS=$(printf '%s' "$INPUT" | python3 -c '
+FIELDS=$(printf '%s' "$INPUT" | python3 -I -c '
 import hashlib, json, re, sys
 try:
     d = json.load(sys.stdin)
@@ -266,7 +266,7 @@ say() { # sentence -> the agent, result intact (+ the live page to the user, onc
   if [ -n "${LIVE_MSG:-}" ]; then
     if [ -n "$s" ]; then s="${s%.}. Also: $(live_note)"; else s="ohmybug: $(live_note)"; fi
   fi
-  python3 -c 'import json, sys
+  python3 -I -c 'import json, sys
 out = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": sys.argv[1]}}
 if sys.argv[2]:
     out["systemMessage"] = sys.argv[2]

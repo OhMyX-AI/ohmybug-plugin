@@ -26,4 +26,10 @@ printf '{"version":"0.82.0"}\n' > "$TMP/plugin/.codex-plugin/plugin.json"
 printf '{"version":"not-semver"}\n' > "$TMP/latest.json"
 out=$(run); [ -z "$out" ]
 [ "$(cat "$TMP/state/version-notice-v1-codex")" = 'codex:0.80.0->0.82.0' ]
+# A json.py or re.py in the session's folder is never imported: the notice still comes.
+mkdir -p "$TMP/pl"; for m in json re; do printf 'open("%s", "w").close()\nraise ImportError("planted")\n' "$TMP/ran" > "$TMP/pl/$m.py"; done
+printf '{"version":"0.80.0"}\n' > "$TMP/plugin/.codex-plugin/plugin.json"; printf '{"version":"0.81.0"}\n' > "$TMP/latest.json"; rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+out=$(cd "$TMP/pl" && run)
+echo "$out" | grep -q '0.81.0 is available'
+[ ! -e "$TMP/ran" ]
 echo 'version-check: ok'

@@ -17,7 +17,7 @@ set -u
 
 INPUT=$(cat 2>/dev/null) || exit 0
 
-printf '%s' "$INPUT" | python3 -c '
+printf '%s' "$INPUT" | python3 -I -c '
 import json, re, sys
 try:
     d = json.load(sys.stdin)

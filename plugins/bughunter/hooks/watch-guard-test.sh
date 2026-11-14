@@ -46,5 +46,10 @@ check "foreground loop passes" "$(hook "$HAND" false)" 0
 check "a loop over another URL passes" "$(hook 'while :; do curl -fsS https://example.com/health; sleep 30; done' true)" 0
 # Garbage in is never a refusal.
 check "unparseable input passes" "$(printf 'not json' | sh "$G/watch-guard.sh" 2>/dev/null; echo $?)" 0
+# A json.py or re.py in the session's folder is never imported: the hook still refuses.
+PL=$(mktemp -d); for m in json re; do printf 'open("%s", "w").close()\nraise ImportError("planted")\n' "$PL/ran" > "$PL/$m.py"; done
+IN=$(python3 -c "import json,sys; print(json.dumps({'tool_name':'Bash','tool_input':{'command':sys.argv[1],'run_in_background':True}}))" "$HAND")
+check "planted json.py and re.py: not imported, still refused" "$(printf '%s' "$IN" | (cd "$PL" && sh "$G/watch-guard.sh" >/dev/null 2>&1); echo "$?:$([ -e "$PL/ran" ] && echo imported || echo no)")" "2:no"
+rm -rf "$PL"
 
 [ "$fails" -eq 0 ] && echo "watch-guard: ok" || { echo "watch-guard: $fails failing"; exit 1; }

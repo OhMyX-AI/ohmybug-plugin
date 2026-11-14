@@ -49,7 +49,7 @@ command -v python3 >/dev/null 2>&1 || exit 0
 INPUT=$(cat 2>/dev/null) || INPUT=
 
 mkdir -p "$STATE"
-printf '%s' "$INPUT" | python3 -c '
+printf '%s' "$INPUT" | python3 -I -c '
 import json, os, sys
 state, home, proj = sys.argv[1:4]
 try:
