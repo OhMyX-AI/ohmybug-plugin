@@ -94,8 +94,8 @@ def once(mark):
 
 auto = d.get("permission_mode") == "auto"
 say, ctx = None, None
-# One mark per server name: the plugin's keeps the old name, so a machine that
-# heard it once is not told again; a second server's rule is told once of its own.
+# One mark per server name: the plugin server keeps the old name, so a machine that
+# heard it once is not told again; a second server gets one notice of its own.
 mark = "permission-notice-v1" + ("" if P == "mcp__plugin_bughunter_ohmybug" else "-" + P)
 if not mentioned:
     if once(mark):
