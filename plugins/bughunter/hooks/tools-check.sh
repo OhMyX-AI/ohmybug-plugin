@@ -26,10 +26,11 @@ set -euo pipefail
 
 [ -n "${PLUGIN_DATA:-}" ] && exit 0
 
-# A user who also added the README's key server (`claude mcp add ... ohmybug`) gets
-# that server's tools, mcp__ohmybug__*: Claude Code hides the plugin's server of the
-# same URL as a duplicate, and the hunt works through the other name.
-NOTE='First thing this session: confirm the OhMyBug MCP tools are present: mcp__plugin_bughunter_ohmybug__*, or mcp__ohmybug__* when the user added the OhMyBug server with claude mcp add (Claude Code then hides the plugin'"'"'s server of the same URL; the hunt works through those tools: use them, and tell the user so in one line). If neither is there, tell the user once, now — a session that began without them will not get them, and a restart (claude -c) usually does — then let the user decide and go on with what they asked; do not leave the discovery to the merge gate hours later.'
+# A user who also added the key server of the README (`claude mcp add ... ohmybug`)
+# gets its tools, mcp__ohmybug__*: Claude Code hides the plugin server of the same
+# URL. The hunt works there; only a permission rule must use that name, and the
+# assistant is the one place that knows which name this session has.
+NOTE='First thing this session: confirm the OhMyBug MCP tools (mcp__plugin_bughunter_ohmybug__*) are present. If only mcp__ohmybug__* is there, the user added the OhMyBug server with claude mcp add and Claude Code hides the plugin server of the same URL: the hunt works through those tools, so say nothing about it now, but wherever advice names a permission rule mcp__plugin_bughunter_ohmybug__..., give the user the matching mcp__ohmybug__... name instead. If neither is there, tell the user once, now — a session that began without them will not get them, and a restart (claude -c) usually does — then let the user decide and go on with what they asked; do not leave the discovery to the merge gate hours later.'
 
 python3 - "$NOTE" <<'PY' || exit 0
 import json, sys
