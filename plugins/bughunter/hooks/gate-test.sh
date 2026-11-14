@@ -2748,7 +2748,7 @@ upload_block() { # SKILL.md's upload block, its placeholders filled
   python3 - plugins/bughunter/skills/bughunter/SKILL.md "$1" <<'PY'
 import re, sys
 s = open(sys.argv[1]).read()
-m = re.search(r"```bash\n(\(set -e;[^`]*?omb-upload\.sh[^`]*?)```", s, re.S)
+m = re.search(r"```bash\n(\([^`]*?omb-upload\.sh[^`]*?)```", s, re.S)
 print(m.group(1).replace("<skill_dir>", sys.argv[2] + "/skills/bughunter").replace("<upload_url>", "https://mcp.ohmybug.ai/u/tok")
       .replace("<snapshot>", "required").replace("<base_branch>", "main") if m else "")
 PY
