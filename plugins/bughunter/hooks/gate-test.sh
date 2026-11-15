@@ -3230,14 +3230,14 @@ Cite lines as they stand at the hunted commit. If you or the user changed a cite
 `git cat-file -e <hunted commit>:<path>` (the file is tracked there)
 `git diff --quiet <hunted commit> -- <path>`
 A hunt with no hunted commit (no `meta.ref`: uncommitted work or a folder sent as files) takes no dispute.
-Where the plugin's hooks do not run (Windows), do not dispute
+Where the plugin's hooks do not run (Windows, or Codex before the user trusts them in `/hooks`), do not dispute
 A path the finding names outside the repository is not read.
 A dispute you change after their yes (an item dropped or fixed) goes back to them first.
 A refused call sent nothing and is not your one dispute.
-the `dispute-envoy` subagent (it can only Read and Grep)
-Elsewhere, read it yourself with read-only commands.
+If your agent types list `bughunter:dispute-envoy`, hand it, by that exact name,
+If the list does not have it, or the handoff fails to start, read the evidence yourself with read-only commands.
 at most 5 `{path, line, note}` items, each path relative to the repository root and never a file that holds keys
-a claim under 1500 characters, at most 2 quoted lines per note, and never a secret-looking value
+a claim of at most 1500 characters, at most 2 quoted lines and 400 characters per note, and never a secret-looking value
 If the evidence holds no line that disproves or limits the finding, or the subagent's answer is not the JSON it was asked for, do not dispute.
 **The user says yes first.**
 send the dispute only on their yes
@@ -3253,7 +3253,7 @@ DISPUTE
 ENVOY=plugins/bughunter/agents/dispute-envoy.md
 [ "$(awk '/^---$/{n++; next} n==1 && /^tools:/' "$ENVOY" 2>/dev/null)" = 'tools: Read, Grep' ] \
   || { echo "FAIL dispute: $ENVOY front matter must grant exactly 'tools: Read, Grep'"; fails=$((fails + 1)); }
-[ "$(awk '/^---$/{n++; next} n==1 && /^name:/' "$ENVOY" 2>/dev/null)" = 'name: dispute-envoy' ] && grep -qF '`dispute-envoy` subagent' plugins/bughunter/skills/bughunter/SKILL.md \
+[ "$(awk '/^---$/{n++; next} n==1 && /^name:/' "$ENVOY" 2>/dev/null)" = 'name: dispute-envoy' ] && grep -qF '`bughunter:dispute-envoy`' plugins/bughunter/skills/bughunter/SKILL.md \
   || { echo "FAIL dispute: the skill names a subagent the plugin does not ship as dispute-envoy"; fails=$((fails + 1)); }
 EFLAT=$(tr '\n' ' ' <"$ENVOY" 2>/dev/null | tr -s ' ')
 while IFS= read -r rule; do
@@ -3264,7 +3264,7 @@ open each by its absolute path under the repository root you were given, and nev
 Never cite a file in the changed list
 Never copy a secret-looking value
 At most 5 evidence items
-A note quotes at most 2 lines of code.
+A note is under 400 characters and quotes at most 2 lines of code.
 answer `{"dispute": false
 ENVOYRULES
 

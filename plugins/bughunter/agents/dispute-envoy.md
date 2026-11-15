@@ -27,11 +27,11 @@ Do this:
 3. Answer with exactly one JSON object and nothing else:
 
 ```json
-{"dispute": true, "claim": "<what the code does instead, in plain words, under 1500 characters>",
+{"dispute": true, "claim": "<what the code does instead, in plain words, at most 1500 characters>",
  "evidence": [{"path": "<path relative to the repository root>", "line": 42, "note": "<why this line matters; at most 2 quoted lines>"}]}
 ```
 
    - At most 5 evidence items, each a real line you read.
-   - A note quotes at most 2 lines of code.
+   - A note is under 400 characters and quotes at most 2 lines of code.
    - If you found no line that disproves or limits the finding, answer `{"dispute": false, "why": "<one sentence>"}`.
      Do not stretch: a dispute the service holds changes nothing and uses one of the few disputes a hunt allows.

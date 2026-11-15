@@ -74,9 +74,9 @@ row "a refused provide_files is told to resend, not to hunt again" 2 "$(j "{'rev
 # must be a regular file git lists in the session's repository, reached with no symlink, and not a key file in any
 # letter case: whatever the spelling, and whatever the scan setting.
 DR=$(mktemp -d); (cd "$DR" && git init -q && mkdir -p src keys deploy sub && printf 'x\n' > src/a.py && printf 'x\n' > ci.sh \
-  && printf 'k\n' > keys/id_rsa && printf 'P=1\n' > deploy/.env && printf 'P=1\n' > .env.example && printf 'k\n' > keys/Server.PEM \
+  && printf 'k\n' > keys/id_rsa && printf 'P=1\n' > deploy/.env && printf 'P=1\n' > .env.example && mkdir -p conf && printf 'P=1\n' > conf/.env.example && printf 'k\n' > keys/Server.PEM \
   && printf 'k\n' > keys/Deploy.Key && printf 'k\n' > keys/id_ED25519 && printf 'P=1\n' > .ENV.Local && printf 'u\n' > untracked.txt \
-  && printf 'u\n' > ignored.txt && printf 'ignored.txt\n' > .gitignore && ln -s src/a.py link.py && git add src ci.sh keys deploy .env.example .ENV.Local link.py && git -c user.email=t@t -c user.name=t commit -qm x)
+  && printf 'u\n' > ignored.txt && printf 'ignored.txt\n' > .gitignore && ln -s src/a.py link.py && git add src ci.sh keys deploy conf .env.example .ENV.Local link.py && git -c user.email=t@t -c user.name=t commit -qm x)
 dhook() { # tool_input JSON -> "<exit> <stderr>", run as a challenge_finding from the repository $DR
   python3 -c "import json,sys; sys.stdout.buffer.write(json.dumps({'tool_name':'mcp__plugin_bughunter_ohmybug__challenge_finding','cwd':sys.argv[2],'tool_input':json.loads(sys.argv[1])}, ensure_ascii=False).encode('utf-8'))" "$1" "$DR" \
     | bash "$G/secret-scan.sh" 2>&1 >/dev/null; printf ' %s' "$?"
@@ -111,6 +111,10 @@ OHMYBUG_SECRET_SCAN=0 drow "a dispute citing a key file is refused with the scan
 OHMYBUG_SECRET_SCAN=0 drow "a dispute citing .env is refused with the scan off" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'deploy/.env','line':1}]}")" "  - deploy/.env"
 OHMYBUG_SECRET_SCAN=0 drow "the scan off lets a token in a note through" 0 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':1,'note':'T=$GHP'}]}")"
 drow "a clean dispute passes, ./ prefix and .env.example included" 0 "$(j "{'finding_id':'f','claim':'the caller checks it first','evidence':[{'path':'./src/a.py','line':1,'note':'if x is None: return'},{'path':'.env.example','line':1}]}")"
+drow "a nested template cited with a note passes" 0 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'conf/.env.example','line':1,'note':'P=1 is a sample'}]}")"
+drow "a field named like a key file is not called a key file" 0 "$(j "{'finding_id':'f','claim':'c','tls':{'server.key':'x'}}")"
+drow "a note over 400 characters is refused" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':1,'note':'n'*401}]}")" "longer than 400"
+drow "evidence given as null passes as none" 0 "$(j "{'finding_id':'f','claim':'c','evidence':None}")"
 drow "a dispute with no evidence passes" 0 "$(j "{'finding_id':'f','claim':'the caller checks it first'}")"
 drow "evidence that is not a list names the field" 2 "$(j "{'finding_id':'f','claim':'c','evidence':'src/a.py'}")" "evidence must be a list"
 drow "an evidence item with no path names the field" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'line':1}]}")" "needs a string path"

@@ -11,7 +11,7 @@
 # shapes: high-signal ones only, every value masked. This hook reads the call.
 #
 # It reads whatever payload the call carries: submit_review's diff and files,
-# provide_files' files. A repo+ref submit carries none, so nothing is read.
+# provide_files' files, every string of a challenge_finding. A repo+ref submit carries none, so nothing is read.
 #
 # It also FILLS provide_files' `paths`: the agent names the requested files,
 # and this hook reads them from disk and hands the call on with their contents
@@ -38,7 +38,8 @@ pass() { # the call goes on: a submit is recorded exactly as before
   exit 0
 }
 # The user's way out, in the env block of settings.json: no scan at all. A
-# provide_files still goes through python, which fills its paths unscanned.
+# provide_files still goes through python, which fills its paths unscanned, and
+# a challenge_finding still has its paths checked against git.
 if [ "${OHMYBUG_SECRET_SCAN:-1}" = 0 ]; then
   # A dispute's paths are still held to the repository below: the opt-out skips the credential scan only.
   case "$INPUT" in *'__provide_files"'*|*'__challenge_finding"'*) ;; *) pass ;; esac
@@ -69,7 +70,8 @@ d = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
 if os.environ.get("OHMYBUG_TEST_SCAN_RAISE"):
     raise RuntimeError("forced by the test")
 sys.path.insert(0, os.environ["OMB_SCAN_DIR"])
-from omb_scan import scan_payload, shown
+from omb_scan import scan, scan_payload, shown
+dstrings = []
 ti = d.get("tool_input")
 if ti is None:
     ti = {}
@@ -151,7 +153,8 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
         shape("claim must be a string")
     if len(ti["claim"]) > 1500:
         shape("claim is longer than 1500 characters")
-    ev = ti.get("evidence", [])
+    ev = ti.get("evidence")
+    ev = [] if ev is None else ev
     if not isinstance(ev, list):
         shape("evidence must be a list of {path, line, note}")
     if len(ev) > 5:
@@ -161,6 +164,8 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
             shape("each evidence item needs a string path")
         if e.get("note") is not None and not isinstance(e.get("note"), str):
             shape("an evidence note must be a string")
+        if isinstance(e.get("note"), str) and len(e["note"]) > 400:
+            shape("an evidence note is longer than 400 characters")
         ln = e.get("line")
         if ln is not None and (isinstance(ln, bool) or not isinstance(ln, int) or ln < 1):
             shape("an evidence line must be a whole number from 1")
@@ -183,11 +188,10 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
             bad.append("%s (line %d is past its end)" % (e["path"], e["line"]))
     if bad:
         stop(6, "\n".join("  - " + p for p in bad))
-    strings = []
-
+    # Scanned by content only (scan, not scan_payload): a label is not a file name, so it never meets the key-file check.
     def collect(v, where):
         if isinstance(v, str):
-            strings.append({"path": where, "content": v})
+            dstrings.append((where, v))
         elif isinstance(v, dict):
             for k, x in v.items():
                 collect(x, where if k in ("note", "claim") else "%s.%s" % (where, k))
@@ -200,12 +204,14 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
             collect(v, k)
     for i, e in enumerate(ev):
         collect({k: v for k, v in e.items() if k != "path"}, "evidence[%d] note (%s)" % (i, e["path"]))
-    ti = {"files": strings}
-if os.environ.get("OHMYBUG_SECRET_SCAN", "1") == "0":
     ti = {}
+if os.environ.get("OHMYBUG_SECRET_SCAN", "1") == "0":
+    ti, dstrings = {}, []
 
 hits = []
 scan_payload(hits, ti)
+for where, text in dstrings:
+    scan(hits, where, text)
 
 if hits:
     stop(3, "\n".join(shown(hits)))
@@ -227,7 +233,7 @@ if [ "$rc" = 4 ] && [ -n "$OUT" ]; then
 fi
 if [ "$rc" = 6 ] && [ -n "$OUT" ]; then
   {
-    echo "OhMyBug: a dispute cites only files git tracks in this repository, by a path relative to its root (no empty, \".\" or \"..\" part, no symlink), never a file that holds keys. Not sent, because of:"
+    echo "OhMyBug: a dispute cites only lines that exist in files git tracks in this repository, by a path relative to its root (no empty, \".\" or \"..\" part, no symlink), never a file that holds keys. Not sent, because of:"
     printf '%s\n' "$OUT"
     echo "Fix or drop those items; a dispute you change goes back to the user for a new yes before you send it. Or judge the finding without a dispute."
   } >&2
@@ -257,7 +263,7 @@ if [ "$rc" != 3 ] || [ -z "$OUT" ]; then
   exit 2
 fi
 {
-  echo "OhMyBug: this upload carries what looks like credentials, so it was NOT sent:"
+  echo "OhMyBug: this call carries what looks like credentials, so it was NOT sent:"
   printf '%s\n' "$OUT" | LC_ALL=C sed 's/^/  - /'
   case "$INPUT" in
     *'__provide_files"'*) echo "Call provide_files again for the same review without those files (or with each value replaced by [REDACTED]); an empty list is a valid answer. Do not start a new hunt for this." ;;

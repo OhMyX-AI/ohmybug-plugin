@@ -216,7 +216,10 @@ repository per week, and is not a merge gate.
   a `submit_review` or `provide_files` that carries a credential; there,
   without `python3`, it cannot run and lets the call through unscanned (an
   inline diff-mode submit, a `provide_files` answer), saying so in a system
-  message. Not scanned: submits that send no payload (repo + ref) have
+  message. A `challenge_finding` (a dispute, offered to some keys only) is
+  held to tracked files of this repository and lines that exist in them, and
+  every string it carries is scanned; without `python3` it is refused, and its
+  path checks run even with the scan turned off. Not scanned: submits that send no payload (repo + ref) have
   nothing to scan; it does not run on Windows; and a key the patterns miss,
   under a name off the list, is sent. The account's diff mode on
   `/me/policy` sends the diff without the snapshot. When a fast hunt's
@@ -299,6 +302,7 @@ Turn the mod off with
 | `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}`, `upload?` (send the payload out of band), `mode?` (`lite`, `snap` or `fast`; absent: fast, or a routed first step that may go on to fast, see above) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}`; with `upload: true`, also `upload_url`, `snapshot` and, on a fast hunt, maybe `pack: "partial"` (`required`: POST the repository snapshot to `<upload_url>/repo` first, then `{diff, files}` to `upload_url`; with `pack: "partial"` the upload script posts a partial copy to `<upload_url>/repo?pack=partial`; `off`: diff mode, the payload alone) |
 | `get_findings` | `review_id` | `{status: running\|needs_files\|done\|failed, findings[{finding_id, severity, file, line?, title, failure_scenario, suggested_fix?}]}` |
 | `provide_files` | `review_id`, `paths[]` (Claude Code: the plugin's hook reads them from disk) or `files[{path, content}]` | `{status, delivered}` |
+| `challenge_finding` (some keys only) | `finding_id`, `claim`, `evidence[{path, line?, note?}]` (at most 5) | `{outcome: WITHDRAWN\|DOWNGRADED_LOW\|HELD\|null, message, check?}` |
 | `confirm_findings` | `review_id`, `verdicts[{finding_id, verdict: REAL\|NOT_REAL\|UNCLEAR, reason, severity?, known?: {kind: deferred\|accepted, ref}}]` | `{confirmed, minor_confirmed, marked_known?, billed_usd, free_review_used, balance_usd, receipt_id}` |
 | `get_balance` | — | `{balance_usd, free_reviews_left, confirmed_total, stats{…}, modes[{mode, price_usd, typical_s?, found_pct?}], deep_hunt?{price_usd, wide_price_usd, wide_min_chunks, typical_s, found_pct}, route?{first, then}}` |
 

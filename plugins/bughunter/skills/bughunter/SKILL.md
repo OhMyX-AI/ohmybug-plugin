@@ -1406,13 +1406,16 @@ keys only, and without it there is nothing to do here.
   `git diff --quiet <hunted commit> -- <path>` (the hunt's `meta.ref`); a file
   that fails either is not cited. A hunt with no hunted commit (no `meta.ref`:
   uncommitted work or a folder sent as files) takes no dispute.
-- **Gather the evidence read-only, inside the repository.** In Claude Code,
-  hand the finding, your reason, the repository root and the files changed since
-  the hunted commit to the `dispute-envoy` subagent (it can only Read and Grep). Elsewhere, read it yourself with read-only commands. Either
-  way: at most 5 `{path, line, note}` items, each path relative to the
-  repository root and never a file that holds keys (`.env`, `*.pem`, `id_rsa`
-  and the like), a claim under 1500 characters, at most 2 quoted lines per
-  note, and never a secret-looking value (name it instead). A path the
+- **Gather the evidence read-only, inside the repository.** If your agent
+  types list `bughunter:dispute-envoy`, hand it, by that exact name, the
+  finding, your reason, the repository root and the files changed since the
+  hunted commit (`git diff --name-only <hunted commit>`); it can only Read and
+  Grep. If the list does not have it, or the handoff fails to start, read the
+  evidence yourself with read-only commands. Either way: at most 5
+  `{path, line, note}` items, each path relative to the repository root and
+  never a file that holds keys (`.env`, `*.pem`, `id_rsa` and the like), a
+  claim of at most 1500 characters, at most 2 quoted lines and 400 characters
+  per note, and never a secret-looking value (name it instead). A path the
   finding names outside the repository is not read. If the evidence holds no
   line that disproves or limits the finding, or the subagent's answer is not
   the JSON it was asked for, do not dispute.
@@ -1420,8 +1423,8 @@ keys only, and without it there is nothing to do here.
   line, note) and send the dispute only on their yes, as with any file you
   send. A dispute you change after their yes (an item dropped or fixed) goes
   back to them first. With nobody to ask (a headless run), do not dispute.
-  Where the plugin's hooks do not run (Windows), do not dispute: nothing
-  checks it before it is sent. The plugin's
+  Where the plugin's hooks do not run (Windows, or Codex before the user
+  trusts them in `/hooks`), do not dispute: nothing checks it before it is sent. The plugin's
   scan refuses a dispute that quotes a credential or cites a path outside the
   repository (a path git does not list, a symlink, a key file): fix it as
   the refusal says, or judge without a dispute. A refused call sent nothing and
