@@ -1204,7 +1204,7 @@ fresh; run "$P15" "$URL" partial --commits 1
   && ok "PP15 only a binary change: the whole snapshot of HEAD, the reason named" || fail "PP15 binary only: rc $rc $out"
 
 
-# ---- 6b. The server's secret-file and nested-repository rules (snapshot-recipe.ts) ----
+# ---- 6f. The server's secret-file and nested-repository rules (snapshot-recipe.ts) ----
 # SF: kubeconfig files and prefixed .env files leave the snapshot unless their
 # name ends in a lower-case source extension; the case of the name aside.
 SF="$ROOT/sf"; mkdir -p "$SF/src" "$SF/conf"; g -C "$SF" init -q
@@ -1216,6 +1216,19 @@ fresh; run "$SF" "$URL" required --head
 [ "$rc" = 0 ] && [ "$(names)" = "$(printf '%s\n' src/a.py src/kubeconfig_loader.go src/load.env.py | sort)" ] \
   && ok "SF secret files: prod.env, Stage.ENV, my-kubeconfig.yaml, kube_config, .env.local out; load.env.py and kubeconfig_loader.go (source) in" \
   || fail "SF secret files: rc $rc [$(names | tr '\n' ' ')]"
+# SF2: the same rule on the diff, and the fourth pattern and the case rule:
+# a changed prod.env and new app.env.bak, a-kubeconfig.yaml and tool.env.PY
+# (upper-case extension: out) reach neither the tar nor the diff.
+printf 'PASSWORD=changed\n' > "$SF/prod.env"; printf 'X=1\n' > "$SF/app.env.bak"; printf 'x: 1\n' > "$SF/conf/a-kubeconfig.yaml"; printf 'x = 1\n' > "$SF/src/tool.env.PY"
+fresh; run "$SF" "$URL" required --head
+[ "$rc" = 0 ] && [ "$(names)" = "$(printf '%s\n' src/a.py src/kubeconfig_loader.go src/load.env.py | sort)" ] \
+  && ! grep -q 'PASSWORD\|app.env.bak\|a-kubeconfig\|tool.env.PY' "$STUB/payload.1.sent" && printf '%s' "$out" | grep -q 'Left out of the diff as secret-named: .*prod.env' \
+  && ok "SF2 the rule on the diff too: prod.env, app.env.bak, a-kubeconfig.yaml, tool.env.PY out of tar and diff, named" \
+  || fail "SF2 secret files in the diff: rc $rc [$(names | tr '\n' ' ')] $out"
+g -C "$SF" checkout -q -- prod.env; rm -f "$SF/app.env.bak" "$SF/conf/a-kubeconfig.yaml" "$SF/src/tool.env.PY"
+# SF3: GIT_LITERAL_PATHSPECS in the caller's environment changes nothing.
+fresh; out=$(cd "$SF" && GIT_LITERAL_PATHSPECS=1 PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required --head 2>&1); rc=$?
+[ "$rc" = 0 ] && [ "$(names)" = "$(printf '%s\n' src/a.py src/kubeconfig_loader.go src/load.env.py | sort)" ] && ok "SF3 GIT_LITERAL_PATHSPECS=1 set: the same files left out" || fail "SF3 literal pathspecs: rc $rc [$(names | tr '\n' ' ')]"
 # NR: nested repositories. An untracked repo with a commit and one without, a
 # bare one (HEAD beside a config holding a token), a gitlink, and a .gnupg
 # folder: none reaches the tar, each named once on stderr with the server's
@@ -1231,16 +1244,36 @@ printf 'x = 2\n' > "$NR/src/a.py"
 fresh; run "$NR" "$URL" required --head
 [ "$rc" = 0 ] && [ "$(names)" = src/a.py ] && [ "$(printf '%s' "$out" | grep -c 'left out nested repositories and submodules (to hunt a working repository among them, submit it on its own, from inside it):')" = 1 ] \
   && printf '%s' "$out" | grep -qx '  nest1' && printf '%s' "$out" | grep -qx '  nest2' && printf '%s' "$out" | grep -qx '  mirror.git' && printf '%s' "$out" | grep -qx '  sub' \
-  && ! grep -q 'sub' "$STUB/payload.1.sent" \
+  && ! grep -q 'sub\|tok@\|nest1\|nest2' "$STUB/payload.1.sent" \
   && ok "NR nested repos (with and without commits, bare, gitlink) and .gnupg out of the tar, named once; the gitlink is no deletion in the diff" \
   || fail "NR nested: rc $rc [$(names | tr '\n' ' ')] $out"
+# ND: diff mode (off): the diff's tree leaves the untracked ones out and names them.
+fresh; run "$NR" "$URL" off --head
+[ "$rc" = 0 ] && ! grep -q 'tok@\|nest1\|nest2' "$STUB/payload.1.sent" && printf '%s' "$out" | grep -qx '  mirror.git' && printf '%s' "$out" | grep -qx '  nest1' \
+  && ok "ND diff mode: untracked nested and bare repositories out of the diff, named" || fail "ND diff mode: rc $rc $out"
+# NC: --commits: the snapshot is HEAD's tree; a committed bare repository (its
+# config holds a token) and a gitlink are left out and named.
+NC="$ROOT/nc"; mkdir -p "$NC/src" "$NC/tools" "$NC/sub"; g -C "$NC" init -q; printf 'x = 1\n' > "$NC/src/a.py"
+printf 'ref: refs/heads/main\n' > "$NC/tools/HEAD"; printf '[remote "o"]\n\turl = https://tok@example.invalid/r\n' > "$NC/tools/config"
+g -C "$NC" add -A; g -C "$NC" commit -qm base; g -C "$NC" update-index --add --cacheinfo "160000,$(g -C "$NC" rev-parse HEAD),sub"
+printf 'x = 2\n' > "$NC/src/a.py"; g -C "$NC" add src; g -C "$NC" commit -qm two
+fresh; run "$NC" "$URL" required --commits 1
+[ "$rc" = 0 ] && [ "$(names)" = src/a.py ] && printf '%s' "$out" | grep -qx '  tools' && printf '%s' "$out" | grep -qx '  sub' \
+  && ok "NC --commits: a committed bare repository and a gitlink out of HEAD's snapshot, named" || fail "NC commits nested: rc $rc [$(names | tr '\n' ' ')] $out"
+# NEc: nothing left once the credential hits are out: that cause, last line.
+NX="$ROOT/nx"; mkdir -p "$NX"; g -C "$NX" init -q
+{ printf 'k = "%s"\n' "$AWS"; for i in 1 2 3 4 5 6 7 8 9 10; do printf 'pad%s = %s\n' "$i" "$i"; done; printf 'v = 1\n'; } > "$NX/conf.py"
+g -C "$NX" add -A; g -C "$NX" commit -qm base; sed -i.b 's/^v = 1$/v = 2/' "$NX/conf.py"; rm -f "$NX/conf.py.b"
+fresh; run "$NX" "$URL" required --head
+[ "$rc" = 1 ] && ! grep -q '^CURL repo' "$STUB/transcript" && [ "$(printf '%s\n' "$out" | tail -n 1 | grep -c 'nothing is left to pack once the files with a credential match are left out (conf.py)')" = 1 ] \
+  && ok "NEc only credential-hit files: that cause as the last line, nothing sent" || fail "NEc credential empty: rc $rc $out"
 # NE: nothing left once secret-named files and nested repositories are out
 # (top-level .gitignore alone does not count): the server's sentence, exit 1,
 # no snapshot sent.
 NE="$ROOT/ne"; mkdir -p "$NE/inner"; g -C "$NE" init -q; printf '*.log\n' > "$NE/.gitignore"; printf 'A=1\n' > "$NE/.env"
 g -C "$NE/inner" init -q; printf 'i\n' > "$NE/inner/i.py"
 fresh; run "$NE" "$URL" required --all
-[ "$rc" = 1 ] && ! grep -q '^CURL repo' "$STUB/transcript" && printf '%s' "$out" | grep -q '^nothing to pack: this folder has no files after ignored, secret-named and nested-repository paths are left out' \
+[ "$rc" = 1 ] && ! grep -q '^CURL repo' "$STUB/transcript" && [ "$(printf '%s\n' "$out" | tail -n 1)" = "$(sed -n "s/^SNAPSHOT_EMPTY='\(.*\)'$/\1/p" "$UP")" ] \
   && ok "NE nothing left to pack: the server's sentence, exit 1, nothing sent" || fail "NE empty: rc $rc $out"
 # NG: a folder without git: a nested repository in it is named and left out.
 NG="$ROOT/ng"; mkdir -p "$NG/inner"; printf 'x = 1\n' > "$NG/a.py"; g -C "$NG/inner" init -q; printf 'i\n' > "$NG/inner/i.py"; g -C "$NG/inner" add -A; g -C "$NG/inner" commit -qm i

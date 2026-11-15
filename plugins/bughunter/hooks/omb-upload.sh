@@ -97,6 +97,9 @@ SNAPSHOT_NESTED_NOTE='left out nested repositories and submodules (to hunt a wor
 SNAPSHOT_EMPTY='nothing to pack: this folder has no files after ignored, secret-named and nested-repository paths are left out (top-level .gitmodules, .gitignore and .gitattributes alone do not count); nothing was sent. Without a snapshot this ticket expires on its own. A fast hunt can run in diff mode instead, on the diff alone with no repository, so its quality differs: only the user can turn that on, on the account policy page (/me/policy on the server this command uploads to); do not turn it on yourself'
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
+# Every exclude below is pathspec magic; with GIT_LITERAL_PATHSPECS=1 git would
+# read each as a plain file name and leave nothing out.
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
 # -I: no PYTHON* variables and neither this folder nor the user's site on
 # sys.path. The script runs inside the user's repository, where a json.py would
 # otherwise be imported in place of the standard one. -B: no bytecode written
@@ -208,7 +211,7 @@ home_check() { # $1: what is refused (pack, read)
 # `git add -A` that also reaches files outside a sparse checkout's cone: with
 # --sparse where git has it (2.34+; before it, plain add -A has no such
 # refusal). A skip-worktree entry is left as it is either way, never staged as
-# a deletion. $@: options before `add`.
+# a deletion. $1: the NUL pathspec file; then options before `add`.
 add_all() { # $1: a NUL pathspec file (nested's "$1/a"); then options before `add`
   a=$1; shift
   if git add -h 2>&1 | grep -q -E -e '--(\[no-\])?sparse'; then git "$@" add -A --sparse --pathspec-from-file="$a" --pathspec-file-nul
@@ -253,7 +256,8 @@ nested() {
 nested_say() {
   [ -s "$1" ] && [ ! -e "$d/nested-said" ] || return 0
   : > "$d/nested-said"
-  printf '%s\n' "$SNAPSHOT_NESTED_NOTE" >&2; xargs -0 sh -c 'for e; do printf "  %s\n" "$e"; done' sh < "$1" >&2
+  printf '%s\n' "$SNAPSHOT_NESTED_NOTE" >&2
+  tr '\001-\037\177' '?' < "$1" | tr '\0' '\n' | sed '/^$/d; s/^/  /' >&2  # one line per name, no control bytes
 }
 
 # The working copy as a tree (step A): an index copy, a private object
@@ -441,6 +445,12 @@ if blobs:
 
 # Now the bare repository, every object at hand.
 every = names(["--no-renames"], ONLY)
+# The server's secret FILE names, on the diff as in the pack: kubeconfig files
+# and prefixed .env files, unless the name ends in a lower-case source extension.
+SECRET_FILE = re.compile(rb"(?i)(kubeconfig|kube[-_]config|\.env$|\.env[^a-z0-9])")
+SOURCE = re.compile(rb"\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|rb|rs|cs|php|swift|scala|c|cc|cpp|h|hpp|m|ex|exs|dart|lua)$")
+specs = specs + [":(exclude,top,literal)" + os.fsdecode(n) for n in every
+                 if SECRET_FILE.search(n.rsplit(b"/", 1)[-1]) and not SOURCE.search(n.rsplit(b"/", 1)[-1])]
 kept = names(["--no-renames"], specs)
 keptset = set(kept)
 dropped = [n for n in every if n not in keptset]
@@ -596,7 +606,7 @@ pack() (
   for q in $OMB_SECRETS; do set -- "$@" ":(exclude,icase,glob)**/$q" ":(exclude,icase,glob)**/$q/**"; done
   set +f
   git ls-files -- "$@" ':(exclude,literal).gitmodules' ':(exclude,literal).gitignore' ':(exclude,literal).gitattributes' > "$k/e"
-  [ -s "$k/e" ] || { printf '%s\n' "$SNAPSHOT_EMPTY" >&2; exit 1; }
+  [ -s "$k/e" ] || exit 5  # run_pack says why, as the last line
   t=$(git $s write-tree); printf '%s\n' "$t" > "$k/t"
   [ -z "$partial" ] || pre "$t"  # what the index holds beyond HEAD; no request when nothing is missing
   c=$(GIT_AUTHOR_NAME=omb GIT_AUTHOR_EMAIL=omb GIT_AUTHOR_DATE='946684800 +0000' GIT_COMMITTER_NAME=omb GIT_COMMITTER_EMAIL=omb GIT_COMMITTER_DATE='946684800 +0000' git commit-tree --no-gpg-sign -m omb "$t")
@@ -641,6 +651,10 @@ run_pack() {
   set +e
   pack "$d/k" "$d/drop"; rc=$?
   set -e
+  if [ "$rc" = 5 ]; then
+    [ -s "$d/drop" ] || die "$SNAPSHOT_EMPTY"
+    die "omb-upload: nothing is left to pack once the files with a credential match are left out ($(tr '\001-\037\177' '?' < "$d/drop" | tr '\0' '\n' | sed '/^$/d' | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')); remove or redact the credentials, then run the same command again; nothing was sent"
+  fi
   [ "$rc" = 0 ] || die "omb-upload: the repository could not be packed (above); nothing was sent"
 }
 
