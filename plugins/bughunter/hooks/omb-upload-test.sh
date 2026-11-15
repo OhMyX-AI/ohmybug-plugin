@@ -1246,6 +1246,8 @@ NOTE='left out nested repositories and submodules (to hunt a working repository 
 notes() { printf '%s\n' "$out" | grep -c -F "$NOTE"; }
 bare() { mkdir -p "$1"; printf 'ref: refs/heads/main\n' > "$1/HEAD"; printf '[remote "o"]\n\turl = https://tok@example.invalid/%s\n' "${2:-r}" > "$1/config"; }
 [ "$(sed -n "s/^SNAPSHOT_NESTED_NOTE='\(.*\)'$/\1/p" "$UP")" = "$NOTE" ] && ok "the nested note is the server's sentence" || fail "nested note differs"
+EMPTY_SRV='nothing to pack: this folder has no files after ignored, secret-named and nested-repository paths are left out (top-level .gitmodules, .gitignore and .gitattributes alone do not count); nothing was sent. Without a snapshot this ticket expires on its own. A fast hunt can run in diff mode instead, on the diff alone with no repository, so its quality differs: only the user can turn that on, on the account policy page (/me/policy on the server this command uploads to); do not turn it on yourself'
+[ "$(sed -n "s/^SNAPSHOT_EMPTY='\(.*\)'$/\1/p" "$UP")" = "$EMPTY_SRV" ] && ok "the empty-snapshot refusal is the server's sentence" || fail "empty refusal differs"
 NR="$ROOT/nr"; mkdir -p "$NR/src" "$NR/.gnupg"; g -C "$NR" init -q
 printf 'x = 1\n' > "$NR/src/a.py"; printf 'key\n' > "$NR/.gnupg/pubring.kbx"
 bare "$NR/tracked.git" t
@@ -1326,6 +1328,19 @@ fresh; run "$NS" "$URL" off --head
 printf 'x = 2\n' > "$NS/src/a.py"
 fresh; run "$NS" "$URL" off --head
 [ "$rc" = 0 ] && ! grep -q 'Subproject' "$STUB/payload.1.sent" && ok "NS a bump with another change: no Subproject line in the diff" || fail "NS bump with change: rc $rc $out"
+# NSr: the range removes the submodule: no Subproject line, the other change is sent.
+g -C "$NS" add -A; g -C "$NS" commit -qm bump; g -C "$NS" rm -q --cached sub; printf 'x = 3\n' > "$NS/src/a.py"
+fresh; run "$NS" "$URL" off --head
+[ "$rc" = 0 ] && ! grep -q 'Subproject' "$STUB/payload.1.sent" && grep -q 'x = 3' "$STUB/payload.1.sent" && ok "NSr a removed submodule: no Subproject line in the diff" || fail "NSr removed sub: rc $rc $out"
+# NRp: the range turns a bare folder into code: the new code is sent, the old config is not.
+NRP="$ROOT/nrp"; mkdir -p "$NRP/src"; g -C "$NRP" init -q; printf 'x = 1\n' > "$NRP/src/a.py"; bare "$NRP/app"
+g -C "$NRP" add -A; g -C "$NRP" commit -qm base; g -C "$NRP" rm -rq app; mkdir -p "$NRP/app"; printf 'newcode = 1\n' > "$NRP/app/main.py"; g -C "$NRP" add -A; g -C "$NRP" commit -qm code
+fresh; run "$NRP" "$URL" off --commits 1
+[ "$rc" = 0 ] && ! grep -q 'tok@' "$STUB/payload.1.sent" && grep -q 'newcode' "$STUB/payload.1.sent" && ok "NRp a bare folder replaced by code: the code is sent, the old config is not" || fail "NRp replaced bare: rc $rc $out"
+# NHm: --commits in diff mode reads no working copy for its content: a project that is the home folder is not refused.
+NHM="$ROOT/nhm"; mkdir -p "$NHM"; g -C "$NHM" init -q; printf 'x = 1\n' > "$NHM/a.py"; g -C "$NHM" add -A; g -C "$NHM" commit -qm base; printf 'x = 2\n' > "$NHM/a.py"; g -C "$NHM" commit -qam two
+fresh; out=$(cd "$NHM" && HOME="$NHM" PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" off --commits 1 2>&1); rc=$?
+[ "$rc" = 0 ] && ok "NHm --commits off in the home folder: sent as before" || fail "NHm home commits: rc $rc $out"
 # NP: partial: a changed file defines a name a file inside a tracked bare folder uses: nothing under it in the partial tar.
 NPA="$ROOT/np"; mkdir -p "$NPA/src" "$NPA/lib"; g -C "$NPA" init -q; printf 'x = 1\n' > "$NPA/src/a.py"; bare "$NPA/tb"
 printf 'nested_call_name(1)\n' > "$NPA/tb/use.py"; printf 'nested_call_name(2)\n' > "$NPA/lib/use.py"

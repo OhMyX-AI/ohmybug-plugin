@@ -260,7 +260,7 @@ top=$(git rev-parse --show-toplevel)
 # disk names from here): an untracked repository is listed as dir/, never
 # its files. The working-copy tree's add leaves those dir/ entries out.
 set +e
-( set -e; unset CDPATH; cd "$top"; home_check read; git ls-files -z -co --exclude-standard > "$d/disk.z" ); rc=$?
+( set -e; unset CDPATH; cd "$top"; if [ -z "$to" ]; then home_check read; fi; git ls-files -z -co --exclude-standard > "$d/disk.z" ); rc=$?
 set -e
 [ "$rc" = 0 ] || die "omb-upload: the working copy could not be listed (above); nothing was sent"
 py -c 'import sys
@@ -309,7 +309,8 @@ fi
 
 # The payload. The client reads the diff only to decode it (JSON carries
 # text); its files, names and counts come from git by path.
-export OMB_SECRETS excl only SNAPSHOT_NESTED_NOTE
+OMB_EMPTY_TREE=$empty
+export OMB_SECRETS excl only SNAPSHOT_NESTED_NOTE OMB_EMPTY_TREE
 set +e
 py - "$d" "$DIR" "$from" "$to" "$prefix" "$top" "$PATH" "$snap" "$nogit" "$@" <<'PY'
 import json, os, re, subprocess, sys
@@ -367,7 +368,8 @@ p = subprocess.run(["git", "diff-tree", "-r", "--raw", "--no-renames", "-z", frm
                    env=RENV, stdout=subprocess.PIPE)
 if p.returncode:
     say("git could not list the changed files (a partial clone whose remote is out of reach?)")
-changed = [n for n in p.stdout.split(b"\0")[1::2] if n]
+raw = [r for r in zip(p.stdout.split(b"\0")[0::2], p.stdout.split(b"\0")[1::2]) if r[1]]
+changed = [n for _, n in raw]
 
 # Nested repositories, the server's rule, as ONE set of top-relative folders
 # (and gitlink paths) read from the three sources a sent byte can come from:
@@ -412,7 +414,12 @@ for m, n in tree:
 # The range's other side: a bare repository the range removes or changes, only
 # for the folders above a changed path. A gitlink there is no member: it has
 # no content in any tree, and its name would hide the files that replace it.
-if frm != subprocess.run(["git", "hash-object", "-t", "tree", "/dev/null"], env=RENV, stdout=subprocess.PIPE).stdout.strip().decode():
+# A folder that was a bare repository before the range: only its before-side
+# paths leave the diff, so files that replace it are still sent. The same for
+# a gitlink the range removes (no tree in either side holds its content).
+gone = set()
+GONE = []
+if frm != os.environ["OMB_EMPTY_TREE"]:
     cand = sorted(q for q in {q for n in changed for q in parents(n)} if not under(q, S))
     for i in range(0, len(cand), 200):
         part = cand[i:i + 200]
@@ -421,16 +428,25 @@ if frm != subprocess.run(["git", "hash-object", "-t", "tree", "/dev/null"], env=
             if r:
                 got[r.split(b"\t", 1)[1]] = r.split(b" ")[1]
         for q in part:
-            if got.get(q + b"/HEAD") in (b"blob", b"commit") and q + b"/config" in got:
-                S.add(q)
-if S:
-    sys.stderr.write(os.environ["SNAPSHOT_NESTED_NOTE"] + "\n" + "".join("  " + clean1(n) + "\n" for n in sorted(S)))
+            if got.get(q + b"/HEAD") == b"blob" and got.get(q + b"/config") == b"blob":
+                gone.add(q)
+for q in sorted(gone):
+    if q in anyp:
+        GONE += [n for n in out("ls-tree", "-r", "-z", "--name-only", "--full-tree", frm, "--", os.fsdecode(q)).split(b"\0") if n]
+    else:
+        GONE.append(q)
+for r in raw:
+    if r[0].startswith(b":160000 ") and r[1] not in anyp:
+        gone.add(r[1])
+        GONE.append(r[1])
+if S or gone:
+    sys.stderr.write(os.environ["SNAPSHOT_NESTED_NOTE"] + "\n" + "".join("  " + clean1(n) + "\n" for n in sorted(S | gone)))
 open(d + "/nest.z", "wb").write(b"".join(n + b"\0" for n in sorted(S)))
 open(d + "/nestpaths.z", "wb").write(b"".join(n + b"\0" for _, n in tree if under(n, S)))
 if b"." in S:
     sys.exit(5)  # the folder itself is a bare repository: the shell says so
 # The excludes: one per member at or above a changed path.
-NEST = [":(exclude,top,literal)" + os.fsdecode(q) for q in sorted({q for n in changed for q in [n] + list(parents(n)) if q in S})]
+NEST = [":(exclude,top,literal)" + os.fsdecode(q) for q in sorted({q for n in changed for q in [n] + list(parents(n)) if q in S} | set(GONE))]
 # 2. One prefetch of every blob the diff reads, in one request: git's diff
 #    machinery fetches the missing blobs of a diff as one batch. Its exit
 #    status is not read; the blob read below decides.
