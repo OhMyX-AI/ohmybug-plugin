@@ -344,15 +344,31 @@ nothing and say nothing about it. Then answer what the user asked.
      - "The whole working copy": "Slower; for bugs that live far from the
        change." Sends `upload: "full"`.
      - "Skip (keep the current setting)".
-   - **Default hunt.** "Which hunt runs when you name none?" A deep hunt
-     runs only when asked: say its price in the question, from `get_balance`.
-     - "Let OhMyBug choose (recommended)": sends `hunt_mode: "auto"`.
-     - "Quick check, <snap price>": sends `hunt_mode: "snap"`.
-     - "Fast hunt, <fast price>": sends `hunt_mode: "fast"`.
-     - "Skip (keep the current setting)".
+   - **Default hunt.** "Which hunt runs when you name none?" Then one line
+     on the deep hunt, from `get_balance` `deep_hunt` when present: "A deep
+     hunt runs only when you ask for it: <price_usd>, <time>, finds
+     ~<found_pct>% of known bugs (our benchmark)." No `deep_hunt`: no line.
+     Each mode below shows its figures from its `get_balance` `modes` row,
+     as "<price_usd> · <time> · finds ~<found_pct>% of known bugs (our
+     benchmark)". `<time>` is from `typical_s`: under 60 seconds "~N s"
+     rounded to 5 seconds, otherwise "~N min" to one decimal, a trailing
+     ".0" dropped (122 → "~2 min", 139 → "~2.3 min"). A row without
+     `typical_s` or `found_pct` shows the price alone. Figures and prices
+     come only from `get_balance`, never from memory; a mode not listed in
+     `modes` is not offered.
+     - "Let OhMyBug choose (recommended)": with a `get_balance` `route`, "Starts
+       with the <route.first> check (<its price>); when it finds no real
+       medium or worse bug, the fast hunt (<fast price>) follows on the same
+       commit." Without one, "Runs the fast hunt (<fast price>)." Sends
+       `hunt_mode: "auto"`.
+     - "Lite check": its figures, then "On a pushed commit OhMyBug can read;
+       anything else gets the fast hunt." Sends `hunt_mode: "lite"`.
+     - "Quick check": its figures and the same pushed-commit sentence. Sends
+       `hunt_mode: "snap"`.
+     - "Fast hunt": its figures. Sends `hunt_mode: "fast"`.
 
-     Prices come only from `get_balance` `modes` (`price_usd`); a mode not
-     listed there is not offered.
+     There is no Skip here: the option marked "(current)" keeps the setting,
+     and a dismissed dialog sends nothing.
    - **Stories.** Not asked when the saved `stories` is `auto`: say in one
      line that automatic posting stays as it is, and send no `stories`. The
      question: "When a hunt finds a real bug, your agent can write a short
