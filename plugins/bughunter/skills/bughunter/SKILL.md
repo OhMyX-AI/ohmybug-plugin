@@ -345,30 +345,37 @@ nothing and say nothing about it. Then answer what the user asked.
        change." Sends `upload: "full"`.
      - "Skip (keep the current setting)".
    - **Default hunt.** "Which hunt runs when you name none?" Then one line
-     on the deep hunt, from `get_balance` `deep_hunt` when present: "A deep
-     hunt runs only when you ask for it: <price_usd>, <time>, finds
-     ~<found_pct>% of known bugs (our benchmark)." No `deep_hunt`: no line.
-     Each mode below shows its figures from its `get_balance` `modes` row,
-     as "<price_usd> · <time> · finds ~<found_pct>% of known bugs (our
-     benchmark)". `<time>` is from `typical_s`: under 60 seconds "~N s"
-     rounded to 5 seconds, otherwise "~N min" to one decimal, a trailing
-     ".0" dropped (122 → "~2 min", 139 → "~2.3 min"). A row without
-     `typical_s` or `found_pct` shows the price alone. Figures and prices
-     come only from `get_balance`, never from memory; a mode not listed in
-     `modes` is not offered.
-     - "Let OhMyBug choose (recommended)": with a `get_balance` `route`, "Starts
-       with the <route.first> check (<its price>); when it finds no real
-       medium or worse bug, the fast hunt (<fast price>) follows on the same
-       commit." Without one, "Runs the fast hunt (<fast price>)." Sends
-       `hunt_mode: "auto"`.
-     - "Lite check": its figures, then "On a pushed commit OhMyBug can read;
-       anything else gets the fast hunt." Sends `hunt_mode: "lite"`.
-     - "Quick check": its figures and the same pushed-commit sentence. Sends
+     on the deep hunt: "A deep hunt runs only when you ask for it", followed,
+     when `get_balance` `deep_hunt` is present, by ": <figures>" from it.
+     Each mode below shows its figures from its `get_balance` `modes` row.
+     `<figures>` is "$<price_usd> · <time> · finds ~<found_pct>% of known
+     bugs (our benchmark)". `<time>` is from `typical_s`: under 60 seconds
+     "~N s", N rounded to the nearest 5 and at least 5; otherwise "~N min"
+     to one decimal, a trailing ".0" dropped (31 → "~30 s", 122 → "~2 min",
+     139 → "~2.3 min"). A row or `deep_hunt` without `typical_s` or
+     `found_pct` shows "$<price_usd>" alone. Prices come only from
+     `get_balance` `modes` and `deep_hunt`, figures likewise, never from
+     memory: with no price for a mode, name the mode without one. A mode not
+     listed in `modes` is not offered. A mode's name is "the lite check" for
+     `lite`, "the quick check" for `snap`, "the fast hunt" for `fast`.
+     - "Let OhMyBug choose (recommended)": with a `get_balance` `route`,
+       "Starts with <the name of route.first> ($<its price>); when it finds
+       no real medium or worse bug, the fast hunt ($<fast price>) follows on
+       the same commit." Without one, "Runs the fast hunt ($<fast price>)."
+       Sends `hunt_mode: "auto"`.
+     - "Lite check": its figures, then "Runs on a pushed commit OhMyBug can
+       read, when the change is small enough for it; anything else gets the
+       fast hunt." Sends `hunt_mode: "lite"`.
+     - "Quick check": its figures and the same sentence. Sends
        `hunt_mode: "snap"`.
      - "Fast hunt": its figures. Sends `hunt_mode: "fast"`.
+     - Only when the saved `hunt_mode` is none of the options offered (a
+       mode `modes` no longer lists): "Keep <its name>", which sends
+       nothing for this field.
 
-     There is no Skip here: the option marked "(current)" keeps the setting,
-     and a dismissed dialog sends nothing.
+     This question has no Skip, unlike Upload: the question tool takes four
+     options, and the four above are the choices. The option marked
+     "(current)" keeps the setting, and a dismissed dialog sends nothing.
    - **Stories.** Not asked when the saved `stories` is `auto`: say in one
      line that automatic posting stays as it is, and send no `stories`. The
      question: "When a hunt finds a real bug, your agent can write a short

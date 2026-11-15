@@ -297,7 +297,7 @@ Turn the mod off with
 | `get_findings` | `review_id` | `{status: running\|needs_files\|done\|failed, findings[{finding_id, severity, file, line?, title, failure_scenario, suggested_fix?}]}` |
 | `provide_files` | `review_id`, `paths[]` (Claude Code: the plugin's hook reads them from disk) or `files[{path, content}]` | `{status, delivered}` |
 | `confirm_findings` | `review_id`, `verdicts[{finding_id, verdict: REAL\|NOT_REAL\|UNCLEAR, reason, severity?, known?: {kind: deferred\|accepted, ref}}]` | `{confirmed, minor_confirmed, marked_known?, billed_usd, free_review_used, balance_usd, receipt_id}` |
-| `get_balance` | — | `{balance_usd, free_reviews_left, confirmed_total, stats{…}, modes[{mode, price_usd}]}` |
+| `get_balance` | — | `{balance_usd, free_reviews_left, confirmed_total, stats{…}, modes[{mode, price_usd, typical_s?, found_pct?}], deep_hunt?{price_usd, wide_price_usd, wide_min_chunks, typical_s, found_pct}, route?{first, then}}` |
 
 Errors: `snapshot_required` (an inline diff outside diff mode, or a payload before its snapshot: nothing started or charged), `mode_unavailable`, `mode_needs_repo`, `mode_too_large`, `mode_with_deep` (the mode cannot run; nothing started or charged), `payment_required` (top up), `pending_verdicts` (resolve previous
 review's verdicts first).

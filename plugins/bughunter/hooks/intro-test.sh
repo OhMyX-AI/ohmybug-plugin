@@ -91,6 +91,14 @@ for want in \
   'Not asked when the saved `stories` is `auto`' \
   '`free_review_rule` word for word' \
   'Prices come only from `get_balance` `modes`' \
+  'Sends `hunt_mode: "lite"`' \
+  'Sends `hunt_mode: "snap"`' \
+  'Sends `hunt_mode: "fast"`' \
+  'Sends `hunt_mode: "auto"`' \
+  'finds ~<found_pct>% of known bugs (our benchmark)' \
+  'with a `get_balance` `route`' \
+  'This question has no Skip' \
+  '"Keep <its name>", which sends nothing for this field' \
   'without one (a headless run), do nothing and say nothing about it' \
   "If its \`policy.intro.version\` is 1 or more and this is not \`/bughunter:setup\`, run" \
   'The marker stays written.'; do
