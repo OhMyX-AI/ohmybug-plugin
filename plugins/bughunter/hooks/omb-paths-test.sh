@@ -284,5 +284,24 @@ R="$ROOT/l5"; printf '#!/bin/sh\ncase "$*" in *" grep "*) exit 2 ;; esac\nexec %
 PATH="$ROOT/gw:$PATH" lst "$R"
 [ "$lrc" != 0 ] && ok "L9 a git grep that fails (not 'no match') fails the list" || fail "L9 grep failure: rc $lrc [$ST]"
 
+# L11: the one-regex secret check answers as one fnmatch per part and pattern
+# did (the archive's **/<pat> and **/<pat>/**, case aside), and stays fast.
+python3 -I - "$G/omb_paths.py" "$(sed -n '/^OMB_SECRETS=/,/'"'"'$/p' "$G/omb-upload.sh" | tr -d "'" | sed 's/^OMB_SECRETS=//')" <<'PY' && ok "L11 secret check: one regex, the same answers as fnmatch per pattern, 200,000 paths in under 2 s" || fail "L11 secret check differs or is slow"
+import fnmatch, importlib.util, random, sys, time
+spec = importlib.util.spec_from_file_location("p", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+pats = sys.argv[2].split()
+assert len(pats) > 20, pats
+rx = m.secret_rx(pats)
+def slow(p): return any(fnmatch.fnmatchcase(c, q.lower()) for c in p.lower().split("/") for q in pats)
+probe = [".env", "a/.ENV.local", "b/My_Secret/x.py", "c/id_rsa.pub", "d/k.PEM", "e/server.key.bak", "f/keystore", "g/credentials.json",
+         "src/main.py", "docs/key.md", "env/x.py", "secretary/ok.txt", "x/.envrc", "y/app.p12", "z/a.pfx"]
+for p in probe:
+    assert m.secret(p, rx) == slow(p), p
+assert m.secret("a/b.py", m.secret_rx([])) is False
+random.seed(3)
+paths = ["/".join("dir%d" % random.randrange(50) for _ in range(5)) + "/file%d.c" % i for i in range(200000)]
+t = time.time(); sum(m.secret(p, rx) for p in paths); assert time.time() - t < 2, time.time() - t
+PY
+
 echo "omb-paths: $([ "$fails" = 0 ] && echo ok || echo "$fails failing")"
 [ "$fails" = 0 ]

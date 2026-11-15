@@ -81,11 +81,16 @@ def added_names(added):
     return sorted(found, key=lambda n: (-len(n), n))[:PARTIAL["names"]]
 
 
-def secret(p, pats):
+def secret_rx(pats):
+    """The secret patterns as one regex: one match per path part, not one per
+    pattern (27 fnmatch calls per part cost seconds on a large tree)."""
+    return re.compile("|".join(fnmatch.translate(q.lower()) for q in pats)) if pats else None
+
+
+def secret(p, rx):
     """A path the snapshot leaves out by name: a part of it matches a secret
     pattern, case aside, as the archive's `**/<pat>` and `**/<pat>/**` do."""
-    parts = p.lower().split("/")
-    return any(fnmatch.fnmatchcase(c, q) for c in parts for q in pats)
+    return rx is not None and any(rx.match(c) for c in p.lower().split("/"))
 
 
 def git(gitdir, *args, ok=(0,)):
@@ -109,8 +114,8 @@ def main(gitdir, tree, changed_z, added_f, keep_z, stats_f):
         recs[p] = (mode, typ, oid, size, raw)
         order.append(p)
     # Secret-named files never go, so they take no manifest or caller slot.
-    pats = [q.lower() for q in os.environ.get("OMB_SECRETS", "").split()]
-    regular = [p for p in order if recs[p][0] in (b"100644", b"100755") and not secret(p, pats)]
+    rx = secret_rx(os.environ.get("OMB_SECRETS", "").split())
+    regular = [p for p in order if recs[p][0] in (b"100644", b"100755") and not secret(p, rx)]
     present = set(regular)
     changed = [n.decode("utf-8", "surrogateescape") for n in open(changed_z, "rb").read().split(b"\0") if n]
     skip = set(changed)
