@@ -453,11 +453,11 @@ upload and, with `required`, packs and scans the repository snapshot exactly
 as the upload will, so its manifest line is the one the upload prints.
 `<snapshot>` here is `required`, unless an upload ticket earlier in this
 session answered `snapshot: "off"` (the account is in diff mode, the only
-way you can know before the submit): then `off`; or one earlier in this
-session carried `pack: "partial"`: then `partial`. When you cannot know, use
-`required`: it over-states what leaves the machine rather than
-under-stating it. After `submit_review`, the ticket's `snapshot` and `pack`
-decide, and the upload's own manifest line is the one that counts.
+way you can know before the submit): then `off`. Never `partial` here,
+even when a ticket earlier in this session carried `pack: "partial"`: the
+dry run over-states what leaves the machine rather than under-stating it.
+After `submit_review`, the ticket's `snapshot` and `pack` decide, and the
+upload's own manifest line is the one that counts.
 
 ```bash
 bash '<skill_dir>/../../hooks/omb-upload.sh' --dry-run '<snapshot>' <scope>
@@ -725,10 +725,12 @@ bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' <scope>
      copy goes` sent the whole copy. The hunt of a partial copy ends with one
      line from the server that says so: show it as it comes.
      **"Whole repository"** in the user's own words (they want the hunt to
-     see every file): run this hunt's command with `required`, and call
-     `set_policy` with `upload: "full"` so later tickets stop asking for a
-     partial copy; say both in one line, with the way back (`upload:
-     "partial"`, or /bughunter:setup).
+     see every file): first call `set_policy` with `upload: "full"`, so
+     tickets stop asking for a partial copy; then a new `submit_review`,
+     whose ticket asks for the whole copy, and its command as that ticket
+     says. Only when this hunt's ticket is not yet used (the command has not
+     run on it), run it with `required` instead of a new submit. Say it in
+     one line, with the way back (`upload: "partial"`, or /bughunter:setup).
    - `3` – the diff or a context file carries what looks like a credential,
      and nothing was sent. Show the masked list. Never rerun with the scan
      off yourself: the user removes or redacts it and the same command runs

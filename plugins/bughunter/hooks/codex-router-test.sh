@@ -55,6 +55,15 @@ for prompt in ("set up OhMyBug", "please setup ohmybug", "OhMyBug setup now"):
     text = run("prompt", {"prompt": prompt})["hookSpecificOutput"]["additionalContext"]
     assert "run the First-run setup of the bughunter skill" in text, prompt
 assert "First-run setup" not in json.dumps(run("prompt", {"prompt": "set up the database"}))
+# I9: a review ask beside the setup ask is still routed, with the setup too.
+text = run("prompt", {"prompt": "set up OhMyBug and then review this PR"})["hookSpecificOutput"]["additionalContext"]
+assert "Route this request now" in text and "run the First-run setup of the bughunter skill" in text, text[-300:]
+# I10: a counter that cannot be written means no offer (it would offer forever).
+ro = tempfile.mkdtemp(); open(os.path.join(ro, "intro-v1-offers"), "w").write("0\n"); os.chmod(os.path.join(ro, "intro-v1-offers"), 0o444)
+if os.geteuid() != 0:
+    os.environ["OMB_STATE_DIR"] = ro
+    assert OFFER not in run("session")["hookSpecificOutput"]["additionalContext"], "offered with a counter it cannot write"
+    os.environ["OMB_STATE_DIR"] = state
 assert session["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 session_text = session["hookSpecificOutput"]["additionalContext"]
 # One cadence (#67): the automation fires once per interval_s and a wake is ONE
@@ -904,7 +913,8 @@ assert "bash '<skill_dir>/../../hooks/omb-upload.sh'" in skill and "--base '<bas
 # The partial copy: the mark is the ticket's word, the script's work, and a rerun keeps it.
 for phrase in ("`<snapshot>` is `partial` only when the answer that gave you this\n   `upload_url` carries `pack: \"partial\"`", "A deep ticket is\n   always `required`",
                "Never add `?pack=partial` to a URL or build a file list\n   yourself", "A rerun after `75` is the same command with the same second\n   argument",
-               "call\n     `set_policy` with `upload: \"full\"`", "the server\n     refused the partial mark", "this was a deep-hunt ticket and it is retired",
+               "first call `set_policy` with `upload: \"full\"`, so\n     tickets stop asking for a partial copy; then a new `submit_review`", "Only when this hunt's ticket is not yet used",
+               "Never `partial` here,\neven when a ticket earlier in this session carried `pack: \"partial\"`", "the server\n     refused the partial mark", "this was a deep-hunt ticket and it is retired",
                "the\n     hunt was not started and nothing was billed"):
     assert phrase in skill, phrase
 # The two answer values reach the single-quoted command only after a shape check.

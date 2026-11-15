@@ -190,12 +190,12 @@ else
   nogit=0
 fi
 
-# The home-folder check, shared by the working-copy tree and the pack: a
-# folder that is the home folder or holds it is never read as a project.
 # A git call that no user, system or repository setting reaches, nor any GIT_*
 # variable but the ones given: the diff's environment, for the partial copy.
 pin() { env -i PATH="$PATH" HOME="$d/h" XDG_CONFIG_HOME="$d/h" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null LC_ALL=C "$@"; }
 
+# The home-folder check, shared by the working-copy tree and the pack: a
+# folder that is the home folder or holds it is never read as a project.
 home_check() { # $1: what is refused (pack, read)
   [ "${OMB_SNAPSHOT_HOME_OK:-}" = 1 ] && return 0
   h=; [ -n "${HOME:-}" ] && h=$(cd "$HOME" 2>/dev/null && pwd -P) || :; [ -n "$h" ] || { echo "refusing to $1: HOME is not set to a folder this shell can enter, so the home-folder check cannot run; if this folder is the project, run the same command again as one call with OMB_SNAPSHOT_HOME_OK=1 in front of it (OMB_SNAPSHOT_HOME_OK=1 bash .../omb-upload.sh ...)" >&2; exit 1; }
@@ -545,10 +545,14 @@ pack() (
   if [ "$snap" = partial ]; then
     if [ "$scope" = all ]; then
       echo 'all of it is new code' > "$k/why"
-    elif ! pin ${OMB_TEST_PATHS_LIMITS:+"OMB_TEST_PATHS_LIMITS=$OMB_TEST_PATHS_LIMITS"} python3 -I -B "$DIR/omb_paths.py" "$k/g" "$t" "$d/changed.z" "$d/added" "$k/keep.z" "$k/stats" 2>/dev/null; then
-      echo 'the file list could not be built' > "$k/why"
+    elif ! pin OMB_SECRETS="$OMB_SECRETS" ${OMB_TEST_MODE:+"OMB_TEST_MODE=$OMB_TEST_MODE"} ${OMB_TEST_PATHS_LIMITS:+"OMB_TEST_PATHS_LIMITS=$OMB_TEST_PATHS_LIMITS"} python3 -I -B "$DIR/omb_paths.py" "$k/g" "$t" "$d/changed.z" "$d/added" "$k/keep.z" "$k/stats" 2> "$k/err"; then
+      # Its last error line, one line of printable bytes, is the reason.
+      e=$(tail -n 1 "$k/err" | tr -d '\n' | tr -c '[:print:]' ' ' | cut -c1-200)
+      echo "the file list could not be built${e:+: $e}" > "$k/why"
     elif [ ! -s "$k/keep.z" ]; then
-      echo 'no changed file is in the working copy' > "$k/why"
+      read -r _ _ nch _ < "$k/stats"
+      if [ "${nch:-0}" -gt 0 ]; then echo 'every changed file is over 4 MiB, binary or a git-lfs pointer' > "$k/why"
+      else echo 'no changed file is in the working copy' > "$k/why"; fi
     elif pin GIT_INDEX_FILE="$k/i2" git --git-dir="$k/g" update-index -z --index-info < "$k/keep.z" \
         && tp=$(pin GIT_INDEX_FILE="$k/i2" git --git-dir="$k/g" write-tree) \
         && cp=$(pin GIT_AUTHOR_NAME=omb GIT_AUTHOR_EMAIL=omb GIT_AUTHOR_DATE='946684800 +0000' GIT_COMMITTER_NAME=omb GIT_COMMITTER_EMAIL=omb GIT_COMMITTER_DATE='946684800 +0000' git --git-dir="$k/g" commit-tree --no-gpg-sign -m omb "$tp"); then
@@ -630,7 +634,10 @@ snapline() {
   fi
   printf ' (.env*, *.pem, *.key and %s more patterns), LFS content (pointers only)' "$((npat - 3))"
   if [ "$nogit" = 1 ]; then printf '; folder without git: top-level dot-folders, node_modules, __pycache__ and build output also left out'; fi
-  if [ "$snap" = partial ]; then printf '. A partial copy was asked for and not built (%s), so the whole working copy goes' "$(cat "$d/k/why")"; fi
+  if [ "$snap" = partial ]; then
+    if [ "$scope" = commits ]; then whole='the whole snapshot of HEAD'; else whole='the whole working copy'; fi
+    printf '. A partial copy was asked for and not built (%s), so %s goes' "$(cat "$d/k/why")" "$whole"
+  fi
 }
 # The partial copy's line: what of the whole tree goes, by kind, and the rest.
 partline() {
@@ -648,7 +655,7 @@ partline() {
   printf ' + partial repository snapshot%s: %s of %s (%s of %s changed, %s, %s), %s packed. Left out: every other file, git-ignored files, submodules' \
     "$snapof" "$packed" "$(files "$total")" "$nhead" "$nchanged" "$man" "$callers" "$size"
   if [ "$scan_off" = 1 ]; then printf ', secret-named files'; else printf ', %s' "$(files "$((inpart - packed))" secret-named)"; fi
-  printf ' (.env*, *.pem, *.key and %s more patterns), LFS content (pointers only)' "$((npat - 3))"
+  printf ' (.env*, *.pem, *.key and %s more patterns), LFS files' "$((npat - 3))"
 }
 
 # One request per door, no retry and no overall time limit: the server's own

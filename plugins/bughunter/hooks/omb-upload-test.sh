@@ -1081,10 +1081,10 @@ fresh; run "$PF" --dry-run partial --head
 [ "$rc" = 0 ] && [ "$(calls)" = 0 ] && [ "$(printf '%s\n' "$out" | grep '^OhMyBug upload')" = "$PLINE" ] \
   && ok "PP13 --dry-run partial: the upload's manifest line, no request" || fail "PP13 dry run: rc $rc calls $(calls) [$out] want [$PLINE]"
 # PP3/PP5: the list fails (a stand-in that exits 2): the whole copy, unmarked, the reason named, exit 0.
-FP="$ROOT/fakepaths"; mkdir -p "$FP"; cp "$UP" "$G/omb_scan.py" "$FP/"; printf 'raise SystemExit(2)\n' > "$FP/omb_paths.py"
+FP="$ROOT/fakepaths"; mkdir -p "$FP"; cp "$UP" "$G/omb_scan.py" "$FP/"; printf 'import sys\nsys.stderr.write("first\\nboom\\033 here\\n")\nraise SystemExit(2)\n' > "$FP/omb_paths.py"
 fresh; out=$(cd "$PF" && PATH="$BIN:$PATH" "$TSH" "$FP/omb-upload.sh" "$URL" partial --head 2>&1); rc=$?
 [ "$rc" = 0 ] && [ "$(tarnames | wc -l | tr -d ' ')" = 6 ] && grep -q "^CURL repo $URL/repo\$" "$STUB/transcript" \
-  && printf '%s' "$out" | grep -q 'A partial copy was asked for and not built (the file list could not be built), so the whole working copy goes' \
+  && printf '%s' "$out" | grep -q 'A partial copy was asked for and not built (the file list could not be built: boom  here), so the whole working copy goes' \
   && ok "PP3/PP5 a list that fails: the whole copy, no mark, the reason in the manifest, exit 0" || fail "PP3/PP5 list failure: rc $rc $(cat "$STUB/transcript") $out"
 # PP4: a diff of deletions only: no changed file is in the tree, so the whole copy.
 g -C "$PF" add -A; g -C "$PF" commit -qm two; git -C "$PF" rm -q lib/other.py
@@ -1112,7 +1112,7 @@ fresh; out=$(cd "$PF" && GIT_CONFIG_GLOBAL="$HG" GIT_CONFIG_COUNT=1 GIT_CONFIG_K
   && ok "PP7 grep and diff settings (user, environment, attributes): the same list and bytes" || fail "PP7 settings: rc $rc [$(tarnames | tr '\n' ' ')] $out"
 rm -f "$PF/.git/info/attributes"
 # L7 through the script: a tree past the line names the cut in the manifest.
-fresh; out=$(cd "$PF" && OMB_TEST_PATHS_LIMITS="3 1000000000" PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" partial --head 2>&1); rc=$?
+fresh; out=$(cd "$PF" && OMB_TEST_MODE=1 OMB_TEST_PATHS_LIMITS="3 1000000000" PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" partial --head 2>&1); rc=$?
 [ "$rc" = 0 ] && printf '%s' "$out" | grep -q '1 build manifest, files that use the changed names not searched (more than 200,000 files))' \
   && [ "$(tarnames)" = "$(want_names src/core.py package.json)" ] && grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" \
   && ok "L7m past the line: head and manifests only, still partial, the manifest says so" || fail "L7m manifest: rc $rc $out"
@@ -1170,7 +1170,23 @@ if git -C "$G" show 3186e5a:plugins/bughunter/hooks/omb-upload.sh > "$OLD/omb-up
       && ok "PP14 required $sc: output, snapshot, payload and requests byte for byte as before" \
       || fail "PP14 required $sc: out $([ "$out" = "$o1" ] && echo same || echo "[$out] / [$o1]"), snapshot $([ "$(sha "$STUB/repo.1.sent")" = "$s1" ] && echo same || echo differs), payload $([ "$(sha "$STUB/payload.1.sent")" = "$p1" ] && echo same || echo differs), requests [$(seq_)] / [$q1], args $([ "$(argsof)" = "$a1" ] && echo same || echo "[$(argsof)] / [$a1]")"
   done
+elif [ -n "${CI:-}" ]; then fail "PP14 the older script is not in this clone's history (CI fetches it: fetch-depth 0)"
 else echo "skip PP14 (the older script is not in this clone's history)"; fi
+# PP15: a secret-named file that uses the name takes no caller slot (the
+# manifest counts one caller, not two); a commit whose only change is binary
+# packs the whole snapshot of HEAD, and says why.
+P15="$ROOT/p15"; mkdir -p "$P15"; g -C "$P15" init -q; printf 'pass\n' > "$P15/m.py"
+printf 'bin_call_name()\n' > "$P15/u.py"; printf 'bin_call_name()\n' > "$P15/app_secret.py"; printf '\0a' > "$P15/data.bin"
+g -C "$P15" add -A; g -C "$P15" commit -qm base; printf 'pass\nbin_call_name()\n' > "$P15/m.py"; g -C "$P15" commit -qam call
+fresh; run "$P15" "$URL" partial --commits 1
+[ "$rc" = 0 ] && printf '%s' "$out" | grep -q '(1 of 1 changed, 0 build manifests, 1 file that uses the changed names)' && [ "$(tarnames)" = "$(want_names m.py u.py)" ] \
+  && ok "PP15 a secret-named file is no caller" || fail "PP15 secret caller: rc $rc [$(tarnames | tr '\n' ' ')] $out"
+printf '\0b' > "$P15/data.bin"; g -C "$P15" commit -qam bin
+fresh; run "$P15" "$URL" partial --commits 1
+[ "$rc" = 0 ] && grep -q "^CURL repo $URL/repo\$" "$STUB/transcript" \
+  && printf '%s' "$out" | grep -q 'not built (every changed file is over 4 MiB, binary or a git-lfs pointer), so the whole snapshot of HEAD goes' \
+  && ok "PP15 only a binary change: the whole snapshot of HEAD, the reason named" || fail "PP15 binary only: rc $rc $out"
+
 
 # ---- 7. URL and arguments ------------------------------------------------------
 for bad in "https://evil.example/u/tok" "http://mcp.ohmybug.ai/u/tok" "https://mcp.ohmybug.ai/u/x; touch $ROOT/pwned" "https://mcp.ohmybug.ai/u/" "https://mcp.ohmybug.ai.evil/u/tok" "https://mcp.ohmybug.ai/u/a/../b"; do

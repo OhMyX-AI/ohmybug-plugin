@@ -1,5 +1,5 @@
 ---
-description: Set your OhMyBug defaults: which copy of your code goes to a hunt, the default hunt, and bug stories
+description: "Set your OhMyBug defaults: which copy of your code goes to a hunt, the default hunt, and bug stories"
 ---
 
 Run the "First-run setup" of the `bughunter` skill now, whatever this machine

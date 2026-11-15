@@ -38,7 +38,8 @@ function offerSetup() {
   let n = 0;
   try { n = parseInt(fs.readFileSync(counter, 'utf8'), 10) || 0; } catch (_) {}
   if (n >= 3) return false;
-  try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(counter, `${n + 1}\n`); } catch (_) {}
+  // A counter that cannot be written would offer forever: no offer then.
+  try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(counter, `${n + 1}\n`); } catch (_) { return false; }
   return true;
 }
 
@@ -61,10 +62,10 @@ function finish() {
   finished = true;
   let prompt = '';
   try { prompt = String(JSON.parse(input.replace(/^\uFEFF/, '')).prompt || ''); } catch (_) { process.exit(0); }
-  if (/\bset\s*up\s+ohmybug\b|\bohmybug\s+setup\b/i.test(prompt)) {
-    emit('The user asks for the OhMyBug setup: run the First-run setup of the bughunter skill now, in chat, numbered, free text accepted.', 'UserPromptSubmit');
-    return;
-  }
+  // The setup ask never swallows a review ask in the same prompt: both go.
+  const setup = /\bset\s*up\s+ohmybug\b|\bohmybug\s+setup\b/i.test(prompt)
+    ? 'The user asks for the OhMyBug setup: run the First-run setup of the bughunter skill now, in chat, numbered, free text accepted.'
+    : '';
   if (/\b(?:review|reviewing|bug.?hunt|hunt\s+bugs?|deep\s+(?:review|hunt)|(?:lite|snap)\s+hunt|full[- ]repo(?:sitory)?\b|pull\s+request|\bpr\b|merge)\b/i.test(prompt)) {
     // The user's own words are the only thing that puts deep first (the server
     // takes deep: true from nobody else); the sentence says so only when the
@@ -76,8 +77,8 @@ function finish() {
     const deep = /\bdeep\s+(?:hunt|review|scan|pass|mode)\b|\bfull[- ]repo(?:sitory)?\b|--deep\b|\bbughunter:review\s+(?:--)?deep\b/i.test(prompt)
       ? ' The prompt names the deep hunt: if the user is asking for it, submit_review with deep: true is the first and only review – no fast stage first, no second question.'
       : '';
-    emit(`${ROUTING} Route this request now; do not launch local review agents.${deep}`, 'UserPromptSubmit');
-  }
+    emit(`${ROUTING} Route this request now; do not launch local review agents.${deep}${setup ? ` ${setup}` : ''}`, 'UserPromptSubmit');
+  } else if (setup) emit(setup, 'UserPromptSubmit');
 }
 
 process.stdin.on('data', chunk => { input += chunk; });

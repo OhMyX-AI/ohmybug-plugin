@@ -6,7 +6,8 @@ fails=0
 fail() { echo "FAIL $*"; fails=$((fails + 1)); }
 ok() { echo "ok   $*"; }
 S=$(mktemp -d); trap 'rm -rf "$S"' EXIT
-hook() { OMB_STATE_DIR="$S/state" HOME="$S" bash "$G/intro.sh" "$@"; }
+hook() { OMB_STATE_DIR="$S/state" HOME="$S" bash "$G/intro.sh" "$@" < /dev/null; }
+hooksrc() { printf '{"hook_event_name":"SessionStart","source":"%s"}' "$1" | OMB_STATE_DIR="$S/state" HOME="$S" bash "$G/intro.sh"; }
 ctx() { python3 -I -c 'import json, sys; d = json.load(sys.stdin); print(d["systemMessage"]); print(d["hookSpecificOutput"]["hookEventName"], d["hookSpecificOutput"]["additionalContext"])'; }
 
 # I4: Codex (PLUGIN_DATA) is silent and uses up no offer.
@@ -26,6 +27,51 @@ esac
 [ "$(cat "$S/state/intro-v1-offers")" = 3 ] && ok "I3 the counter stops at 3" || fail "I3 counter: $(cat "$S/state/intro-v1-offers")"
 printf 'junk\n' > "$S/state/intro-v1-offers"
 [ -n "$(hook)" ] && ok "I3 an unreadable counter counts as none" || fail "I3 junk counter: silent"
+
+# I8: only a new session. A compacted, cleared or resumed one is mid-task:
+# silent, and no offer counted; hooks.json runs it on startup only.
+rm -rf "$S/state"
+for src in compact clear resume; do
+  [ -z "$(hooksrc "$src")" ] && [ ! -e "$S/state/intro-v1-offers" ] && ok "I8 source $src: silent, no offer counted" || fail "I8 source $src spoke or counted"
+done
+[ -n "$(hooksrc startup)" ] && ok "I8 source startup: offered" || fail "I8 source startup: silent"
+python3 -I - "$G/hooks.json" <<'PY' && ok "I8 hooks.json: intro.sh only in a SessionStart group matching startup alone" || fail "I8 hooks.json: intro.sh runs on other sources"
+import json, sys
+groups = json.load(open(sys.argv[1]))["hooks"]["SessionStart"]
+where = [g.get("matcher") for g in groups for h in g["hooks"] if h["command"].endswith("/intro.sh")]
+sys.exit(0 if where == ["startup"] else 1)
+PY
+
+# C: every command's front matter is strict YAML (a plain scalar may not hold
+# ": "): parsed with PyYAML where it is installed, else that rule.
+python3 -I - "$G/../commands" <<'PY' && ok "C commands/*.md: front matter is strict YAML" || fail "C a command's front matter is not strict YAML"
+import glob, os, re, sys
+try:
+    import yaml
+except ImportError:
+    yaml = None
+bad = []
+for f in sorted(glob.glob(os.path.join(sys.argv[1], "*.md"))):
+    t = open(f, encoding="utf-8").read()
+    m = re.match(r"---\n(.*?)\n---\n", t, re.S)
+    if not m:
+        bad.append(f); continue
+    if yaml:
+        try:
+            d = yaml.safe_load(m.group(1))
+            if not isinstance(d, dict) or not isinstance(d.get("description"), str):
+                bad.append(f)
+        except yaml.YAMLError:
+            bad.append(f)
+    for line in m.group(1).split("\n"):
+        k, _, v = line.partition(": ")
+        v = v.strip()
+        if v and v[0] not in "\"'|>" and ": " in v:
+            bad.append(f)
+if bad:
+    print(bad)
+sys.exit(1 if bad else 0)
+PY
 
 # I5: done writes the marker and prints an ISO UTC time; I1: then silent.
 rm -rf "$S/state"

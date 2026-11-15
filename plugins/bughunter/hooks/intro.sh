@@ -26,6 +26,13 @@ fi
 [ -n "${PLUGIN_DATA:-}" ] && exit 0
 [ -f "$MARK" ] && exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
+# Only a new session: a resumed, cleared or compacted one is mid-task, and
+# would burn an offer. hooks.json runs this on startup only; the source check
+# holds the same line when a client runs it on another source anyway.
+src=$(python3 -I -c 'import json, sys
+try: print(json.loads(sys.stdin.read() or "{}").get("source") or "")
+except Exception: print("")' 2>/dev/null) || src=
+case $src in ''|startup) ;; *) exit 0 ;; esac
 n=$(cat "$OFFERS" 2>/dev/null || :)
 case $n in ''|*[!0-9]*) n=0 ;; esac
 [ "$n" -ge "$CAP" ] && exit 0

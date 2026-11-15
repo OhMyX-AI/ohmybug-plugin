@@ -64,7 +64,10 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The whole path is compared with the previous release's script, read from history.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - run: OMB_TEST_SKIP_SLOW=1 bash plugins/bughunter/hooks/omb-upload-test.sh
       - run: bash plugins/bughunter/hooks/omb-paths-test.sh
 

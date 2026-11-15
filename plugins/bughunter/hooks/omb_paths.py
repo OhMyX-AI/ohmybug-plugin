@@ -19,7 +19,8 @@ Inputs are git facts only: <changed.z> the diff's file names, NUL-separated;
 --output-indicator-new), so no diff header is ever read as a line; the tree's
 records from `git ls-tree -r -l -z`. Every git call runs as the caller set it
 up (no user or repository setting reaches it). The names are searched in ONE
-`git grep` pass over the tree, read back per name and file.
+`git grep -l` pass over the tree; which names each file found holds is then
+read from its blob, one file at a time.
 
 Output: <keep.z> the kept files as `<mode> <type> <id>\t<path>` records,
 NUL-separated, ready for `git update-index -z --index-info`; <stats> one line:
@@ -32,6 +33,7 @@ gives the same list, and the snapshot the same bytes, on a rerun.
 Exit 0 with or without records; anything else means no list (the caller packs
 the whole tree).
 """
+import fnmatch
 import os
 import re
 import subprocess
@@ -42,7 +44,7 @@ PARTIAL = {"changed": 60, "callers": 20, "bytes": 16 * 1024 * 1024, "file": 4 <<
 # about 4 s per GB on a fast laptop and several times that on two cores. A
 # count of the tree, never a timer, so a rerun packs the same bytes.
 MAX_FILES, MAX_BYTES = 200000, 512 * 1024 * 1024
-if os.environ.get("OMB_TEST_PATHS_LIMITS"):  # the test suite only
+if os.environ.get("OMB_TEST_MODE") == "1" and os.environ.get("OMB_TEST_PATHS_LIMITS"):  # the test suites only
     MAX_FILES, MAX_BYTES = (int(x) for x in os.environ["OMB_TEST_PATHS_LIMITS"].split())
 
 # The server rule's patterns, character for character (omb-paths-test.sh holds
@@ -79,6 +81,13 @@ def added_names(added):
     return sorted(found, key=lambda n: (-len(n), n))[:PARTIAL["names"]]
 
 
+def secret(p, pats):
+    """A path the snapshot leaves out by name: a part of it matches a secret
+    pattern, case aside, as the archive's `**/<pat>` and `**/<pat>/**` do."""
+    parts = p.lower().split("/")
+    return any(fnmatch.fnmatchcase(c, q) for c in parts for q in pats)
+
+
 def git(gitdir, *args, ok=(0,)):
     p = subprocess.run(["git", "--git-dir=" + gitdir] + list(args), stdout=subprocess.PIPE)
     if p.returncode not in ok:
@@ -99,7 +108,9 @@ def main(gitdir, tree, changed_z, added_f, keep_z, stats_f):
         p = raw.decode("utf-8", "surrogateescape")
         recs[p] = (mode, typ, oid, size, raw)
         order.append(p)
-    regular = [p for p in order if recs[p][0] in (b"100644", b"100755")]
+    # Secret-named files never go, so they take no manifest or caller slot.
+    pats = [q.lower() for q in os.environ.get("OMB_SECRETS", "").split()]
+    regular = [p for p in order if recs[p][0] in (b"100644", b"100755") and not secret(p, pats)]
     present = set(regular)
     changed = [n.decode("utf-8", "surrogateescape") for n in open(changed_z, "rb").read().split(b"\0") if n]
     skip = set(changed)
@@ -133,26 +144,59 @@ def main(gitdir, tree, changed_z, added_f, keep_z, stats_f):
     if names:
         with open(keep_z + ".names", "wb") as f:
             f.write(b"".join(n.encode() + b"\n" for n in names))
-        # -F -w: each name as a fixed word; -o prints every match, so one pass
-        # says which name each file holds. Records: <tree>:<path> NUL <name> LF.
-        rc, out = git(gitdir, "grep", "-F", "-o", "-w", "-I", "-z", "-f", keep_z + ".names", tree, ok=(0, 1))
+        # One git grep pass, -l: the files that hold any name as a word (git
+        # decides what is binary). It prints each file once, so its output is
+        # small, and it stops reading a file at its first match. Printing the
+        # matches instead (-o, or the lines) is many times slower in git once
+        # one name is found everywhere. Then which names each candidate holds
+        # is read from its blob, one at a time, so memory stays small: at most
+        # 8 files are kept per name, and a name past 8 is dropped for good.
+        out = git(gitdir, "grep", "-F", "-w", "-I", "-l", "-z", "-f", keep_z + ".names", tree, ok=(0, 1))[1]
         pre = tree.encode() + b":"
-        files_of = {}
-        i = 0
-        while i < len(out):
-            j = out.index(b"\0", i)
-            k = out.index(b"\n", j)
-            path, name = out[i:j], out[j + 1:k].decode()
-            i = k + 1
-            if not path.startswith(pre):
+        cand = []
+        for r in out.split(b"\0"):
+            if not r:
+                continue
+            if not r.startswith(pre):
                 raise SystemExit(2)
-            p = path[len(pre):].decode("utf-8", "surrogateescape")
-            files_of.setdefault(name, []).append(p)
+            p = r[len(pre):].decode("utf-8", "surrogateescape")
+            if p in present and p not in skip and not OS_SKIP.search(p) and not os_doc(p):
+                cand.append(p)
+        files_of = {n: [] for n in names}
+        live = list(names)
+        word = {n: re.compile(rb"(?<![A-Za-z0-9_])" + n.encode() + rb"(?![A-Za-z0-9_])") for n in names}
+        if cand:
+            with open(keep_z + ".cand", "wb") as f:
+                f.write(b"".join(recs[p][2] + b"\n" for p in cand))
+            with open(keep_z + ".cand", "rb") as f:
+                q = subprocess.Popen(["git", "--git-dir=" + gitdir, "cat-file", "--batch"], stdin=f, stdout=subprocess.PIPE)
+            for p in cand:
+                if not live:
+                    break  # every name is past 8 files: nothing left to learn
+                h = q.stdout.readline().split()
+                if len(h) != 3 or h[0] != recs[p][2]:
+                    q.kill(); q.wait()
+                    raise SystemExit(2)
+                data = q.stdout.read(int(h[2]) + 1)
+                if len(data) != int(h[2]) + 1:
+                    q.kill(); q.wait()
+                    raise SystemExit(2)
+                for n in list(live):
+                    if n.encode() in data and word[n].search(data):
+                        files_of[n].append(p)
+                        if len(files_of[n]) > 8:
+                            live.remove(n)
+                data = None
+            if live:
+                if q.wait():
+                    raise SystemExit(2)
+            else:
+                q.kill(); q.wait()
+        dead = {n for n in names if len(files_of[n]) > 8}
         hits = {}
         for name in names:
-            files = [p for p in dict.fromkeys(files_of.get(name, []))
-                     if p in present and p not in skip and not OS_SKIP.search(p) and not os_doc(p)]
-            if not files or len(files) > 8:
+            files = files_of[name]
+            if not files or name in dead:
                 continue
             for p in files:
                 hits[p] = hits.get(p, 0) + 1 / len(files)

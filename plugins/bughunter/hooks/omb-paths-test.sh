@@ -25,7 +25,7 @@ lst() {
   rm -rf "$o"; mkdir -p "$o"
   git -C "$r" diff-tree -r -M --name-only -z HEAD~1 HEAD > "$o/changed.z"
   git -C "$r" diff-tree -r -M -p -U0 --output-indicator-new="$(printf '\001')" HEAD~1 HEAD > "$o/added"
-  env -i PATH="$PATH" HOME="$o" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null LC_ALL=C ${LIMITS:+"OMB_TEST_PATHS_LIMITS=$LIMITS"} \
+  env -i PATH="$PATH" HOME="$o" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null LC_ALL=C ${LIMITS:+"OMB_TEST_PATHS_LIMITS=$LIMITS"} ${TESTMODE:+"OMB_TEST_MODE=$TESTMODE"} ${SECRETS:+"OMB_SECRETS=$SECRETS"} \
     python3 -I -B "$PATHS" "$r/.git" "$(git -C "$r" rev-parse 'HEAD^{tree}')" "$o/changed.z" "$o/added" "$o/keep.z" "$o/stats"
   lrc=$?
   ST=$(cat "$o/stats" 2>/dev/null)
@@ -229,10 +229,12 @@ head_commit head
 lst "$R"
 [ "$got" = "mod.py y2.bin x1.py x3.py x4.py x5.py x7.py" ] && ok "L4 caps: a NUL by byte 8000 is binary; 4 MiB kept, one byte over skipped; 16 MiB exactly kept after a skip" || fail "L4 caps: [$got]"
 
-# ---- L5. A name in more than 8 files says nothing -------------------------
+# ---- L5. A name in more than 8 files says nothing; a word, not a substring -
 repo l5; printf 'pass\n' > "$R/m.py"
 for i in 1 2 3 4 5 6 7 8; do printf 'in_eight_files()\n' > "$R/e$i.py"; done
 for i in 1 2 3 4 5 6 7 8 9; do printf 'in_nine_files()\n' > "$R/n$i.py"; done
+# A name inside a longer word is no match: n1.py does not make it nine files.
+printf 'in_nine_files()\nx_in_eight_files = 1\n' > "$R/n1.py"
 head_commit base; printf 'pass\nin_eight_files()\nin_nine_files()\n' > "$R/m.py"; head_commit head
 lst "$R"
 [ "$got" = "m.py e1.py e2.py e3.py e4.py e5.py e6.py e7.py e8.py" ] && ok "L5 a name in 8 files adds them; in 9, none" || fail "L5 eight/nine: [$got]"
@@ -252,12 +254,25 @@ mkdir -p "$ROOT/gw"; printf '#!/bin/sh\necho "$*" >> "%s/gitcalls"\nexec %s "$@"
 R="$ROOT/l5"
 for lim in "17 1000000000:files" "1000 10:bytes" "18 1000000000:-"; do
   : > "$ROOT/gitcalls"
-  PATH="$ROOT/gw:$PATH" LIMITS=${lim%:*} lst "$R"; ngrep=$(grep -c '^--git-dir=[^ ]* grep ' "$ROOT/gitcalls")
+  PATH="$ROOT/gw:$PATH" LIMITS=${lim%:*} TESTMODE=1 lst "$R"; ngrep=$(grep -c '^--git-dir=[^ ]* grep ' "$ROOT/gitcalls")
   case ${lim#*:} in
     -) [ "$ngrep" = 1 ] && [ "${ST##* }" = - ] && [ "$got" != m.py ] && ok "L7 a tree of 18 files under an 18-file line: searched" || fail "L7 at the line: grep $ngrep [$ST] [$got]" ;;
     *) [ "$ngrep" = 0 ] && [ "${ST##* }" = "${lim#*:}" ] && [ "$got" = m.py ] && ok "L7 past the ${lim#*:} line: no grep, head and manifests only, the stats say ${lim#*:}" || fail "L7 ${lim#*:}: grep $ngrep [$ST] [$got]" ;;
   esac
 done
+
+# The lines move only in a test run: the limits alone change nothing.
+PATH="$ROOT/gw:$PATH" LIMITS="17 1000000000" lst "$R"
+[ "${ST##* }" = - ] && [ "$got" != m.py ] && ok "L7 the test limits without OMB_TEST_MODE=1: ignored, searched" || fail "L7 limits outside a test run: [$ST] [$got]"
+
+# ---- L10. Secret-named files take no slot ------------------------------------
+# A caller or a manifest whose name the snapshot leaves out is not listed, and
+# does not count toward a name's 8 files.
+repo l10; mkdir -p "$R/conf/Secrets"; printf 'pass\n' > "$R/m.py"
+printf 'secret_call_name()\n' > "$R/u.py"; printf 'secret_call_name()\n' > "$R/My_Credentials.py"; printf 'secret_call_name()\n' > "$R/conf/Secrets/x.py"
+head_commit base; printf 'pass\nsecret_call_name()\n' > "$R/m.py"; head_commit head
+SECRETS='.env* *secret* *credential*' lst "$R"
+[ "$got" = "m.py u.py" ] && ok "L10 secret-named files (any part, any case) are no callers" || fail "L10 secrets: [$got]"
 
 # ---- L8. One grep pass for every name -----------------------------------------
 : > "$ROOT/gitcalls"
