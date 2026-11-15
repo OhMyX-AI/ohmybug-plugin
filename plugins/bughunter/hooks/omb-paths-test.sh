@@ -62,11 +62,13 @@ sys.exit(1 if bad else 0)
 PY
 
 # ---- L2. Parity with the server rule ---------------------------------------
-# Three fixtures, and the lists the server rule's reference implementation
+# Four fixtures, and the lists the server rule's reference implementation
 # produced for them once, written out here: ranking (names in 1 to 9 files,
 # keywords, short names, skipped and doc paths, more than 20 callers), caps
 # (over 4 MiB, a NUL byte, past 16 MiB), folders (62 changed files, nested
-# manifests, a changed manifest, a deletion, a rename).
+# manifests, a changed manifest, a deletion, a rename), names (48 names of
+# many lengths: the 40 longest are searched; a changed git-lfs pointer is
+# left out).
 python3 -I - "$ROOT/fx" <<'PY'
 import os, subprocess, sys
 
@@ -165,12 +167,26 @@ os.rename(os.path.join(r, "d/old_name.py"), os.path.join(r, "d/new_name.py"))
 for i in range(62):
     w(r, "z/f%02d.py" % i, "y\n")
 commit(r, "head")
+
+# D: more than 40 names, of many lengths: only the 40 longest are searched.
+# A changed git-lfs pointer is left out.
+r = repo("d")
+w(r, "m.py", "pass\n")
+names = ["n%s_%d" % ("x" * (i % 9), i) for i in range(48)]
+for i, n in enumerate(names):
+    w(r, "u/f%02d.py" % i, "%s()\n" % n)
+w(r, "asset.bin", "version https://git-lfs.github.com/spec/v1\\noid sha256:%s\\nsize 10\\n" % ("0" * 64))
+commit(r, "base")
+w(r, "m.py", "pass\n" + "".join("%s(1)\n" % n for n in names))
+w(r, "asset.bin", "version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize 11\n" % ("1" * 64))
+commit(r, "head")
 PY
 A='src/app/main.py src/app/new_mod.py src/app/pyproject.toml src/setup.cfg package.json lib/gamma_three/f0.py lib/shared.py lib/kappa_x/f0.py lib/kappa_x/f1.py lib/iota_ten/f0.py lib/iota_ten/f1.py lib/iota_ten/f2.py lib/lambda_y/f0.py lib/lambda_y/f1.py lib/lambda_y/f2.py lib/beta_two/f0.py lib/beta_two/f1.py lib/beta_two/f2.py lib/alpha_one/f0.py lib/alpha_one/f1.py lib/epsilon_five/f0.py lib/epsilon_five/f1.py lib/epsilon_five/f2.py lib/epsilon_five/f3.py lib/zeta_six/f0.py'
 B='mod.py c7_small.py c8_exact.py c2_big.py c3_big.py c4_big.py c5_big.py'
 C='a/b/c/setup.py a/b/c/x.py a/y.go d/new_name.py z/f00.py z/f01.py z/f02.py z/f03.py z/f04.py z/f05.py z/f06.py z/f07.py z/f08.py z/f09.py z/f10.py z/f11.py z/f12.py z/f13.py z/f14.py z/f15.py z/f16.py z/f17.py z/f18.py z/f19.py z/f20.py z/f21.py z/f22.py z/f23.py z/f24.py z/f25.py z/f26.py z/f27.py z/f28.py z/f29.py z/f30.py z/f31.py z/f32.py z/f33.py z/f34.py z/f35.py z/f36.py z/f37.py z/f38.py z/f39.py z/f40.py z/f41.py z/f42.py z/f43.py z/f44.py z/f45.py z/f46.py z/f47.py z/f48.py z/f49.py z/f50.py z/f51.py z/f52.py z/f53.py z/f54.py z/f55.py a/package.json Gemfile a/b/c/foo.gemspec a/b/c/requirements.txt a/b/go.mod d/pom.xml z/build.gradle.kts q/user.py'
-for x in A B C; do
-  r=$(echo "$x" | tr ABC abc); lst "$ROOT/fx/$r"; eval "want=\$$x"
+D='m.py u/f03.py u/f04.py u/f05.py u/f06.py u/f07.py u/f08.py u/f10.py u/f11.py u/f12.py u/f13.py u/f14.py u/f15.py u/f16.py u/f17.py u/f19.py u/f20.py u/f21.py u/f22.py u/f23.py u/f24.py'
+for x in A B C D; do
+  r=$(echo "$x" | tr ABCD abcd); lst "$ROOT/fx/$r"; eval "want=\$$x"
   [ "$lrc" = 0 ] && [ "$got" = "$want" ] && ok "L2 fixture $r: the server rule's list, in its order" || fail "L2 fixture $r: rc $lrc got [$got]"
 done
 

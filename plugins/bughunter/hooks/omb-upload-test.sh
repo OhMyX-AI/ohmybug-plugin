@@ -1051,7 +1051,16 @@ printf 'x = 1\n' > "$PF/lib/other.py"; printf 'part_helper_name\n' > "$PF/docs/g
 g -C "$PF" add -A; g -C "$PF" commit -qm base
 printf 'def compute():\n    return part_helper_name(1)\n' > "$PF/src/core.py"
 PWANT=$(want_names src/core.py package.json lib/use.py lib/use2.py)
-fresh; run "$PF" "$URL" partial --head
+# A python3 on PATH that counts the runs of the file list.
+PYW="$ROOT/pywrap"; mkdir -p "$PYW"
+printf '#!/bin/sh
+case "$*" in *omb_paths.py*) echo run >> "%s/pathruns" ;; esac
+exec %s "$@"
+' "$ROOT" "$(command -v python3)" > "$PYW/python3"; chmod +x "$PYW/python3"
+pathruns() { wc -l < "$ROOT/pathruns" 2>/dev/null | tr -d ' ' || echo 0; }
+: > "$ROOT/pathruns"
+fresh; out=$(cd "$PF" && PATH="$PYW:$BIN:$PATH" "$TSH" "$UP" "$URL" partial --head 2>&1); rc=$?
+[ "$(pathruns)" = 1 ] || fail "PP2 the file list ran $(pathruns) times, want 1"
 [ "$rc" = 0 ] && [ "$(tarnames)" = "$PWANT" ] && grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" && [ "$(seq_)" = "repo payload " ] \
   && ok "PP2 partial: the snapshot is exactly the list, and only its request carries ?pack=partial" || fail "PP2 partial: rc $rc [$(tarnames | tr '\n' ' ')] $(cat "$STUB/transcript")"
 grep -q "^CURL payload $URL\$" "$STUB/transcript" || fail "PP2 the payload door got a mark: $(cat "$STUB/transcript")"
@@ -1059,9 +1068,10 @@ printf '%s' "$out" | grep -q '+ partial repository snapshot: 4 of 6 files (1 of 
   && printf '%s' "$out" | grep -q 'Left out: every other file, git-ignored files, submodules, 0 secret-named files' \
   && ok "PP2 ...the manifest says partial, N of M, by kind, and what is left out" || fail "PP2 manifest: $out"
 PSHA=$(sha "$STUB/repo.1.sent"); PLINE=$(printf '%s\n' "$out" | grep '^OhMyBug upload')
-fresh; run "$PF" "$URL" required --head
-[ "$rc" = 0 ] && [ "$(tarnames | wc -l | tr -d ' ')" = 6 ] && grep -q "^CURL repo $URL/repo\$" "$STUB/transcript" \
-  && ok "PP1 required on the same working copy: the whole snapshot, no mark" || fail "PP1 required: rc $rc [$(tarnames | tr '\n' ' ')] $(cat "$STUB/transcript")"
+: > "$ROOT/pathruns"
+fresh; out=$(cd "$PF" && PATH="$PYW:$BIN:$PATH" "$TSH" "$UP" "$URL" required --head 2>&1); rc=$?
+[ "$rc" = 0 ] && [ "$(tarnames | wc -l | tr -d ' ')" = 6 ] && grep -q "^CURL repo $URL/repo\$" "$STUB/transcript" && [ "$(pathruns)" = 0 ] \
+  && ok "PP1 required on the same working copy: the file list never runs; the whole snapshot, no mark" || fail "PP1 required: list runs $(pathruns), rc $rc [$(tarnames | tr '\n' ' ')] $(cat "$STUB/transcript")"
 # PP12: the same working copy packs to the same bytes, and a ticket that holds them takes the payload.
 fresh; plan repo "$(taken "$PSHA")"; run "$PF" "$URL" partial --head
 [ "$rc" = 0 ] && [ "$(sha "$STUB/repo.1.sent")" = "$PSHA" ] && [ "$(seq_)" = "repo payload " ] \
@@ -1118,7 +1128,7 @@ g -C "$PF" reset -q --hard HEAD~1
 # PP8: paths with a space, a quote, a leading '-', a line break and (where the
 # file system allows it) bytes that are not UTF-8: the exact members.
 odd="$(printf 'sp ace.py\nquo"te.py\n-dash.py\nnew\nline.py')"
-PO="$ROOT/podd"; mkdir -p "$PO"; g -C "$PO" init -q; printf 'pass\n' > "$PO/m.py"
+PO="$ROOT/podd"; mkdir -p "$PO"; g -C "$PO" init -q; printf 'pass\n' > "$PO/m.py"; printf 'x = 1\n' > "$PO/other.py"
 ( cd "$PO" && printf 'odd_name_call()\n' > 'sp ace.py' && printf 'odd_name_call()\n' > 'quo"te.py' && printf 'odd_name_call()\n' > ./-dash.py && printf 'odd_name_call()\n' > "$(printf 'new\nline.py')" )
 NONU=; if ( cd "$PO" && printf 'odd_name_call()\n' > "$(printf 'caf\351.py')" ) 2>/dev/null && [ -e "$PO/$(printf 'caf\351.py')" ]; then NONU=1; fi
 g -C "$PO" add -A; g -C "$PO" commit -qm base; printf 'pass\nodd_name_call()\n' > "$PO/m.py"
@@ -1126,7 +1136,7 @@ fresh; run "$PO" "$URL" partial --head
 want=$(python3 -I -c 'import sys
 n = ["m.py", "sp ace.py", "quo\"te.py", "-dash.py", "new\nline.py"] + (["caf\udce9.py"] if sys.argv[1] else [])
 for x in sorted(n): print(repr(x))' "$NONU")
-[ "$rc" = 0 ] && [ "$(tarnames)" = "$want" ] && ok "PP8 odd paths (space, quote, leading '-', line break$([ -n "$NONU" ] && echo ', not UTF-8')): the exact members" || fail "PP8 odd paths: rc $rc [$(tarnames)] want [$want] $out"
+[ "$rc" = 0 ] && [ "$(tarnames)" = "$want" ] && grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" && ok "PP8 odd paths (space, quote, leading '-', line break$([ -n "$NONU" ] && echo ', not UTF-8')): the exact members" || fail "PP8 odd paths: rc $rc [$(tarnames)] want [$want] $out"
 # PP9: a sparse checkout: a file outside the cone that uses the name is not in the working tree's index, so not in the copy.
 SPS="$ROOT/sps-src"; mkdir -p "$SPS/src" "$SPS/far"; g -C "$SPS" init -q
 printf 'pass\n' > "$SPS/src/a.py"; printf 'far_helper_name()\n' > "$SPS/far/b.py"; printf 'far_helper_name()\n' > "$SPS/src/c.py"

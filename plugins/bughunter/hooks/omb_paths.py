@@ -11,7 +11,7 @@ and every folder above, then the unchanged files that use the names the added
 lines call or define (at most 40 names, 4 or more characters, longest first; a
 name found in more than 8 files says nothing), at most 20 of them by weight.
 Then the caps, in that rank order: a file over 4 MiB is skipped, a file with a
-NUL byte in its first 8000 bytes is skipped, and a file that would take the
+NUL byte in its first 8000 bytes or a git-lfs pointer is skipped, and a file that would take the
 total past 16 MiB is skipped while the next ones still may fit.
 
 Inputs are git facts only: <changed.z> the diff's file names, NUL-separated;
@@ -179,7 +179,9 @@ def main(gitdir, tree, changed_z, added_f, keep_z, stats_f):
             if len(data) != n + 1:
                 q.kill(); q.wait()
                 raise SystemExit(2)
-            if b"\0" in data[:min(n, 8000)]:
+            # A NUL byte in the first 8000 bytes, or a git-lfs pointer (the
+            # content is not here): the server rule leaves both out.
+            if b"\0" in data[:min(n, 8000)] or data.startswith(b"version https://git-lfs.github.com/spec/"):
                 binary.add(p)
         if q.wait():
             raise SystemExit(2)
