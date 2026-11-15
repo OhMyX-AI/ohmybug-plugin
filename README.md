@@ -35,6 +35,15 @@ That's the whole setup. On first use Claude Code opens a GitHub sign-in in
 your browser; your account (with a free first review) is created
 automatically. No keys to copy, nothing lands in config files.
 
+In the first session after install, your assistant asks three quick questions
+that set your defaults: which copy of your code goes to a hunt when OhMyBug
+cannot read it on GitHub, the hunt that runs when you name none, and whether
+to keep stories of the bugs it finds. Run `/bughunter:setup` to change them
+later, or use ohmybug.ai/me/policy. The questions need Claude Code's question
+tool, so a headless run never sees them. Stated assumption: the notice is
+offered at most 3 times per machine; after that only `/bughunter:setup` asks.
+In Codex, say "set up OhMyBug".
+
 Headless or CI, with no browser: put an operator-issued `omb_` key (write to
 [hi@ohmybug.ai](mailto:hi@ohmybug.ai) to get one) in `~/.ohmybug/api-key`,
 and the plugin signs in with it. Claude Code does not pass variables named

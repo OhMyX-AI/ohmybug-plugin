@@ -10,7 +10,7 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/scan-hint.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/intro.sh",
             "commandWindows": "exit 0"
           },
           {

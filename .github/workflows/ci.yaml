@@ -33,6 +33,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
       - run: bash plugins/bughunter/hooks/gate-test.sh
       - run: bash plugins/bughunter/hooks/codex-router-test.sh
+      - run: bash plugins/bughunter/hooks/intro-test.sh
       # The scan must read a payload under a multibyte locale; its test fails,
       # not skips, when a locale is missing, so generate the ones it runs under.
       - run: |

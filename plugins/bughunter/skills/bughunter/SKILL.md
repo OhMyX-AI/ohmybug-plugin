@@ -310,6 +310,85 @@ created automatically, once per machine. Then retry the tool call.
 (Do not run `claude mcp login` or `codex mcp login` yourself: they need
 an interactive tty.)
 
+## First-run setup
+
+Three questions that set the account's defaults, asked once per machine. In
+Claude Code the session-start hook asks for it in your first reply, at most
+three times per machine; `/bughunter:setup` runs it any time. In Codex it
+starts only on the user's word ("set up OhMyBug"). In Claude Code it needs
+the question tool (`AskUserQuestion`): without one (a headless run), do
+nothing and say nothing about it. Then answer what the user asked.
+
+1. Call `get_balance`. If it fails, say nothing about the setup, write
+   nothing and stop. If its `policy.intro.version` is 1 or more and this is
+   not `/bughunter:setup`, run `bash '<skill_dir>/../../hooks/intro.sh' done`,
+   say nothing and stop: the setup ran on another machine.
+2. Say, as plain text: "OhMyBug hunts bugs in your changes in the cloud. You
+   pay only when a real bug is found: a clean change costs nothing. Three quick
+   questions set your defaults; change them any time with /bughunter:setup or
+   on ohmybug.ai/me/policy." Add "Your first hunt that finds a bug costs
+   nothing." only when `get_balance` shows one still free.
+3. Ask the three questions in ONE question-tool call (in Codex: in chat,
+   numbered, a free-text answer accepted). The option equal to the saved
+   value in `get_balance` `policy` is marked "(current)".
+   - **Upload.** "When OhMyBug cannot read your code on GitHub, a copy goes
+     to the hunt sandbox. Which copy?" Git-ignored and secret-named files
+     are left out either way.
+     - "Changed files and the files around them (recommended)": "About 5% of
+       a typical repository. On our benchmark of 22 pull requests it scored
+       77.2 against 76.1 for the whole repository, in 137 s against 183 s."
+       Sends `upload: "partial"`.
+     - "The whole working copy": "Slower; for bugs that live far from the
+       change." Sends `upload: "full"`.
+     - "Skip (keep the current setting)".
+   - **Default hunt.** "Which hunt runs when you name none?" A deep hunt
+     runs only when asked: say its price in the question, from `get_balance`.
+     - "Let OhMyBug choose (recommended)": sends `hunt_mode: "auto"`.
+     - "Quick check, <snap price>": sends `hunt_mode: "snap"`.
+     - "Fast hunt, <fast price>": sends `hunt_mode: "fast"`.
+     - "Skip (keep the current setting)".
+
+     Prices come only from `get_balance` `modes` (`price_usd`); a mode not
+     listed there is not offered.
+   - **Stories.** Not asked when the saved `stories` is `auto`: say in one
+     line that automatic posting stays as it is, and send no `stories`. The
+     question: "When a hunt finds a real bug, your agent can write a short
+     story of it: two sentences on the trap and how it fires, plus the rule
+     that avoids it. Kept together in your account, they show the mistakes
+     your agents make most. Before a story goes public, your agent removes
+     every name (repo, file, company, code), and our check removes names
+     again and holds any story it is unsure about." Then `get_balance`
+     `free_review_rule` word for word, when present; never a reward rule of
+     your own.
+     - "Keep them in my account only (recommended)": "Off every public page,
+       at ohmybug.ai/me/stories. Your agent still asks before each story, and
+       private stories earn nothing toward the reward." Sends
+       `stories: "private"`.
+     - "Publish them, signed with my GitHub name": "Your agent asks before
+       each story." Sends `stories: "ask"`, `author: "handle"`.
+     - "Publish them unsigned": "The same, without your name." Sends
+       `stories: "ask"`, `author: "anonymous"`.
+     - "Don't write them": "No stories, no questions." Sends
+       `stories: "never"`.
+4. A skipped question, or a dismissed dialog, sends nothing for its fields.
+5. Run `bash '<skill_dir>/../../hooks/intro.sh' done`: it writes this
+   machine's marker and prints the time (no such script, as in a skill-only
+   install: `date -u +%Y-%m-%dT%H:%M:%SZ`). Then make ONE `set_policy` call:
+   the answered fields plus `intro: {"version": 1, "at": "<that time>"}`.
+   Never a second policy write in the setup: it would void a `confirm_url`.
+6. Say: "Done. /bughunter:review hunts what you have, /bughunter:scan a
+   GitHub repository, /bughunter:stats shows your record." (In Codex, in
+   words: "ask for an OhMyBug review, a scan of this repository, or your
+   record.") When the answer carries `confirm_url` (signed stories over a
+   saved unsigned setting), add last: "Open this link to sign your stories
+   with your GitHub name: <confirm_url>. It is valid for 24 hours; until then
+   stories stay unsigned." Nothing waits on it.
+7. `set_policy` refused or unreachable: one line, "Your choices were not
+   saved: <the server's sentence>. Run /bughunter:setup to try again.", and
+   go on with the session. No retry. The marker stays written.
+
+In Codex, say "set up OhMyBug" wherever these lines name `/bughunter:setup`.
+
 ## The flow
 
 ### 1. Scope the diff
