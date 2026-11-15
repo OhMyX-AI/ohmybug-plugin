@@ -19,7 +19,7 @@ router, config, manifest, mcp, marketplace = sys.argv[1:]
 def run(event, payload=None):
     proc = subprocess.run(
         ["node", router, event],
-        input=None if payload is None else json.dumps(payload),
+        input="" if payload is None else json.dumps(payload),
         text=True,
         capture_output=True,
         check=True,
@@ -27,21 +27,49 @@ def run(event, payload=None):
     return json.loads(proc.stdout or "{}")
 
 import os, tempfile
-# The welcome is once per machine: a fresh state dir gets it, with the routing
-# still in front and the assistant asked to say it; the second session is plain.
-os.environ["OMB_STATE_DIR"] = tempfile.mkdtemp()
+# I6: the setup offer, one line in front of nothing but the routing; no welcome
+# text, no marker written; offered 3 times in all, never once the setup is done.
+state = tempfile.mkdtemp()
+os.environ["OMB_STATE_DIR"] = state
+OFFER = "In your first reply add one line: OhMyBug is installed, say 'set up OhMyBug' for three quick questions; then go on."
 first = run("session")
-assert "OhMyBug is installed" in first["systemMessage"], first
+assert first["systemMessage"] == "OHMYBUG: cloud code review", first
 first_text = first["hookSpecificOutput"]["additionalContext"]
 assert first_text.startswith("OhMyBug is the code review: whenever the user asks for a review"), first_text[:80]
-# The timing is the point: at once, instead of a local review, not after one.
+assert first_text.endswith(" " + OFFER), first_text[-200:]
 assert "run the hunt at once as that review, instead of a local review and not after one" in first_text
 assert "never on your own initiative" in first_text
-assert "in your first reply" in first_text and "Run the OhMyBug cloud hunt on my code" in first_text
-# The first hunt is one step away, on the user's yes only.
-assert "offer once to hunt" in first_text and "only if they say yes" in first_text and "do not start a hunt" not in first_text
+assert "Run the OhMyBug cloud hunt on my code" not in first_text and "first is free" not in first_text
+assert not os.path.exists(os.path.join(state, "intro-v1")) and not os.path.exists(os.path.join(state, "codex-welcome-v1"))
+assert OFFER in run("session")["hookSpecificOutput"]["additionalContext"]
+assert OFFER in run("session")["hookSpecificOutput"]["additionalContext"]
 session = run("session")
-assert "OhMyBug is installed" not in session["systemMessage"], session
+assert OFFER not in session["hookSpecificOutput"]["additionalContext"], "a fourth offer"
+# I11: a resumed, cleared or compacted session neither offers nor counts.
+mid = tempfile.mkdtemp(); os.environ["OMB_STATE_DIR"] = mid
+for src in ("resume", "clear", "compact"):
+    assert OFFER not in run("session", {"source": src})["hookSpecificOutput"]["additionalContext"], src
+assert not os.path.exists(os.path.join(mid, "intro-v1-offers")), "a mid-task session spent an offer"
+assert OFFER in run("session", {"source": "startup"})["hookSpecificOutput"]["additionalContext"]
+done = tempfile.mkdtemp(); open(os.path.join(done, "intro-v1"), "w").close()
+os.environ["OMB_STATE_DIR"] = done
+assert OFFER not in run("session")["hookSpecificOutput"]["additionalContext"], "offered after the setup"
+assert not os.path.exists(os.path.join(done, "intro-v1-offers"))
+os.environ["OMB_STATE_DIR"] = state
+# I7: the user's words start the setup.
+for prompt in ("set up OhMyBug", "please setup ohmybug", "OhMyBug setup now"):
+    text = run("prompt", {"prompt": prompt})["hookSpecificOutput"]["additionalContext"]
+    assert "run the First-run setup of the bughunter skill" in text, prompt
+assert "First-run setup" not in json.dumps(run("prompt", {"prompt": "set up the database"}))
+# I9: a review ask beside the setup ask is still routed, with the setup too.
+text = run("prompt", {"prompt": "set up OhMyBug and then review this PR"})["hookSpecificOutput"]["additionalContext"]
+assert "Route this request now" in text and "run the First-run setup of the bughunter skill" in text, text[-300:]
+# I10: a counter that cannot be written means no offer (it would offer forever).
+ro = tempfile.mkdtemp(); open(os.path.join(ro, "intro-v1-offers"), "w").write("0\n"); os.chmod(os.path.join(ro, "intro-v1-offers"), 0o444)
+if os.geteuid() != 0:
+    os.environ["OMB_STATE_DIR"] = ro
+    assert OFFER not in run("session")["hookSpecificOutput"]["additionalContext"], "offered with a counter it cannot write"
+    os.environ["OMB_STATE_DIR"] = state
 assert session["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 session_text = session["hookSpecificOutput"]["additionalContext"]
 # One cadence (#67): the automation fires once per interval_s and a wake is ONE
@@ -888,9 +916,16 @@ for phrase in ("### Hunt modes: lite, snap, fast", "send it as `submit_review`'s
     assert phrase in skill, phrase
 # The upload goes through the plugin's own script, never a command from a tool answer.
 assert "bash '<skill_dir>/../../hooks/omb-upload.sh'" in skill and "--base '<base_branch>'" in skill and "<N>` is\n   a number from 1 to 999 with no leading zero" in skill and "instruction gives" not in skill and "--fail-with-body" not in skill
+# The partial copy: the mark is the ticket's word, the script's work, and a rerun keeps it.
+for phrase in ("`<snapshot>` is `partial` only when the answer that gave you this\n   `upload_url` carries `pack: \"partial\"`", "A deep ticket is\n   always `required`",
+               "Never add `?pack=partial` to a URL or build a file list\n   yourself", "A rerun after `75` is the same command with the same second\n   argument",
+               "is this hunt only: run the command with `required` in\n     place of `partial`", "Saved settings stay as they\n     are; only when the user says so for every hunt",
+               "Never `partial` here,\neven when a ticket earlier in this session carried `pack: \"partial\"`", "the server\n     refused the partial mark", "this was a deep-hunt ticket and it is retired",
+               "the\n     hunt was not started and nothing was billed"):
+    assert phrase in skill, phrase
 # The two answer values reach the single-quoted command only after a shape check.
 for phrase in ("Check every value BEFORE you write the command", "`https://mcp.ohmybug.ai/u/` followed only by letters, digits, `_` or `-`",
-               "`<snapshot>` is exactly `required` or `off`", "and does not start with `-`", "goes into no shell command"):
+               "`<snapshot>` is exactly `required`, `partial` or `off`", "and does not start with `-`", "goes into no shell command"):
     assert phrase in skill, phrase
 assert "Otherwise send no `mode`: the hunt is `fast`" not in skill and "The mode is `fast` – stage one" not in skill and "**A review starts fast**" not in skill
 assert "may start with a first step" in skill and "§the routed\n  hunt under the watch loop" in skill and "get the `fast` hunt" in skill
