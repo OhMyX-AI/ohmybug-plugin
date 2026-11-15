@@ -1,5 +1,6 @@
 #!/bin/bash
-# Refuse a submit_review whose inline payload carries a credential.
+# Refuse a submit_review whose inline payload carries a credential, and a challenge_finding (a dispute) that quotes
+# one or cites a path git does not list in this repository.
 #
 # Why a shell hook and not the Claude Code mod: a check that only some clients
 # run is a check the others silently lack. This one fires wherever hooks.json
@@ -43,6 +44,10 @@ if [ "${OHMYBUG_SECRET_SCAN:-1}" = 0 ]; then
   case "$INPUT" in *'__provide_files"'*|*'__challenge_finding"'*) ;; *) pass ;; esac
 fi
 command -v python3 >/dev/null 2>&1 || {
+  case "$INPUT" in *'__challenge_finding"'*)
+    echo "OhMyBug: a dispute is checked before it is sent (its paths against git, its text for credentials), and python3 is not found, so it was NOT sent. Judge the finding without a dispute." >&2
+    exit 2 ;;
+  esac
   printf '%s\n' '{"systemMessage":"OhMyBug: secret scan skipped before this upload (python3 not found)."}'
   pass
 }
@@ -129,34 +134,61 @@ if str(d.get("tool_name") or "").endswith("__provide_files") and "paths" in ti a
     note = "OhMyBug read %d requested file(s) from disk for provide_files%s." % (len(sent), (": " + ", ".join(sent)) if sent else "")
     if skipped:
         note += " Not sent (missing, unreadable, not a regular file, a symlink, under .git or outside the repository): " + ", ".join(skipped) + "."
-# A dispute (challenge_finding) sends a claim and quoted lines of the repository. Each evidence path must name a file
-# inside it: relative, no empty, "." or ".." part, not under .git, not a file that holds keys. The claim and every note
-# are scanned like file contents. A path outside the repository is refused even with the scan turned off.
+# A dispute (challenge_finding) sends a claim and notes on lines of the repository. Each evidence path must be a
+# regular file git lists in this repository, reached with no symlink (the provide_files rule, omb_scan.read_listed),
+# and not a file that holds keys in any letter case: so a spelling (a backslash, a case variant, a nested .git, a
+# path outside) cannot pass, even with the scan turned off. Every string the call carries is scanned like a file.
 if str(d.get("tool_name") or "").endswith("__challenge_finding"):
-    from omb_scan import KEY_FILE, ENV_FILE
-    claim = ti.get("claim")
-    if claim is not None and not isinstance(claim, str):
-        raise TypeError("claim")
-    ev = ti.get("evidence")
-    if ev is None:
-        ev = []
+    import subprocess
+    from omb_scan import KEY_FILE, ENV_FILE, read_listed
+
+    def shape(field):
+        stop(7, field)
+
+    if not isinstance(ti.get("claim"), str):
+        shape("claim must be a string")
+    ev = ti.get("evidence", [])
     if not isinstance(ev, list):
-        raise TypeError("evidence")
-    bad, notes = [], []
+        shape("evidence must be a list of {path, line, note}")
     for e in ev:
         if not isinstance(e, dict) or not isinstance(e.get("path"), str):
-            raise TypeError("evidence item")
-        p = e["path"]
-        parts = p.replace("\\", "/").split("/")
-        if p.startswith(("/", "\\", "~")) or re.match(r"^[A-Za-z]:", p) or any(x in ("", ".", "..") for x in parts) or parts[0] == ".git" or KEY_FILE.search(p) or ENV_FILE.search(p):
-            bad.append(p)
-        note = e.get("note")
-        if note is not None and not isinstance(note, str):
-            raise TypeError("note")
-        notes.append({"path": p, "content": note or ""})
+            shape("each evidence item needs a string path")
+        if e.get("note") is not None and not isinstance(e.get("note"), str):
+            shape("an evidence note must be a string")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        top = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=d.get("cwd") or None,
+                                      env=env, stderr=subprocess.DEVNULL).rstrip(b"\n")
+    except (OSError, subprocess.CalledProcessError):
+        stop(8, "")
+    top = os.path.realpath(top)
+    listed = set(subprocess.check_output(["git", "ls-files", "-z", "-co", "--exclude-standard"], cwd=top, env=env).split(b"\0"))
+    bad = []
+    for e in ev:
+        rel, data = read_listed(top, listed, e["path"])
+        name = rel.decode("utf-8", "replace").lower() if rel is not None else ""
+        if data is None or KEY_FILE.search(name) or ENV_FILE.search(name):
+            bad.append(e["path"])
     if bad:
         stop(6, "\n".join("  - " + p for p in bad))
-    ti = {"files": [{"path": "claim", "content": claim or ""}] + notes}
+    strings = []
+
+    def collect(v, where):
+        if isinstance(v, str):
+            strings.append({"path": where, "content": v})
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                collect(x, where if k in ("note", "claim") else "%s.%s" % (where, k))
+        elif isinstance(v, list):
+            for i, x in enumerate(v):
+                collect(x, "%s[%d]" % (where, i))
+
+    for k, v in ti.items():
+        if k not in ("finding_id", "evidence"):
+            collect(v, k)
+    for i, e in enumerate(ev):
+        collect({k: v for k, v in e.items() if k != "path"}, "evidence[%d] note (%s)" % (i, e["path"]))
+    ti = {"files": strings}
 if os.environ.get("OHMYBUG_SECRET_SCAN", "1") == "0":
     ti = {}
 
@@ -183,10 +215,18 @@ if [ "$rc" = 4 ] && [ -n "$OUT" ]; then
 fi
 if [ "$rc" = 6 ] && [ -n "$OUT" ]; then
   {
-    echo "OhMyBug: a dispute cites only files inside this repository, by a relative path, never a file that holds keys. Not sent, because of:"
+    echo "OhMyBug: a dispute cites only files git lists in this repository, by a path relative to its root (no empty, \".\" or \"..\" part, no symlink), never a file that holds keys. Not sent, because of:"
     printf '%s\n' "$OUT"
-    echo "Drop those items and dispute again, or judge the finding without a dispute."
+    echo "Fix or drop those items; a dispute you change goes back to the user for a new yes before you send it. Or judge the finding without a dispute."
   } >&2
+  exit 2
+fi
+if [ "$rc" = 7 ] && [ -n "$OUT" ]; then
+  echo "OhMyBug: this dispute is not the shape challenge_finding takes ($OUT), so it was NOT sent. Send {finding_id, claim, evidence: [{path, line, note}]}, or judge the finding without a dispute." >&2
+  exit 2
+fi
+if [ "$rc" = 8 ]; then
+  echo "OhMyBug: a dispute's paths are checked against the git repository this session runs in, and this directory is not inside one, so it was NOT sent. Judge the finding without a dispute." >&2
   exit 2
 fi
 if [ "$rc" = 5 ]; then

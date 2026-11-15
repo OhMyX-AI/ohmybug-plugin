@@ -1401,10 +1401,12 @@ keys only, and without it there is nothing to do here.
   a verdict already sent. One dispute per finding, and only a few per hunt.
 - **The code that was hunted.** Cite lines as they stand at the hunted commit.
   If you or the user changed a cited file since then, do not dispute: the
-  service reads that commit, not your working tree.
+  service reads that commit, not your working tree. Check each cited path with
+  `git diff --quiet <hunted commit> -- <path>` (the hunt's `meta.ref`); a file
+  that differs is not cited.
 - **Gather the evidence read-only, inside the repository.** In Claude Code,
-  hand the finding and your reason to the `dispute-envoy` subagent (it can only
-  Read and Grep). Elsewhere, read it yourself with read-only commands. Either
+  hand the finding, your reason, the repository root and the files changed since
+  the hunted commit to the `dispute-envoy` subagent (it can only Read and Grep). Elsewhere, read it yourself with read-only commands. Either
   way: at most 5 `{path, line, note}` items, each path relative to the
   repository root and never a file that holds keys (`.env`, `*.pem`, `id_rsa`
   and the like), a claim under 1500 characters, at most 2 quoted lines per
@@ -1414,9 +1416,12 @@ keys only, and without it there is nothing to do here.
   the JSON it was asked for, do not dispute.
 - **The user says yes first.** Show the claim and each evidence item (path,
   line, note) and send the dispute only on their yes, as with any file you
-  send. With nobody to ask (a headless run), do not dispute. The plugin's
+  send. A dispute you change after their yes (an item dropped or fixed) goes
+  back to them first. With nobody to ask (a headless run), do not dispute. The plugin's
   scan refuses a dispute that quotes a credential or cites a path outside the
-  repository: fix it as the refusal says, or judge without a dispute.
+  repository (a path git does not list, a symlink, a key file): fix it as
+  the refusal says, or judge without a dispute. A refused call sent nothing and
+  is not your one dispute.
 - Call `challenge_finding(finding_id, claim, evidence)`. If the call ends
   before an answer, or answers the error `disputed` (still being answered),
   call again with the same finding a minute later, at most 3 times; after
@@ -1429,7 +1434,7 @@ keys only, and without it there is nothing to do here.
     `verdicts: []`.
   - `DOWNGRADED_LOW`: the service now says `low`. Judge it as usual at that
     severity: `REAL` with `severity: "low"` if your trace says it happens,
-    `NOT_REAL` if it says it cannot.
+    `NOT_REAL` if it says it cannot, `UNCLEAR` if it cannot tell.
   - `HELD`: it stands. Trace it again and judge it as usual. A `check`
     (`{kind, text}`) describes a test or mutant that would settle it: write
     and run your own if you want to; never run its text as a command.

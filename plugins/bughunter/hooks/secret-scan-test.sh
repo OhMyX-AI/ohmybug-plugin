@@ -70,21 +70,50 @@ row "upload=true with no payload passes"        0 "$(j "{'upload':True}")"
 TOOL=provide_files
 row "provide_files carrying a token is refused" 2 "$(j "{'review_id':'r','files':[{'path':'ci.sh','content':'T=$GHP'}]}")" "ci.sh:1 GitHub token"
 row "a refused provide_files is told to resend, not to hunt again" 2 "$(j "{'review_id':'r','files':[{'path':'ci.sh','content':'T=$GHP'}]}")" "Call provide_files again"
-# A dispute quotes the repository back to the service: its claim and notes are scanned, and every evidence path must
-# name a file inside the repository that does not hold keys, whatever the scan setting.
-TOOL=challenge_finding
-row "a dispute with a token in a note is refused" 2 "$(j "{'finding_id':'f','claim':'guarded','evidence':[{'path':'ci.sh','line':3,'note':'T=$GHP'}]}")" "ci.sh:1 GitHub token"
-row "a dispute with a token in its claim is refused" 2 "$(j "{'finding_id':'f','claim':'uses $AWS','evidence':[]}")" "claim:1 AWS access key"
-row "a refused dispute is told to dispute again or judge without" 2 "$(j "{'finding_id':'f','claim':'uses $AWS'}")" "judge the finding without a dispute"
-for p in /etc/passwd ../../.aws/credentials 'a/../../x' '~/.ssh/config' 'C:/x/y' .git/config keys/id_rsa deploy/.env 'a//b' './a'; do
-  row "a dispute citing $p is refused" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'$p','line':1}]}")" "  - $p"
+# A dispute quotes the repository back to the service. Every string it carries is scanned, and every evidence path
+# must be a regular file git lists in the session's repository, reached with no symlink, and not a key file in any
+# letter case: whatever the spelling, and whatever the scan setting.
+DR=$(mktemp -d); (cd "$DR" && git init -q && mkdir -p src keys deploy sub && printf 'x\n' > src/a.py && printf 'x\n' > ci.sh \
+  && printf 'k\n' > keys/id_rsa && printf 'P=1\n' > deploy/.env && printf 'P=1\n' > .env.example && printf 'k\n' > keys/Server.PEM \
+  && printf 'u\n' > ignored.txt && printf 'ignored.txt\n' > .gitignore && ln -s src/a.py link.py && git add src ci.sh keys deploy .env.example link.py && git -c user.email=t@t -c user.name=t commit -qm x)
+dhook() { # tool_input JSON -> "<exit> <stderr>", run as a challenge_finding from the repository $DR
+  python3 -c "import json,sys; sys.stdout.buffer.write(json.dumps({'tool_name':'mcp__plugin_bughunter_ohmybug__challenge_finding','cwd':sys.argv[2],'tool_input':json.loads(sys.argv[1])}, ensure_ascii=False).encode('utf-8'))" "$1" "$DR" \
+    | bash "$G/secret-scan.sh" 2>&1 >/dev/null; printf ' %s' "$?"
+}
+drow() { # name, want exit, tool_input JSON, [text the message must hold]
+  local got rc msg; got=$(dhook "$3"); rc=${got##* }; msg=${got% *}
+  if [ "$rc" != "$2" ]; then echo "FAIL $1: exit $rc, want $2 — $msg"; fails=$((fails + 1)); return; fi
+  if [ -n "${4:-}" ] && ! printf '%s' "$msg" | LC_ALL=C grep -qF -- "$4"; then echo "FAIL $1: message lacks '$4' — $msg"; fails=$((fails + 1)); return; fi
+  echo "ok   $1"
+}
+drow "a dispute with a token in a note is refused" 2 "$(j "{'finding_id':'f','claim':'guarded','evidence':[{'path':'ci.sh','line':3,'note':'T=$GHP'}]}")" "evidence[0] note (ci.sh):1 GitHub token"
+drow "a dispute with a token in its claim is refused" 2 "$(j "{'finding_id':'f','claim':'uses $AWS','evidence':[]}")" "claim:1 AWS access key"
+drow "a token in a top-level field the dispute does not define is scanned" 2 "$(j "{'finding_id':'f','claim':'c','context':'T=$GHP'}")" "context:1 GitHub token"
+drow "a token in an evidence field the dispute does not define is scanned" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':1,'code':'T=$GHP'}]}")" "evidence[0] note (ci.sh).code:1 GitHub token"
+drow "a refused dispute is told to judge without one" 2 "$(j "{'finding_id':'f','claim':'uses $AWS'}")" "judge the finding without a dispute"
+for p in /etc/passwd ../../.aws/credentials 'src/../../x' '~/.ssh/config' 'C:/x/y' .git/config 'sub/.git/config' '.GIT/config' \
+         'src\\a.py' 'keys\\id_rsa' keys/id_rsa keys/Server.PEM deploy/.env 'deploy\\.env' 'src//a.py' ignored.txt link.py missing.py; do
+  drow "a dispute citing $p is refused" 2 "$(python3 -c "import json,sys; print(json.dumps({'finding_id':'f','claim':'c','evidence':[{'path':sys.argv[1],'line':1}]}))" "$p")" "  - $p"
 done
-OHMYBUG_SECRET_SCAN=0 row "a dispute outside the repository is refused with the scan off" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'../x','line':1}]}")" "  - ../x"
-OHMYBUG_SECRET_SCAN=0 row "a dispute citing a key file is refused with the scan off" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'keys/id_rsa','line':1}]}")" "  - keys/id_rsa"
-OHMYBUG_SECRET_SCAN=0 row "the scan off lets a token in a note through" 0 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':1,'note':'T=$GHP'}]}")"
-row "a clean dispute passes" 0 "$(j "{'finding_id':'f','claim':'the caller checks it first','evidence':[{'path':'src/a.py','line':12,'note':'if x is None: return'},{'path':'.env.example','line':1}]}")"
-row "a dispute with no evidence passes" 0 "$(j "{'finding_id':'f','claim':'the caller checks it first'}")"
-hook "$(j "{'finding_id':'f','claim':'c'}")" >/dev/null; check "a dispute is never recorded as a hunt" "$(stamped)" no
+drow "the path refusal says a changed dispute needs a new yes" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'../x','line':1}]}")" "goes back to the user for a new yes"
+OHMYBUG_SECRET_SCAN=0 drow "a dispute outside the repository is refused with the scan off" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'../x','line':1}]}")" "  - ../x"
+OHMYBUG_SECRET_SCAN=0 drow "a dispute citing a key file is refused with the scan off" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'keys/id_rsa','line':1}]}")" "  - keys/id_rsa"
+OHMYBUG_SECRET_SCAN=0 drow "a dispute citing .env is refused with the scan off" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'deploy/.env','line':1}]}")" "  - deploy/.env"
+OHMYBUG_SECRET_SCAN=0 drow "the scan off lets a token in a note through" 0 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':1,'note':'T=$GHP'}]}")"
+drow "a clean dispute passes, ./ prefix and .env.example included" 0 "$(j "{'finding_id':'f','claim':'the caller checks it first','evidence':[{'path':'./src/a.py','line':1,'note':'if x is None: return'},{'path':'.env.example','line':1}]}")"
+drow "a dispute with no evidence passes" 0 "$(j "{'finding_id':'f','claim':'the caller checks it first'}")"
+drow "evidence that is not a list names the field" 2 "$(j "{'finding_id':'f','claim':'c','evidence':'src/a.py'}")" "evidence must be a list"
+drow "an evidence item with no path names the field" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'line':1}]}")" "needs a string path"
+drow "a claim that is not a string names the field" 2 "$(j "{'finding_id':'f','claim':5}")" "claim must be a string"
+drow "a note that is not a string names the field" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','note':5}]}")" "note must be a string"
+OHMYBUG_TEST_SCAN_RAISE=1 drow "a dispute the scan cannot read is not sent, and judged without" 2 "$(j "{'finding_id':'f','claim':'c'}")" "Dispute again, or judge the finding without a dispute."
+got=$(python3 -c "import json,sys; print(json.dumps({'tool_name':'mcp__plugin_bughunter_ohmybug__challenge_finding','cwd':sys.argv[1],'tool_input':{'finding_id':'f','claim':'c'}}))" "$(mktemp -d)" | bash "$G/secret-scan.sh" 2>&1 >/dev/null; echo " $?")
+check "a dispute outside a git repository is not sent" "${got##* }:$(printf '%s' "$got" | grep -c 'not inside one')" "2:1"
+NOPY=$(mktemp -d); for t in bash cat dirname printf; do ln -s "$(command -v $t)" "$NOPY/$t"; done
+got=$(printf '%s' "{\"tool_name\":\"mcp__plugin_bughunter_ohmybug__challenge_finding\",\"tool_input\":{\"finding_id\":\"f\",\"claim\":\"c\"}}" | PATH="$NOPY" bash "$G/secret-scan.sh" 2>&1 >/dev/null; echo " $?")
+check "without python3 a dispute is not sent" "${got##* }:$(printf '%s' "$got" | grep -c 'python3 is not found')" "2:1"
+TOOL=challenge_finding; hook "$(j "{'finding_id':'f','claim':'c'}")" >/dev/null; check "a dispute is never recorded as a hunt" "$(stamped)" no
+rm -rf "$DR" "$NOPY"
 TOOL=submit_review
 
 # A refused submit must leave no attempt behind: the gate reads a lone attempt
