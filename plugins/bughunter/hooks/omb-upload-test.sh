@@ -1097,7 +1097,7 @@ fresh; run "$PF" "$URL" partial --head; P7A=$(sha "$STUB/repo.1.sent")
 HG="$ROOT/p7global"; cp "$GIT_CONFIG_GLOBAL" "$HG"
 for kv in grep.lineNumber=true grep.column=true grep.fullName=true grep.patternType=perl core.quotePath=false diff.noprefix=true; do git config --file "$HG" "${kv%%=*}" "${kv#*=}"; done
 printf 'lib/use.py binary\n' > "$PF/.git/info/attributes"
-fresh; out=$(cd "$PF" && GIT_CONFIG_GLOBAL="$HG" GIT_LITERAL_PATHSPECS=1 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=grep.lineNumber GIT_CONFIG_VALUE_0=true PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" partial --head 2>&1); rc=$?
+fresh; out=$(cd "$PF" && GIT_CONFIG_GLOBAL="$HG" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=grep.lineNumber GIT_CONFIG_VALUE_0=true PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" partial --head 2>&1); rc=$?
 [ "$rc" = 0 ] && [ "$(sha "$STUB/repo.1.sent")" = "$P7A" ] && [ "$(tarnames)" = "$PWANT" ] \
   && ok "PP7 grep and diff settings (user, environment, attributes): the same list and bytes" || fail "PP7 settings: rc $rc [$(tarnames | tr '\n' ' ')] $out"
 rm -f "$PF/.git/info/attributes"

@@ -901,9 +901,15 @@ for phrase in ("### Hunt modes: lite, snap, fast", "send it as `submit_review`'s
     assert phrase in skill, phrase
 # The upload goes through the plugin's own script, never a command from a tool answer.
 assert "bash '<skill_dir>/../../hooks/omb-upload.sh'" in skill and "--base '<base_branch>'" in skill and "<N>` is\n   a number from 1 to 999 with no leading zero" in skill and "instruction gives" not in skill and "--fail-with-body" not in skill
+# The partial copy: the mark is the ticket's word, the script's work, and a rerun keeps it.
+for phrase in ("`<snapshot>` is `partial` only when the answer that gave you this\n   `upload_url` carries `pack: \"partial\"`", "A deep ticket is\n   always `required`",
+               "Never add `?pack=partial` to a URL or build a file list\n   yourself", "A rerun after `75` is the same command with the same second\n   argument",
+               "call\n     `set_policy` with `upload: \"full\"`", "the server\n     refused the partial mark", "this was a deep-hunt ticket and it is retired",
+               "the\n     hunt was not started and nothing was billed"):
+    assert phrase in skill, phrase
 # The two answer values reach the single-quoted command only after a shape check.
 for phrase in ("Check every value BEFORE you write the command", "`https://mcp.ohmybug.ai/u/` followed only by letters, digits, `_` or `-`",
-               "`<snapshot>` is exactly `required` or `off`", "and does not start with `-`", "goes into no shell command"):
+               "`<snapshot>` is exactly `required`, `partial` or `off`", "and does not start with `-`", "goes into no shell command"):
     assert phrase in skill, phrase
 assert "Otherwise send no `mode`: the hunt is `fast`" not in skill and "The mode is `fast` – stage one" not in skill and "**A review starts fast**" not in skill
 assert "may start with a first step" in skill and "§the routed\n  hunt under the watch loop" in skill and "get the `fast` hunt" in skill
