@@ -1204,6 +1204,51 @@ fresh; run "$P15" "$URL" partial --commits 1
   && ok "PP15 only a binary change: the whole snapshot of HEAD, the reason named" || fail "PP15 binary only: rc $rc $out"
 
 
+# ---- 6b. The server's secret-file and nested-repository rules (snapshot-recipe.ts) ----
+# SF: kubeconfig files and prefixed .env files leave the snapshot unless their
+# name ends in a lower-case source extension; the case of the name aside.
+SF="$ROOT/sf"; mkdir -p "$SF/src" "$SF/conf"; g -C "$SF" init -q
+printf 'x = 1\n' > "$SF/src/a.py"; printf 'PASSWORD=hunter2\n' > "$SF/prod.env"; printf 'PASSWORD=hunter2\n' > "$SF/conf/Stage.ENV"
+printf 'apiVersion: v1\n' > "$SF/conf/my-kubeconfig.yaml"; printf 'apiVersion: v1\n' > "$SF/conf/kube_config"; printf 'A=1\n' > "$SF/.env.local"
+printf 'def load(): pass\n' > "$SF/src/load.env.py"; printf 'package k\n' > "$SF/src/kubeconfig_loader.go"
+g -C "$SF" add -A; g -C "$SF" commit -qm base; printf 'x = 2\n' > "$SF/src/a.py"
+fresh; run "$SF" "$URL" required --head
+[ "$rc" = 0 ] && [ "$(names)" = "$(printf '%s\n' src/a.py src/kubeconfig_loader.go src/load.env.py | sort)" ] \
+  && ok "SF secret files: prod.env, Stage.ENV, my-kubeconfig.yaml, kube_config, .env.local out; load.env.py and kubeconfig_loader.go (source) in" \
+  || fail "SF secret files: rc $rc [$(names | tr '\n' ' ')]"
+# NR: nested repositories. An untracked repo with a commit and one without, a
+# bare one (HEAD beside a config holding a token), a gitlink, and a .gnupg
+# folder: none reaches the tar, each named once on stderr with the server's
+# sentence; the gitlink, unchanged, is no deletion in the diff.
+NR="$ROOT/nr"; mkdir -p "$NR/src" "$NR/.gnupg"; g -C "$NR" init -q
+printf 'x = 1\n' > "$NR/src/a.py"; printf 'key\n' > "$NR/.gnupg/pubring.kbx"
+g -C "$NR" add src; g -C "$NR" commit -qm base
+g -C "$NR" update-index --add --cacheinfo "160000,$(g -C "$NR" rev-parse HEAD),sub"; g -C "$NR" commit -qm sub
+mkdir -p "$NR/sub" "$NR/nest1" "$NR/nest2" "$NR/mirror.git"; g -C "$NR/nest1" init -q; printf 'n\n' > "$NR/nest1/n.py"; g -C "$NR/nest1" add -A; g -C "$NR/nest1" commit -qm n
+g -C "$NR/nest2" init -q; printf 'n\n' > "$NR/nest2/n.py"
+printf 'ref: refs/heads/main\n' > "$NR/mirror.git/HEAD"; printf '[remote "o"]\n\turl = https://tok@example.invalid/r\n' > "$NR/mirror.git/config"
+printf 'x = 2\n' > "$NR/src/a.py"
+fresh; run "$NR" "$URL" required --head
+[ "$rc" = 0 ] && [ "$(names)" = src/a.py ] && [ "$(printf '%s' "$out" | grep -c 'left out nested repositories and submodules (to hunt a working repository among them, submit it on its own, from inside it):')" = 1 ] \
+  && printf '%s' "$out" | grep -qx '  nest1' && printf '%s' "$out" | grep -qx '  nest2' && printf '%s' "$out" | grep -qx '  mirror.git' && printf '%s' "$out" | grep -qx '  sub' \
+  && ! grep -q 'sub' "$STUB/payload.1.sent" \
+  && ok "NR nested repos (with and without commits, bare, gitlink) and .gnupg out of the tar, named once; the gitlink is no deletion in the diff" \
+  || fail "NR nested: rc $rc [$(names | tr '\n' ' ')] $out"
+# NE: nothing left once secret-named files and nested repositories are out
+# (top-level .gitignore alone does not count): the server's sentence, exit 1,
+# no snapshot sent.
+NE="$ROOT/ne"; mkdir -p "$NE/inner"; g -C "$NE" init -q; printf '*.log\n' > "$NE/.gitignore"; printf 'A=1\n' > "$NE/.env"
+g -C "$NE/inner" init -q; printf 'i\n' > "$NE/inner/i.py"
+fresh; run "$NE" "$URL" required --all
+[ "$rc" = 1 ] && ! grep -q '^CURL repo' "$STUB/transcript" && printf '%s' "$out" | grep -q '^nothing to pack: this folder has no files after ignored, secret-named and nested-repository paths are left out' \
+  && ok "NE nothing left to pack: the server's sentence, exit 1, nothing sent" || fail "NE empty: rc $rc $out"
+# NG: a folder without git: a nested repository in it is named and left out.
+NG="$ROOT/ng"; mkdir -p "$NG/inner"; printf 'x = 1\n' > "$NG/a.py"; g -C "$NG/inner" init -q; printf 'i\n' > "$NG/inner/i.py"; g -C "$NG/inner" add -A; g -C "$NG/inner" commit -qm i
+fresh; run "$NG" "$URL" required --all
+[ "$rc" = 0 ] && [ "$(names)" = a.py ] && printf '%s' "$out" | grep -qx '  inner' && ok "NG folder without git: the nested repository named and left out" || fail "NG no-git nested: rc $rc [$(names | tr '\n' ' ')] $out"
+# The archive's pathspec list ends in the server's spare repeat of its first secret exclude.
+grep -q "set -- \"\$@\" ':(exclude,icase,glob)\*\*/.env\*'" "$UP" && ok "the archive list ends in the spare .env* exclude" || fail "no spare exclude"
+
 # ---- 7. URL and arguments ------------------------------------------------------
 for bad in "https://evil.example/u/tok" "http://mcp.ohmybug.ai/u/tok" "https://mcp.ohmybug.ai/u/x; touch $ROOT/pwned" "https://mcp.ohmybug.ai/u/" "https://mcp.ohmybug.ai.evil/u/tok" "https://mcp.ohmybug.ai/u/a/../b"; do
   fresh; run "$R" "$bad" required "$P"

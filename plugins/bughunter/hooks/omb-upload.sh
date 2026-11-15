@@ -92,6 +92,9 @@ OMB_SECRETS='.env* *secret* *credential* id_rsa* id_dsa* id_ecdsa* id_ed25519* *
   *.ppk *.jks *.keystore .ssh .aws .gnupg'
 nl='
 '
+# The server's sentences, word for word (omb-upload-test.sh holds the parity check).
+SNAPSHOT_NESTED_NOTE='left out nested repositories and submodules (to hunt a working repository among them, submit it on its own, from inside it):'
+SNAPSHOT_EMPTY='nothing to pack: this folder has no files after ignored, secret-named and nested-repository paths are left out (top-level .gitmodules, .gitignore and .gitattributes alone do not count); nothing was sent. Without a snapshot this ticket expires on its own. A fast hunt can run in diff mode instead, on the diff alone with no repository, so its quality differs: only the user can turn that on, on the account policy page (/me/policy on the server this command uploads to); do not turn it on yourself'
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
 # -I: no PYTHON* variables and neither this folder nor the user's site on
@@ -206,8 +209,51 @@ home_check() { # $1: what is refused (pack, read)
 # --sparse where git has it (2.34+; before it, plain add -A has no such
 # refusal). A skip-worktree entry is left as it is either way, never staged as
 # a deletion. $@: options before `add`.
-add_all() {
-  if git add -h 2>&1 | grep -q -E -e '--(\[no-\])?sparse'; then git "$@" add -A --sparse; else git "$@" add -A; fi
+add_all() { # $1: a NUL pathspec file (nested's "$1/a"); then options before `add`
+  a=$1; shift
+  if git add -h 2>&1 | grep -q -E -e '--(\[no-\])?sparse'; then git "$@" add -A --sparse --pathspec-from-file="$a" --pathspec-file-nul
+  else git "$@" add -A --pathspec-from-file="$a" --pathspec-file-nul; fi
+}
+
+# Nested repositories, the server's rule (snapshot-recipe.ts): untracked ones
+# (`add -A` aborts on one with no commit and packs one with commits as an empty
+# folder; `ls-files -o` names both as dir/), tracked submodules (gitlinks, one
+# name per path), and bare ones: a folder with an entry named HEAD beside an
+# entry named config, by names alone, HEAD never read; "." only when there is
+# no .git here. In the caller's index ($GIT_INDEX_FILE). $1: a folder for its
+# files; $2: pack (all three; every tracked entry under a name leaves the
+# index), commits (the tree is HEAD's: tracked ones only, nothing added) or
+# diff (untracked ones only: a tracked entry removed from the diff's tree
+# would show as a deletion, its content in the diff). Names go to "$1/n";
+# "$1/a" is the pathspec list for add_all: "." and an exclude for what
+# `ls-files -o --exclude-standard --directory` lists under each name (an
+# ignored path lists nothing, so add never meets an exclude it refuses).
+nested() {
+  w=$1 nk=$2; : > "$w/n"; : > "$w/v"
+  if [ "$nk" != commits ]; then
+    git ls-files -z -o --exclude-standard > "$w/u"; xargs -0 sh -c 'for e; do case $e in */) printf "%s\0" "${e%/}";; esac; done' sh < "$w/u" > "$w/n"
+  fi
+  if [ "$nk" != diff ]; then
+    git ls-files -z -s > "$w/m"; xargs -0 sh -c 'for e; do case $e in "160000 "*) e=${e#160000 * [0-3]?}; [ "$e" = "$p" ] || printf "%s\0" "$e"; p=$e;; esac; done' sh < "$w/m" >> "$w/n"
+  fi
+  case $nk in pack) git ls-files -z -c -o --exclude-standard > "$w/h" ;; commits) git ls-files -z -c > "$w/h" ;; diff) cp "$w/u" "$w/h" ;; esac
+  xargs -0 sh -c 'for e; do case $e in HEAD|*/HEAD) b=${e%HEAD}; b=${b%/}; b=${b:-.}; if [ "$b" = . ] && [ -e .git ]; then continue; fi; if [ -e "$b/config" ] || [ -h "$b/config" ]; then printf "%s\0" "$b"; fi;; esac; done' sh < "$w/h" >> "$w/n"
+  # The [ -s ] guard is load-bearing: GNU xargs on empty input runs ls-files with no pathspec at all.
+  if [ -s "$w/n" ]; then
+    xargs -0 sh -c 'for e; do printf ":(literal)%s\0" "$e"; done' sh < "$w/n" > "$w/c"
+    if [ "$nk" != diff ]; then
+      xargs -0 sh -c 'exec git ls-files -z -- "$@"' sh < "$w/c" > "$w/y"
+      git -c splitIndex.maxPercentChange=100 update-index -z --force-remove --stdin < "$w/y"
+    fi
+    if [ "$nk" != commits ]; then xargs -0 sh -c 'exec git ls-files -z -o --exclude-standard --directory -- "$@"' sh < "$w/c" > "$w/v"; fi
+  fi
+  printf '.\0' > "$w/a"; xargs -0 sh -c 'for e; do printf ":(exclude,literal)%s\0" "${e%/}"; done' sh < "$w/v" >> "$w/a"
+}
+# The names, once per run (the pack can run again after a credential hit).
+nested_say() {
+  [ -s "$1" ] && [ ! -e "$d/nested-said" ] || return 0
+  : > "$d/nested-said"
+  printf '%s\n' "$SNAPSHOT_NESTED_NOTE" >&2; xargs -0 sh -c 'for e; do printf "  %s\n" "$e"; done' sh < "$1" >&2
 }
 
 # The working copy as a tree (step A): an index copy, a private object
@@ -224,7 +270,9 @@ worktree_tree() (
   printf '%s\n' "$o" > "$k/o/info/alternates"
   cp -p "$(git rev-parse --git-path index)" "$k/i" 2>/dev/null || :
   export GIT_INDEX_FILE="$k/i" GIT_OBJECT_DIRECTORY="$k/o"
-  add_all -c splitIndex.maxPercentChange=100
+  nested "$k" diff
+  [ -n "$snap" ] || nested_say "$k/n"  # with a snapshot, the pack names them (a superset)
+  add_all "$k/a" -c splitIndex.maxPercentChange=100
   git -c splitIndex.maxPercentChange=100 write-tree > "$d/D"
 )
 
@@ -529,8 +577,26 @@ pack() (
   git ls-files -z -t > "$k/l"; xargs -0 sh -c 'for e; do case $e in "S "*) printf "%s\0" "${e#S }";; esac; done' sh < "$k/l" > "$k/s"
   [ "$scope" = commits ] && git $s read-tree "$to"
   git $s update-index -z --force-remove --stdin < "$k/s"
-  [ "$scope" = commits ] || add_all $s
+  if [ "$scope" = commits ]; then nested "$k" commits; else nested "$k" pack; fi
+  nested_say "$k/n"
+  [ "$scope" = commits ] || add_all "$k/a" $s
   git $s update-index -z --force-remove --stdin < "$drop"
+  # Secret FILE names (the server's SNAPSHOT_SECRET_FILES): kubeconfig files
+  # under any name and .env files with a prefix leave the index, unless the
+  # name ends in a source-code extension (lower case only: an upper-case one
+  # is left out, the safe side). The glob's * stops at /: the file's own name.
+  git ls-files -z -- ':(icase,glob)**/*kubeconfig*' ':(icase,glob)**/*kube[-_]config*' ':(icase,glob)**/*.env' ':(icase,glob)**/*.env[!a-z0-9]*' > "$k/k"
+  xargs -0 sh -c 'for e; do case $e in *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.py|*.go|*.java|*.kt|*.kts|*.rb|*.rs|*.cs|*.php|*.swift|*.scala|*.c|*.cc|*.cpp|*.h|*.hpp|*.m|*.ex|*.exs|*.dart|*.lua) ;; *) printf "%s\0" "$e";; esac; done' sh < "$k/k" > "$k/x"
+  git $s update-index -z --force-remove --stdin < "$k/x"
+  # Nothing left to pack (only secret-named files, only nested repositories,
+  # only top-level git metadata) is refused here, as the server does; the
+  # list is the archive's pathspecs below plus the three metadata names.
+  set -- .
+  set -f
+  for q in $OMB_SECRETS; do set -- "$@" ":(exclude,icase,glob)**/$q" ":(exclude,icase,glob)**/$q/**"; done
+  set +f
+  git ls-files -- "$@" ':(exclude,literal).gitmodules' ':(exclude,literal).gitignore' ':(exclude,literal).gitattributes' > "$k/e"
+  [ -s "$k/e" ] || { printf '%s\n' "$SNAPSHOT_EMPTY" >&2; exit 1; }
   t=$(git $s write-tree); printf '%s\n' "$t" > "$k/t"
   [ -z "$partial" ] || pre "$t"  # what the index holds beyond HEAD; no request when nothing is missing
   c=$(GIT_AUTHOR_NAME=omb GIT_AUTHOR_EMAIL=omb GIT_AUTHOR_DATE='946684800 +0000' GIT_COMMITTER_NAME=omb GIT_COMMITTER_EMAIL=omb GIT_COMMITTER_DATE='946684800 +0000' git commit-tree --no-gpg-sign -m omb "$t")
@@ -566,6 +632,9 @@ pack() (
   set -f
   for q in $OMB_SECRETS; do set -- "$@" ":(exclude,icase,glob)**/$q" ":(exclude,icase,glob)**/$q/**"; done
   set +f
+  # The server's list ends in a spare repeat of its first secret exclude (a
+  # client exclude glued to the last word breaks only the spare): kept for parity.
+  set -- "$@" ':(exclude,icase,glob)**/.env*'
   git --git-dir="$k/g" archive --format=tar.gz -o "$k/s.tgz" "$c" -- "$@"
 )
 run_pack() {
