@@ -286,7 +286,7 @@ PATH="$ROOT/gw:$PATH" lst "$R"
 
 # L11: the one-regex secret check answers as one fnmatch per part and pattern
 # did (the archive's **/<pat> and **/<pat>/**, case aside), and stays fast.
-python3 -I - "$G/omb_paths.py" "$(sed -n '/^OMB_SECRETS=/,/'"'"'$/p' "$G/omb-upload.sh" | tr -d "'" | sed 's/^OMB_SECRETS=//')" <<'PY' && ok "L11 secret check: one regex, the same answers as fnmatch per pattern, 200,000 paths in under 2 s" || fail "L11 secret check differs or is slow"
+python3 -I -B - "$G/omb_paths.py" "$(sed -n '/^OMB_SECRETS=/,/'"'"'$/p' "$G/omb-upload.sh" | tr -d "'" | sed 's/^OMB_SECRETS=//')" <<'PY' && ok "L11 secret check: one regex, the same answers as fnmatch per pattern, 200,000 paths in under 2 s" || fail "L11 secret check differs or is slow"
 import fnmatch, importlib.util, random, sys, time
 spec = importlib.util.spec_from_file_location("p", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 pats = sys.argv[2].split()
