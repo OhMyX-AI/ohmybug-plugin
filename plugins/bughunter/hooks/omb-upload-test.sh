@@ -1204,6 +1204,40 @@ fresh; run "$P15" "$URL" partial --commits 1
   && ok "PP15 only a binary change: the whole snapshot of HEAD, the reason named" || fail "PP15 binary only: rc $rc $out"
 
 
+# ---- 6f. The server's secret-file packing rule ----
+# SF: kubeconfig files and prefixed .env files leave the snapshot unless their
+# name ends in a lower-case source extension; the case of the name aside.
+SF="$ROOT/sf"; mkdir -p "$SF/src" "$SF/conf"; g -C "$SF" init -q
+printf 'x = 1\n' > "$SF/src/a.py"; printf 'PASSWORD=hunter2\n' > "$SF/prod.env"; printf 'PASSWORD=hunter2\n' > "$SF/conf/Stage.ENV"
+printf 'apiVersion: v1\n' > "$SF/conf/my-kubeconfig.yaml"; printf 'apiVersion: v1\n' > "$SF/conf/kube_config"; printf 'A=1\n' > "$SF/.env.local"
+printf 'def load(): pass\n' > "$SF/src/load.env.py"; printf 'package k\n' > "$SF/src/kubeconfig_loader.go"
+g -C "$SF" add -A; g -C "$SF" commit -qm base; printf 'x = 2\n' > "$SF/src/a.py"
+fresh; run "$SF" "$URL" required --head
+[ "$rc" = 0 ] && [ "$(names)" = "$(printf '%s\n' src/a.py src/kubeconfig_loader.go src/load.env.py | sort)" ] \
+  && ok "SF secret files: prod.env, Stage.ENV, my-kubeconfig.yaml, kube_config, .env.local out; load.env.py and kubeconfig_loader.go (source) in" \
+  || fail "SF secret files: rc $rc [$(names | tr '\n' ' ')]"
+# SF2: the same rule on the diff, and the fourth pattern and the case rule:
+# a changed prod.env and new app.env.bak, a-kubeconfig.yaml and tool.env.PY
+# (upper-case extension: out) reach neither the tar nor the diff.
+printf 'PASSWORD=changed\n' > "$SF/prod.env"; printf 'X=1\n' > "$SF/app.env.bak"; printf 'x: 1\n' > "$SF/conf/a-kubeconfig.yaml"; printf 'x = 1\n' > "$SF/src/tool.env.PY"
+printf 'PASSWORD=stage2\n' > "$SF/conf/Stage.ENV"; printf 'token: kc2\n' > "$SF/conf/kube_config"; printf 'def load(): return 2\n' > "$SF/src/load.env.py"
+fresh; run "$SF" "$URL" required --head
+[ "$rc" = 0 ] && [ "$(names)" = "$(printf '%s\n' src/a.py src/kubeconfig_loader.go src/load.env.py | sort)" ] \
+  && ! grep -q 'PASSWORD\|stage2\|kc2\|app.env.bak\|a-kubeconfig\|tool.env.PY' "$STUB/payload.1.sent" && grep -q 'load.env.py' "$STUB/payload.1.sent" && printf '%s' "$out" | grep -q 'Left out of the diff as secret-named: .*prod.env' \
+  && ok "SF2 the rule on the diff too: prod.env, app.env.bak, a-kubeconfig.yaml, tool.env.PY out of tar and diff, named" \
+  || fail "SF2 secret files in the diff: rc $rc [$(names | tr '\n' ' ')] $out"
+# SF4: in diff mode a secret file named as a context file is not sent.
+fresh; run "$SF" "$URL" off --head prod.env
+[ "$rc" = 0 ] && ! grep -q 'PASSWORD' "$STUB/payload.1.sent" && printf '%s' "$out" | grep -q 'Not sent (secret-named.*prod.env' && ok "SF4 a secret file as a context file: not sent, named" || fail "SF4 context secret: rc $rc $out"
+g -C "$SF" checkout -q -- prod.env conf/Stage.ENV conf/kube_config src/load.env.py; rm -f "$SF/app.env.bak" "$SF/conf/a-kubeconfig.yaml" "$SF/src/tool.env.PY"
+# SF3: GIT_LITERAL_PATHSPECS in the caller's environment changes nothing.
+fresh; out=$(cd "$SF" && GIT_LITERAL_PATHSPECS=1 PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" required --head 2>&1); rc=$?
+[ "$rc" = 0 ] && [ "$(names)" = "$(printf '%s\n' src/a.py src/kubeconfig_loader.go src/load.env.py | sort)" ] && ok "SF3 GIT_LITERAL_PATHSPECS=1 set: the same files left out" || fail "SF3 literal pathspecs: rc $rc [$(names | tr '\n' ' ')]"
+# The two copies of the source-extension list (the pack's case, the diff's regex) agree.
+sh_ext=$(grep -o 'case \$e in \*\.ts|[^)]*)' "$UP" | head -n 1 | sed 's/^case \$e in //; s/)$//' | tr '|' '\n' | sed 's/^\*\.//' | sort | tr '\n' ' ')
+py_ext=$(grep -o 'SOURCE = re.compile(rb"\\\.([^)]*)' "$UP" | sed 's/.*(//' | tr -d ')' | tr '|' '\n' | sort | tr '\n' ' ')
+[ -n "$sh_ext" ] && [ "$sh_ext" = "$py_ext" ] && ok "the source-extension lists of the pack and the diff agree" || fail "extension lists differ: [$sh_ext] [$py_ext]"
+
 # ---- 7. URL and arguments ------------------------------------------------------
 for bad in "https://evil.example/u/tok" "http://mcp.ohmybug.ai/u/tok" "https://mcp.ohmybug.ai/u/x; touch $ROOT/pwned" "https://mcp.ohmybug.ai/u/" "https://mcp.ohmybug.ai.evil/u/tok" "https://mcp.ohmybug.ai/u/a/../b"; do
   fresh; run "$R" "$bad" required "$P"

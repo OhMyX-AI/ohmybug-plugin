@@ -94,6 +94,9 @@ nl='
 '
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
+# Every exclude below is pathspec magic; with GIT_LITERAL_PATHSPECS=1 git would
+# read each as a plain file name and leave nothing out.
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
 # -I: no PYTHON* variables and neither this folder nor the user's site on
 # sys.path. The script runs inside the user's repository, where a json.py would
 # otherwise be imported in place of the standard one. -B: no bytecode written
@@ -393,6 +396,12 @@ if blobs:
 
 # Now the bare repository, every object at hand.
 every = names(["--no-renames"], ONLY)
+# The server's secret FILE names, on the diff as in the pack: kubeconfig files
+# and prefixed .env files, unless the name ends in a lower-case source extension.
+SECRET_FILE = re.compile(rb"(?i)(kubeconfig|kube[-_]config|\.env\Z|\.env[^a-z0-9])")
+SOURCE = re.compile(rb"\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|rb|rs|cs|php|swift|scala|c|cc|cpp|h|hpp|m|ex|exs|dart|lua)\Z")
+specs = specs + [":(exclude,top,literal)" + os.fsdecode(n) for n in every
+                 if SECRET_FILE.search(n.rsplit(b"/", 1)[-1]) and not SOURCE.search(n.rsplit(b"/", 1)[-1])]
 kept = names(["--no-renames"], specs)
 keptset = set(kept)
 dropped = [n for n in every if n not in keptset]
@@ -453,6 +462,9 @@ if args:
                 if inside(r):
                     rel = r
         content = None
+        # The secret FILE rule holds for context files as for the diff.
+        if rel is not None and SECRET_FILE.search(os.fsencode(os.path.basename(rel))) and not SOURCE.search(os.fsencode(os.path.basename(rel))):
+            rel = None
         if rel is not None:
             got, data = read_listed(rtop, listed, rel)
             if got is not None and data is not None:
@@ -531,6 +543,13 @@ pack() (
   git $s update-index -z --force-remove --stdin < "$k/s"
   [ "$scope" = commits ] || add_all $s
   git $s update-index -z --force-remove --stdin < "$drop"
+  # Secret FILE names (the server's packing rule): kubeconfig files under any
+  # name and .env files with a prefix leave the index, unless the name ends in
+  # a source-code extension (lower case only: an upper-case one is left out,
+  # the safe side). The glob's * stops at /: the file's own name.
+  git ls-files -z -- ':(icase,glob)**/*kubeconfig*' ':(icase,glob)**/*kube[-_]config*' ':(icase,glob)**/*.env' ':(icase,glob)**/*.env[!a-z0-9]*' > "$k/k"
+  xargs -0 sh -c 'for e; do case $e in *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.py|*.go|*.java|*.kt|*.kts|*.rb|*.rs|*.cs|*.php|*.swift|*.scala|*.c|*.cc|*.cpp|*.h|*.hpp|*.m|*.ex|*.exs|*.dart|*.lua) ;; *) printf "%s\0" "$e";; esac; done' sh < "$k/k" > "$k/x"
+  git $s update-index -z --force-remove --stdin < "$k/x"
   t=$(git $s write-tree); printf '%s\n' "$t" > "$k/t"
   [ -z "$partial" ] || pre "$t"  # what the index holds beyond HEAD; no request when nothing is missing
   c=$(GIT_AUTHOR_NAME=omb GIT_AUTHOR_EMAIL=omb GIT_AUTHOR_DATE='946684800 +0000' GIT_COMMITTER_NAME=omb GIT_COMMITTER_EMAIL=omb GIT_COMMITTER_DATE='946684800 +0000' git commit-tree --no-gpg-sign -m omb "$t")
