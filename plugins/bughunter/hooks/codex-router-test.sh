@@ -919,7 +919,7 @@ assert "bash '<skill_dir>/../../hooks/omb-upload.sh'" in skill and "--base '<bas
 # The partial copy: the mark is the ticket's word, the script's work, and a rerun keeps it.
 for phrase in ("`<snapshot>` is `partial` only when the answer that gave you this\n   `upload_url` carries `pack: \"partial\"`", "A deep ticket is\n   always `required`",
                "Never add `?pack=partial` to a URL or build a file list\n   yourself", "A rerun after `75` is the same command with the same second\n   argument",
-               "first call `set_policy` with `upload: \"full\"`, so\n     tickets stop asking for a partial copy; then a new `submit_review`", "Only when this hunt's ticket is not yet used",
+               "is this hunt only: run the command with `required` in\n     place of `partial`", "Saved settings stay as they\n     are; only when the user says so for every hunt",
                "Never `partial` here,\neven when a ticket earlier in this session carried `pack: \"partial\"`", "the server\n     refused the partial mark", "this was a deep-hunt ticket and it is retired",
                "the\n     hunt was not started and nothing was billed"):
     assert phrase in skill, phrase
