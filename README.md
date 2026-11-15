@@ -206,7 +206,12 @@ repository per week, and is not a merge gate.
   message. Not scanned: submits that send no payload (repo + ref) have
   nothing to scan; it does not run on Windows; and a key the patterns miss,
   under a name off the list, is sent. The account's diff mode on
-  `/me/policy` sends the diff without the snapshot. Set
+  `/me/policy` sends the diff without the snapshot. When a fast hunt's
+  ticket asks for a partial copy, the snapshot holds only the changed files,
+  the build manifests above them and the files that use the names the change
+  calls or defines; the upload script builds that list from git and its
+  manifest line says what went. A repository of more than 200,000 files or
+  512 MB gets the changed files and their manifests only. Set
   `OHMYBUG_SECRET_SCAN=0` (in the `env` block of `settings.json`) to turn the
   scan off.
 - The upload script's boundary: POSIX sh (tested under dash and bash on Linux and bash 3.2 on macOS),
@@ -278,7 +283,7 @@ Turn the mod off with
 
 | Tool | In | Out |
 |---|---|---|
-| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}`, `upload?` (send the payload out of band), `mode?` (`lite`, `snap` or `fast`; absent: fast, or a routed first step that may go on to fast, see above) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}`; with `upload: true`, also `upload_url` and `snapshot` (`required`: POST the repository snapshot to `<upload_url>/repo` first, then `{diff, files}` to `upload_url`; `off`: diff mode, the payload alone) |
+| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}`, `upload?` (send the payload out of band), `mode?` (`lite`, `snap` or `fast`; absent: fast, or a routed first step that may go on to fast, see above) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}`; with `upload: true`, also `upload_url`, `snapshot` and, on a fast hunt, maybe `pack: "partial"` (`required`: POST the repository snapshot to `<upload_url>/repo` first, then `{diff, files}` to `upload_url`; with `pack: "partial"` the upload script posts a partial copy to `<upload_url>/repo?pack=partial`; `off`: diff mode, the payload alone) |
 | `get_findings` | `review_id` | `{status: running\|needs_files\|done\|failed, findings[{finding_id, severity, file, line?, title, failure_scenario, suggested_fix?}]}` |
 | `provide_files` | `review_id`, `paths[]` (Claude Code: the plugin's hook reads them from disk) or `files[{path, content}]` | `{status, delivered}` |
 | `confirm_findings` | `review_id`, `verdicts[{finding_id, verdict: REAL\|NOT_REAL\|UNCLEAR, reason, severity?, known?: {kind: deferred\|accepted, ref}}]` | `{confirmed, minor_confirmed, marked_known?, billed_usd, free_review_used, balance_usd, receipt_id}` |

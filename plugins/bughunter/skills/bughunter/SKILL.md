@@ -374,10 +374,11 @@ upload and, with `required`, packs and scans the repository snapshot exactly
 as the upload will, so its manifest line is the one the upload prints.
 `<snapshot>` here is `required`, unless an upload ticket earlier in this
 session answered `snapshot: "off"` (the account is in diff mode, the only
-way you can know before the submit): then `off`. When you cannot know, use
+way you can know before the submit): then `off`; or one earlier in this
+session carried `pack: "partial"`: then `partial`. When you cannot know, use
 `required`: it over-states what leaves the machine rather than
-under-stating it. After `submit_review`, the ticket's `snapshot` decides,
-and if it says `off`, the upload's own manifest line is the one that counts.
+under-stating it. After `submit_review`, the ticket's `snapshot` and `pack`
+decide, and the upload's own manifest line is the one that counts.
 
 ```bash
 bash '<skill_dir>/../../hooks/omb-upload.sh' --dry-run '<snapshot>' <scope>
@@ -458,6 +459,10 @@ Work down this list and stop at the first rung that applies:
    repository root (untracked files in; ignored files, secret-named files and
    submodules out; nothing written to your index or object store), scans it
    and the diff for credentials, and sends the snapshot before the payload.
+   `snapshot: "required"` with `pack: "partial"`: a fast hunt that asks for
+   a partial copy: the changed files, the build manifests above them and the
+   files that use the names the change calls or defines (the script builds
+   that list itself, from git, and says so in its manifest line).
    `snapshot: "off"`: the account is in diff mode, so the payload goes alone.
    An inline `diff` runs only in diff mode; anywhere else
    it is refused `snapshot_required` with nothing started or charged, so submit
@@ -567,7 +572,8 @@ inline `diff` outside diff mode is refused anyway.
 
 1. `submit_review` with `upload: true`, full `meta`, and NO diff/files –
    it returns `upload_url` (one-time) + `review_id` + `status_url`, and
-   `snapshot` (`required` or `off`). Send `meta.repo` + `ref` + `base_branch`
+   `snapshot` (`required` or `off`), and on a fast hunt maybe
+   `pack: "partial"`. Send `meta.repo` + `ref` + `base_branch`
    anyway: the reviewers read files with them. **Except a no-branch ladder
    payload:** leave `base_branch`
    out there (the server would review its own empty merge-base diff instead),
@@ -578,12 +584,19 @@ inline `diff` outside diff mode is refused anyway.
 2. Run the plugin's upload script in ONE shell call, with the block below as
    it stands. `<skill_dir>` is the folder this SKILL.md was loaded from (the
    client names it when it loads the skill); the script sits in the plugin's
-   `hooks/` folder beside it. `<upload_url>` and `<snapshot>`
-   are the answer's `upload_url` and `snapshot`; `<scope>` is
+   `hooks/` folder beside it. `<upload_url>` is the answer's `upload_url`.
+   `<snapshot>` is `partial` only when the answer that gave you this
+   `upload_url` carries `pack: "partial"`; with no `pack` field it is the
+   answer's `snapshot` (`required`, or `off` in diff mode). A deep ticket is
+   always `required`. Never add `?pack=partial` to a URL or build a file list
+   yourself: the script does both or neither, and its manifest line says
+   which. A rerun after `75` is the same command with the same second
+   argument, even though `get_findings` no longer shows `pack` once the
+   snapshot is stored. `<scope>` is
    `--base '<base_branch>'` (`meta.base_branch`) for a branch, or the ladder
    rung's scope. Check every value BEFORE you write the command:
    `<upload_url>` is `https://mcp.ohmybug.ai/u/` followed only by letters, digits, `_` or `-`,
-   `<snapshot>` is exactly `required` or `off`, `<base_branch>` holds only
+   `<snapshot>` is exactly `required`, `partial` or `off`, `<base_branch>` holds only
    letters, digits, `.`, `_`, `/` or `-` and does not start with `-`, `<N>` is
    a number from 1 to 999 with no leading zero, and an `--only` path goes
    inside single quotes and holds no single quote.
@@ -613,7 +626,10 @@ inline `diff` outside diff mode is refused anyway.
    handled: a hard kill leaves its private temporary folder behind; a full temporary folder fails
    a write and nothing is sent; a working copy near the server's 1 GiB
    ceiling may not pack, scan and send inside the 600 s call on a slow machine
-   (a call the client stops at 600 s counts as `75` below).
+   (a call the client stops at 600 s counts as `75` below). A partial copy of
+   a repository of more than 200,000 files or 512 MB gets no search for the
+   files that use the changed names: the changed files and their build
+   manifests only, and the manifest line says so.
 
 ```bash
 bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' <scope>
@@ -622,7 +638,18 @@ bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' <scope>
 3. Before the first POST the script prints one manifest line: what leaves
    the machine and what was left out. Show it to the user word for word; do
    not ask. Its exit status says the rest:
-   - `0` – the payload was accepted (the answer is printed).
+   - `0` – the payload was accepted (the answer is printed). A partial copy's
+     manifest line reads `+ partial repository snapshot: 83 of 6333 files
+     (41 of 41 changed, 3 build manifests, 20 files that use the changed
+     names), 310 KB packed. Left out: every other file, ...`; one that ends
+     `A partial copy was asked for and not built (...), so the whole working
+     copy goes` sent the whole copy. The hunt of a partial copy ends with one
+     line from the server that says so: show it as it comes.
+     **"Whole repository"** in the user's own words (they want the hunt to
+     see every file): run this hunt's command with `required`, and call
+     `set_policy` with `upload: "full"` so later tickets stop asking for a
+     partial copy; say both in one line, with the way back (`upload:
+     "partial"`, or /bughunter:setup).
    - `3` – the diff or a context file carries what looks like a credential,
      and nothing was sent. Show the masked list. Never rerun with the scan
      off yourself: the user removes or redacts it and the same command runs
@@ -648,7 +675,14 @@ bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' <scope>
      names `OMB_SNAPSHOT_HOME_OK=1`: that is the user's call too (the project
      really is the home folder, as in a container). Ask; only on a yes, run
      the same command again as one call with `OMB_SNAPSHOT_HOME_OK=1` in
-     front of it.
+     front of it. Three last lines about the partial copy: "the server
+     refused the partial mark" (the ticket stays valid): run the same command
+     again with `required` in place of `partial`, once, and tell the user to
+     update the plugin. "this was a deep-hunt ticket and it is retired":
+     submit the deep hunt again and run this command with `required`. "the
+     hunt was not started and nothing was billed": one new `submit_review`
+     with `upload: true`, then this command with the new ticket's values; the
+     same answer a second time in a row: stop and tell the user.
 4. The review starts on upload – arm the background monitor on `status_url`
    as usual once the script exits 0. Lite and snap never take this path:
    a submit with `upload: true` in one of those modes is refused

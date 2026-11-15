@@ -44,6 +44,8 @@ jobs:
       - run: bash plugins/bughunter/hooks/omb-upload-test.sh
       # The same rows with the script under bash (sh above is dash here).
       - run: OMB_TEST_SH=bash OMB_TEST_SKIP_SLOW=1 bash plugins/bughunter/hooks/omb-upload-test.sh
+      # The partial copy's file list against the server rule's own lists.
+      - run: bash plugins/bughunter/hooks/omb-paths-test.sh
       - run: bash plugins/bughunter/hooks/watch-guard-test.sh
       - run: bash plugins/bughunter/hooks/version-check-test.sh
       - run: bash plugins/bughunter/hooks/mcp-headers-test.sh
@@ -63,6 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: OMB_TEST_SKIP_SLOW=1 bash plugins/bughunter/hooks/omb-upload-test.sh
+      - run: bash plugins/bughunter/hooks/omb-paths-test.sh
 
   mod:
     name: Claude Code mod

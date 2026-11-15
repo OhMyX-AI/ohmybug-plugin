@@ -3216,10 +3216,10 @@ rm -rf "$(cd "$PL" && ohmybug_hunt_dir)" "$(cd "$PL" && ohmybug_hunt_dir).pendin
 NOI=$(grep -nE '(^|[^-])\bpython3( |$)' "$G/../skills/bughunter/SKILL.md" | grep -vE 'python3 -I|command -v python3|`python3`' || true)
 [ -z "$NOI" ] || { printf 'FAIL planted modules: SKILL.md runs python3 without -I:\n%s\n' "$NOI"; fails=$((fails + 1)); }
 
-# THE DETECTOR AND THE UPLOAD SCRIPT ARE CODE. The gate's sig: id leaves prose
-# out, and skills/ is prose: either file kept there could be edited after the
-# hunt without re-arming the gate. Both live in hooks/, inside the sig: pathspec.
-for code in omb_scan.py omb-upload.sh; do
+# THE DETECTOR, THE UPLOAD SCRIPT AND ITS FILE LIST ARE CODE. The gate's sig: id leaves prose
+# out, and skills/ is prose: any of them kept there could be edited after the
+# hunt without re-arming the gate. All live in hooks/, inside the sig: pathspec.
+for code in omb_scan.py omb-upload.sh omb_paths.py; do
   git ls-files -- $OHMYBUG_SKIP_GLOBS | grep -qx "plugins/bughunter/hooks/$code" \
     || { echo "FAIL $code: hooks/$code is not a file the sig: id reads"; fails=$((fails + 1)); }
   SGD=$(mktemp -d); SG="$SGD/repo"; mkrepo "$SG"

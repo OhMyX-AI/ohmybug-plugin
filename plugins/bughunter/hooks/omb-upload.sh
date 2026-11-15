@@ -1,6 +1,6 @@
 #!/bin/sh
-# omb-upload.sh <upload_url> <required|off> <scope> [--only <path>]... [context-file ...]
-# omb-upload.sh --dry-run    <required|off> <scope> [--only <path>]...
+# omb-upload.sh <upload_url> <required|partial|off> <scope> [--only <path>]... [context-file ...]
+# omb-upload.sh --dry-run    <required|partial|off> <scope> [--only <path>]...
 #   scope: --base <branch>  the merge base with origin/<branch> to the working copy
 #          --head           HEAD to the working copy
 #          --all            nothing to the working copy (all of it is new code)
@@ -9,7 +9,8 @@
 #                           or fewer refuses)
 #
 # Sends a payload hunt's bytes to its upload ticket: the repository snapshot
-# (with `required`), then {diff, files}. The script writes the diff itself.
+# (with `required`, or a partial one with `partial`), then {diff, files}.
+# The script writes the diff itself.
 # The working copy is read into a tree as a commit would read it (the user's
 # git settings decide what is ignored and how files are cleaned): tracked,
 # staged, unstaged and new files git does not ignore. The diff of two trees is
@@ -26,9 +27,20 @@
 #
 # The skill runs this file; it never runs a command a tool answer hands it.
 # Only two values come from the server: the upload URL, whose host is pinned
-# below, and required|off. Neither is ever evaluated, and the branch name is
+# below, and required|partial|off. Neither is ever evaluated, and the branch name is
 # refused unless it has the shape of a ref. It sits in hooks/, beside its
-# detector (omb_scan.py): the merge gate counts both as code. A skill-only
+# detector (omb_scan.py) and the partial copy's file list (omb_paths.py): the
+# merge gate counts all three as code.
+#
+# `partial`: the snapshot holds only the changed files, the build manifests
+# above them and the files that use the names the added lines call or define
+# (omb_paths.py says the rule), cut from the same packed tree, and the request
+# says so (?pack=partial). Only when that list was really built: with --all,
+# in a folder without git, with nothing changed in the working copy, or when
+# the list cannot be built, the whole working copy goes, unmarked, and the
+# manifest says why. A tree of more than 200,000 files or 512 MiB gets no
+# search for those files (a count, never a timer: a rerun packs the same
+# bytes), and the manifest says so. A skill-only
 # install has neither, so it cannot upload.
 #
 # Order, all before the first request: build the payload, scan it, pack the
@@ -87,17 +99,18 @@ die() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
 # otherwise be imported in place of the standard one. -B: no bytecode written
 # into the plugin folder when omb_scan is imported.
 py() { python3 -I -B "$@"; }
-USAGE="usage: omb-upload.sh (<upload_url> | --dry-run) <required|off> (--base <branch> | --head | --all | --commits <N>) [--only <path>]... [context-file ...]"
+USAGE="usage: omb-upload.sh (<upload_url> | --dry-run) <required|partial|off> (--base <branch> | --head | --all | --commits <N>) [--only <path>]... [context-file ...]"
 [ $# -ge 3 ] || die "$USAGE"
 url=$1 dry=0
 [ "$url" = --dry-run ] && dry=1
 # The one dispatch point: argv[2] is read here and nowhere else. snap says
-# what goes to <upload_url>/repo: whole = the working copy, empty = nothing
-# (diff mode).
+# what goes to <upload_url>/repo: whole = the working copy, partial = the
+# file list's part of it when one can be built, empty = nothing (diff mode).
 case $2 in
   required) snap=whole ;;
+  partial) snap=partial ;;
   off) snap= ;;
-  *) die "omb-upload: the second argument is required or off, got '$2'; nothing was sent" ;;
+  *) die "omb-upload: the second argument is required, partial or off, got '$2'; nothing was sent" ;;
 esac
 shift 2
 base= ncommits=
@@ -179,6 +192,10 @@ fi
 
 # The home-folder check, shared by the working-copy tree and the pack: a
 # folder that is the home folder or holds it is never read as a project.
+# A git call that no user, system or repository setting reaches, nor any GIT_*
+# variable but the ones given: the diff's environment, for the partial copy.
+pin() { env -i PATH="$PATH" HOME="$d/h" XDG_CONFIG_HOME="$d/h" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null LC_ALL=C "$@"; }
+
 home_check() { # $1: what is refused (pack, read)
   [ "${OMB_SNAPSHOT_HOME_OK:-}" = 1 ] && return 0
   h=; [ -n "${HOME:-}" ] && h=$(cd "$HOME" 2>/dev/null && pwd -P) || :; [ -n "$h" ] || { echo "refusing to $1: HOME is not set to a folder this shell can enter, so the home-folder check cannot run; if this folder is the project, run the same command again as one call with OMB_SNAPSHOT_HOME_OK=1 in front of it (OMB_SNAPSHOT_HOME_OK=1 bash .../omb-upload.sh ...)" >&2; exit 1; }
@@ -271,9 +288,9 @@ fi
 # The payload. The client reads the diff only to decode it (JSON carries
 # text); its files, names and counts come from git by path.
 export OMB_SECRETS excl only
-py - "$d" "$DIR" "$from" "$to" "$prefix" "$top" "$PATH" "$@" <<'PY' || exit 1
+py - "$d" "$DIR" "$from" "$to" "$prefix" "$top" "$PATH" "$snap" "$@" <<'PY' || exit 1
 import json, os, re, subprocess, sys
-d, here, frm, to, prefix, top, path, args = sys.argv[1:8] + [sys.argv[8:]]
+d, here, frm, to, prefix, top, path, snap, args = sys.argv[1:9] + [sys.argv[9:]]
 sys.path.insert(0, here)
 from omb_scan import read_listed
 
@@ -398,6 +415,11 @@ except UnicodeDecodeError:
 if not diff.strip():
     say("the diff is empty, or nothing is left of it once secret-named and non-UTF-8 files are out, so there is nothing to hunt")
 final = names([], specs)
+if snap == "partial":
+    # The partial copy's inputs, git facts only: the diff's names, and its
+    # added lines marked by a byte no header line starts with.
+    open(d + "/changed.z", "wb").write(b"".join(n + b"\0" for n in final))
+    open(d + "/added", "wb").write(git(["-p", "-U0", "--output-indicator-new=\x01"], specs))
 untracked = set(x for x in open(d + "/untracked", "rb").read().split(b"\0") if x)
 new = [n for n in final if n in untracked]
 
@@ -515,6 +537,26 @@ pack() (
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
   { git init -q --bare $g "$k/g" 2>/dev/null || git init -q --bare "$k/g"; }; mkdir -p "$k/g/info"; printf '%s\n%s\n' "$o" "$k/o" > "$k/g/objects/info/alternates"
   echo '* -filter -text -ident -working-tree-encoding -export-ignore -export-subst' > "$k/g/info/attributes"
+  # The partial copy: the file list of the tree just written, built in the
+  # archive's bare repository under no setting, then a second tree of exactly
+  # those records, handed back to git through stdin (never a pathspec or an
+  # argument). Anything short of a list packs the whole tree, with the reason
+  # in $k/why; the list never fails the pack. $k/t keeps the whole tree.
+  if [ "$snap" = partial ]; then
+    if [ "$scope" = all ]; then
+      echo 'all of it is new code' > "$k/why"
+    elif ! pin ${OMB_TEST_PATHS_LIMITS:+"OMB_TEST_PATHS_LIMITS=$OMB_TEST_PATHS_LIMITS"} python3 -I -B "$DIR/omb_paths.py" "$k/g" "$t" "$d/changed.z" "$d/added" "$k/keep.z" "$k/stats" 2>/dev/null; then
+      echo 'the file list could not be built' > "$k/why"
+    elif [ ! -s "$k/keep.z" ]; then
+      echo 'no changed file is in the working copy' > "$k/why"
+    elif pin GIT_INDEX_FILE="$k/i2" git --git-dir="$k/g" update-index -z --index-info < "$k/keep.z" \
+        && tp=$(pin GIT_INDEX_FILE="$k/i2" git --git-dir="$k/g" write-tree) \
+        && cp=$(pin GIT_AUTHOR_NAME=omb GIT_AUTHOR_EMAIL=omb GIT_AUTHOR_DATE='946684800 +0000' GIT_COMMITTER_NAME=omb GIT_COMMITTER_EMAIL=omb GIT_COMMITTER_DATE='946684800 +0000' git --git-dir="$k/g" commit-tree --no-gpg-sign -m omb "$tp"); then
+      c=$cp; printf '%s\n' "$tp" > "$k/tp"; : > "$k/partial"
+    else
+      echo 'the file list could not be built' > "$k/why"
+    fi
+  fi
   set -- .
   # set -f: a name like *secret* must reach git as a pattern, never be expanded here.
   set -f
@@ -576,6 +618,7 @@ manifest() { # $1: what the snapshot part says
 snapline() {
   snapof=; [ "$scope" = commits ] && snapof=" of HEAD"
   t=$(cat "$d/k/t")
+  if [ -e "$d/k/partial" ]; then partline; return; fi
   total=$(git --git-dir="$d/k/g" ls-tree -r "$t" | grep -c ' blob ' || :)
   size=$(kb "$(wc -c < "$d/k/s.tgz" | tr -d ' ')")
   # The file count is the scanner's (it read every member); with the scan off there is none.
@@ -587,6 +630,25 @@ snapline() {
   fi
   printf ' (.env*, *.pem, *.key and %s more patterns), LFS content (pointers only)' "$((npat - 3))"
   if [ "$nogit" = 1 ]; then printf '; folder without git: top-level dot-folders, node_modules, __pycache__ and build output also left out'; fi
+  if [ "$snap" = partial ]; then printf '. A partial copy was asked for and not built (%s), so the whole working copy goes' "$(cat "$d/k/why")"; fi
+}
+# The partial copy's line: what of the whole tree goes, by kind, and the rest.
+partline() {
+  read -r kept nhead nchanged nman ncall _ cut < "$d/k/stats"
+  inpart=$(git --git-dir="$d/k/g" ls-tree -r "$(cat "$d/k/tp")" | grep -c ' blob ' || :)
+  total=$(git --git-dir="$d/k/g" ls-tree -r "$t" | grep -c ' blob ' || :)
+  size=$(kb "$(wc -c < "$d/k/s.tgz" | tr -d ' ')")
+  if [ "$scan_off" = 1 ]; then packed=$inpart; else packed=$(cat "$d/count"); fi
+  case $cut in
+    files) callers="files that use the changed names not searched (more than 200,000 files)" ;;
+    bytes) callers="files that use the changed names not searched (more than 512 MB of files)" ;;
+    *) if [ "$ncall" = 1 ]; then callers="1 file that uses the changed names"; else callers="$ncall files that use the changed names"; fi ;;
+  esac
+  if [ "$nman" = 1 ]; then man="1 build manifest"; else man="$nman build manifests"; fi
+  printf ' + partial repository snapshot%s: %s of %s (%s of %s changed, %s, %s), %s packed. Left out: every other file, git-ignored files, submodules' \
+    "$snapof" "$packed" "$(files "$total")" "$nhead" "$nchanged" "$man" "$callers" "$size"
+  if [ "$scan_off" = 1 ]; then printf ', secret-named files'; else printf ', %s' "$(files "$((inpart - packed))" secret-named)"; fi
+  printf ' (.env*, *.pem, *.key and %s more patterns), LFS content (pointers only)' "$((npat - 3))"
 }
 
 # One request per door, no retry and no overall time limit: the server's own
@@ -634,15 +696,21 @@ retire() {
 }
 
 send_snapshot() {
-  req POST "$url/repo" "$d/k/s.tgz" application/gzip
+  # The mark goes only with a partial copy that was really packed.
+  mark=; [ -e "$d/k/partial" ] && mark='?pack=partial'
+  req POST "$url/repo$mark" "$d/k/s.tgz" application/gzip
   case $code in
     200) ;;
+    400) [ "$(field code)" = snapshot_mark_unknown ] || { body; die "omb-upload: the snapshot was refused (HTTP 400, above); the payload was not sent."; }
+         body; die "omb-upload: the server refused the partial mark (HTTP 400, above); nothing was stored and the ticket stays valid. Run the same command again with required in place of partial, and update the plugin." ;;
     409) [ "$(field code)" = snapshot_taken ] || { body; die "omb-upload: the snapshot was refused (HTTP 409, above); the payload was not sent."; }
          have=$(field sha256)
          [ -n "$have" ] || { body; die "omb-upload: the ticket already holds a snapshot and the server did not say which; the payload was not sent. Call get_findings for this review."; }
          [ "$have" = "$sha" ] || retire
          echo "omb-upload: the server already holds this snapshot, byte for byte; sending the payload." ;;
-    404|410) body; die "omb-upload: $GONE" ;;
+    410) body; [ "$(field code)" = snapshot_partial ] || die "omb-upload: $GONE"
+         die "omb-upload: this was a deep-hunt ticket and it is retired; nothing was hunted or billed. Submit the deep hunt again and run this command with required." ;;
+    404) body; die "omb-upload: $GONE" ;;
     413) body; die "omb-upload: the snapshot was refused (HTTP 413, above); the payload was not sent. The same command would get the same answer." ;;
     408) slow snapshot ;;
     429|503) rerun "$(retry_after)" ;;
@@ -676,7 +744,9 @@ case $code in
          body; die "omb-upload: diff mode was turned off after this ticket was handed out. Call get_findings for this review and run the command again with the snapshot value it gives, without context files."
        fi
        body; die "omb-upload: the payload was refused (HTTP 409, above)." ;;
-  404|410) body; die "omb-upload: the ticket is used or expired. Call get_findings for this review: if it is running, watch it; else submit again." ;;
+  410) body; [ "$(field code)" = snapshot_partial_unsupported ] && die "omb-upload: the hunt was not started and nothing was billed. Submit again as above and run this command with the value the new ticket gives."
+       die "omb-upload: the ticket is used or expired. Call get_findings for this review: if it is running, watch it; else submit again." ;;
+  404) body; die "omb-upload: the ticket is used or expired. Call get_findings for this review: if it is running, watch it; else submit again." ;;
   413) body; die "omb-upload: the payload was refused (HTTP 413, above). The same command would get the same answer." ;;
   408) slow payload ;;
   429|503) rerun "$(retry_after)" ;;
