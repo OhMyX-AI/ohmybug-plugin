@@ -218,7 +218,7 @@ add_all() { # $1: a NUL pathspec file (nested's "$1/a"); then options before `ad
   else git "$@" add -A --pathspec-from-file="$a" --pathspec-file-nul; fi
 }
 
-# Nested repositories, the server's rule (snapshot-recipe.ts): untracked ones
+# Nested repositories, the server's packing rule: untracked ones
 # (`add -A` aborts on one with no commit and packs one with commits as an empty
 # folder; `ls-files -o` names both as dir/), tracked submodules (gitlinks, one
 # name per path), and bare ones: a folder with an entry named HEAD beside an
@@ -240,7 +240,10 @@ nested() {
     git ls-files -z -s > "$w/m"; xargs -0 sh -c 'for e; do case $e in "160000 "*) e=${e#160000 * [0-3]?}; [ "$e" = "$p" ] || printf "%s\0" "$e"; p=$e;; esac; done' sh < "$w/m" >> "$w/n"
   fi
   case $nk in pack) git ls-files -z -c -o --exclude-standard > "$w/h" ;; commits) git ls-files -z -c > "$w/h" ;; diff) cp "$w/u" "$w/h" ;; esac
-  xargs -0 sh -c 'for e; do case $e in HEAD|*/HEAD) b=${e%HEAD}; b=${b%/}; b=${b:-.}; if [ "$b" = . ] && [ -e .git ]; then continue; fi; if [ -e "$b/config" ] || [ -h "$b/config" ]; then printf "%s\0" "$b"; fi;; esac; done' sh < "$w/h" >> "$w/n"
+  # With --commits the config is looked up in the tree packed (the index), not on disk.
+  NK=$nk xargs -0 sh -c 'for e; do case $e in HEAD|*/HEAD) b=${e%HEAD}; b=${b%/}; b=${b:-.}; if [ "$b" = . ] && [ -e .git ]; then continue; fi
+    if [ "$NK" = commits ]; then [ -n "$(git ls-files -- ":(literal)$b/config")" ] && printf "%s\0" "$b"
+    elif [ -e "$b/config" ] || [ -h "$b/config" ]; then printf "%s\0" "$b"; fi;; esac; done' sh < "$w/h" >> "$w/n"
   # The [ -s ] guard is load-bearing: GNU xargs on empty input runs ls-files with no pathspec at all.
   if [ -s "$w/n" ]; then
     xargs -0 sh -c 'for e; do printf ":(literal)%s\0" "$e"; done' sh < "$w/n" > "$w/c"
@@ -451,6 +454,19 @@ SECRET_FILE = re.compile(rb"(?i)(kubeconfig|kube[-_]config|\.env$|\.env[^a-z0-9]
 SOURCE = re.compile(rb"\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|rb|rs|cs|php|swift|scala|c|cc|cpp|h|hpp|m|ex|exs|dart|lua)$")
 specs = specs + [":(exclude,top,literal)" + os.fsdecode(n) for n in every
                  if SECRET_FILE.search(n.rsplit(b"/", 1)[-1]) and not SOURCE.search(n.rsplit(b"/", 1)[-1])]
+# A bare repository the range adds or changes (an entry HEAD beside an entry
+# config, in either tree): its folder stays out of the diff, as out of the snapshot.
+def has(tree, path):
+    return subprocess.run(["git", "--git-dir=" + d + "/g", "cat-file", "-e", tree + ":" + path], env=ENV,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+bare = set()
+for n in every:
+    parts = n.rsplit(b"/", 1)
+    if len(parts) == 2 and parts[1] in (b"HEAD", b"config"):
+        b, other = os.fsdecode(parts[0]), "config" if parts[1] == b"HEAD" else "HEAD"
+        if any(has(t, b + "/" + other) for t in (to, frm)):
+            bare.add(b)
+specs = specs + [":(exclude,top,literal)" + b for b in sorted(bare)]
 kept = names(["--no-renames"], specs)
 keptset = set(kept)
 dropped = [n for n in every if n not in keptset]
@@ -511,6 +527,17 @@ if args:
                 if inside(r):
                     rel = r
         content = None
+        # The secret FILE rule holds for context files as for the diff.
+        if rel is not None and SECRET_FILE.search(os.fsencode(os.path.basename(rel))) and not SOURCE.search(os.fsencode(os.path.basename(rel))):
+            rel = None
+        # Nor anything inside a bare repository (a folder with HEAD and config entries), as in the snapshot.
+        if rel is not None:
+            up = os.path.dirname(rel)
+            while up:
+                if all(os.path.lexists(os.path.join(rtop, up, x)) for x in ("HEAD", "config")):
+                    rel = None
+                    break
+                up = os.path.dirname(up)
         if rel is not None:
             got, data = read_listed(rtop, listed, rel)
             if got is not None and data is not None:
@@ -591,7 +618,7 @@ pack() (
   nested_say "$k/n"
   [ "$scope" = commits ] || add_all "$k/a" $s
   git $s update-index -z --force-remove --stdin < "$drop"
-  # Secret FILE names (the server's SNAPSHOT_SECRET_FILES): kubeconfig files
+  # Secret FILE names (the server's packing rule): kubeconfig files
   # under any name and .env files with a prefix leave the index, unless the
   # name ends in a source-code extension (lower case only: an upper-case one
   # is left out, the safe side). The glob's * stops at /: the file's own name.
