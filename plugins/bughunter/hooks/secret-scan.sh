@@ -145,16 +145,25 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
     def shape(field):
         stop(7, field)
 
+    if not isinstance(ti.get("finding_id"), str) or not ti.get("finding_id"):
+        shape("finding_id must be the id string of a finding")
     if not isinstance(ti.get("claim"), str):
         shape("claim must be a string")
+    if len(ti["claim"]) > 1500:
+        shape("claim is longer than 1500 characters")
     ev = ti.get("evidence", [])
     if not isinstance(ev, list):
         shape("evidence must be a list of {path, line, note}")
+    if len(ev) > 5:
+        shape("at most 5 evidence items")
     for e in ev:
         if not isinstance(e, dict) or not isinstance(e.get("path"), str):
             shape("each evidence item needs a string path")
         if e.get("note") is not None and not isinstance(e.get("note"), str):
             shape("an evidence note must be a string")
+        ln = e.get("line")
+        if ln is not None and (isinstance(ln, bool) or not isinstance(ln, int) or ln < 1):
+            shape("an evidence line must be a whole number from 1")
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
         top = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=d.get("cwd") or None,
@@ -162,13 +171,16 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
     except (OSError, subprocess.CalledProcessError):
         stop(8, "")
     top = os.path.realpath(top)
-    listed = set(subprocess.check_output(["git", "ls-files", "-z", "-co", "--exclude-standard"], cwd=top, env=env).split(b"\0"))
+    # Tracked files only (no -o): the service reads the hunted commit, where an untracked file does not exist.
+    listed = set(subprocess.check_output(["git", "ls-files", "-z"], cwd=top, env=env).split(b"\0"))
     bad = []
     for e in ev:
         rel, data = read_listed(top, listed, e["path"])
         name = rel.decode("utf-8", "replace").lower() if rel is not None else ""
         if data is None or KEY_FILE.search(name) or ENV_FILE.search(name):
             bad.append(e["path"])
+        elif e.get("line") is not None and e["line"] > data.count(b"\n") + (0 if data.endswith(b"\n") or not data else 1):
+            bad.append("%s (line %d is past its end)" % (e["path"], e["line"]))
     if bad:
         stop(6, "\n".join("  - " + p for p in bad))
     strings = []
@@ -184,7 +196,7 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
                 collect(x, "%s[%d]" % (where, i))
 
     for k, v in ti.items():
-        if k not in ("finding_id", "evidence"):
+        if k != "evidence":
             collect(v, k)
     for i, e in enumerate(ev):
         collect({k: v for k, v in e.items() if k != "path"}, "evidence[%d] note (%s)" % (i, e["path"]))
@@ -215,7 +227,7 @@ if [ "$rc" = 4 ] && [ -n "$OUT" ]; then
 fi
 if [ "$rc" = 6 ] && [ -n "$OUT" ]; then
   {
-    echo "OhMyBug: a dispute cites only files git lists in this repository, by a path relative to its root (no empty, \".\" or \"..\" part, no symlink), never a file that holds keys. Not sent, because of:"
+    echo "OhMyBug: a dispute cites only files git tracks in this repository, by a path relative to its root (no empty, \".\" or \"..\" part, no symlink), never a file that holds keys. Not sent, because of:"
     printf '%s\n' "$OUT"
     echo "Fix or drop those items; a dispute you change goes back to the user for a new yes before you send it. Or judge the finding without a dispute."
   } >&2

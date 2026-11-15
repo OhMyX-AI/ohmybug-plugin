@@ -75,7 +75,8 @@ row "a refused provide_files is told to resend, not to hunt again" 2 "$(j "{'rev
 # letter case: whatever the spelling, and whatever the scan setting.
 DR=$(mktemp -d); (cd "$DR" && git init -q && mkdir -p src keys deploy sub && printf 'x\n' > src/a.py && printf 'x\n' > ci.sh \
   && printf 'k\n' > keys/id_rsa && printf 'P=1\n' > deploy/.env && printf 'P=1\n' > .env.example && printf 'k\n' > keys/Server.PEM \
-  && printf 'u\n' > ignored.txt && printf 'ignored.txt\n' > .gitignore && ln -s src/a.py link.py && git add src ci.sh keys deploy .env.example link.py && git -c user.email=t@t -c user.name=t commit -qm x)
+  && printf 'k\n' > keys/Deploy.Key && printf 'k\n' > keys/id_ED25519 && printf 'P=1\n' > .ENV.Local && printf 'u\n' > untracked.txt \
+  && printf 'u\n' > ignored.txt && printf 'ignored.txt\n' > .gitignore && ln -s src/a.py link.py && git add src ci.sh keys deploy .env.example .ENV.Local link.py && git -c user.email=t@t -c user.name=t commit -qm x)
 dhook() { # tool_input JSON -> "<exit> <stderr>", run as a challenge_finding from the repository $DR
   python3 -c "import json,sys; sys.stdout.buffer.write(json.dumps({'tool_name':'mcp__plugin_bughunter_ohmybug__challenge_finding','cwd':sys.argv[2],'tool_input':json.loads(sys.argv[1])}, ensure_ascii=False).encode('utf-8'))" "$1" "$DR" \
     | bash "$G/secret-scan.sh" 2>&1 >/dev/null; printf ' %s' "$?"
@@ -86,13 +87,22 @@ drow() { # name, want exit, tool_input JSON, [text the message must hold]
   if [ -n "${4:-}" ] && ! printf '%s' "$msg" | LC_ALL=C grep -qF -- "$4"; then echo "FAIL $1: message lacks '$4' — $msg"; fails=$((fails + 1)); return; fi
   echo "ok   $1"
 }
-drow "a dispute with a token in a note is refused" 2 "$(j "{'finding_id':'f','claim':'guarded','evidence':[{'path':'ci.sh','line':3,'note':'T=$GHP'}]}")" "evidence[0] note (ci.sh):1 GitHub token"
+drow "a dispute with a token in a note is refused" 2 "$(j "{'finding_id':'f','claim':'guarded','evidence':[{'path':'ci.sh','line':1,'note':'T=$GHP'}]}")" "evidence[0] note (ci.sh):1 GitHub token"
+drow "a dispute with a token in its finding_id is refused" 2 "$(j "{'finding_id':'$GHP','claim':'c'}")" "GitHub token"
+drow "a finding_id that is not a string names the field" 2 "$(j "{'finding_id':5,'claim':'c'}")" "finding_id must be"
+drow "an evidence item that is not an object names the field" 2 "$(j "{'finding_id':'f','claim':'c','evidence':['src/a.py']}")" "needs a string path"
+drow "six evidence items are refused" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh'}]*6}")" "at most 5 evidence items"
+drow "a claim over 1500 characters is refused" 2 "$(j "{'finding_id':'f','claim':'c'*1501}")" "longer than 1500"
+drow "line 0 is refused" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':0}]}")" "whole number from 1"
+drow "a line given as text is refused" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':'1'}]}")" "whole number from 1"
+drow "a line given as true is refused" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':True}]}")" "whole number from 1"
+drow "a line past the file's end is refused" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':2}]}")" "ci.sh (line 2 is past its end)"
 drow "a dispute with a token in its claim is refused" 2 "$(j "{'finding_id':'f','claim':'uses $AWS','evidence':[]}")" "claim:1 AWS access key"
 drow "a token in a top-level field the dispute does not define is scanned" 2 "$(j "{'finding_id':'f','claim':'c','context':'T=$GHP'}")" "context:1 GitHub token"
 drow "a token in an evidence field the dispute does not define is scanned" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':1,'code':'T=$GHP'}]}")" "evidence[0] note (ci.sh).code:1 GitHub token"
 drow "a refused dispute is told to judge without one" 2 "$(j "{'finding_id':'f','claim':'uses $AWS'}")" "judge the finding without a dispute"
 for p in /etc/passwd ../../.aws/credentials 'src/../../x' '~/.ssh/config' 'C:/x/y' .git/config 'sub/.git/config' '.GIT/config' \
-         'src\\a.py' 'keys\\id_rsa' keys/id_rsa keys/Server.PEM deploy/.env 'deploy\\.env' 'src//a.py' ignored.txt link.py missing.py; do
+         'src\\a.py' 'keys\\id_rsa' keys/id_rsa keys/Server.PEM keys/Deploy.Key keys/id_ED25519 .ENV.Local untracked.txt deploy/.env 'deploy\\.env' 'src//a.py' ignored.txt link.py missing.py; do
   drow "a dispute citing $p is refused" 2 "$(python3 -c "import json,sys; print(json.dumps({'finding_id':'f','claim':'c','evidence':[{'path':sys.argv[1],'line':1}]}))" "$p")" "  - $p"
 done
 drow "the path refusal says a changed dispute needs a new yes" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'../x','line':1}]}")" "goes back to the user for a new yes"

@@ -1402,8 +1402,10 @@ keys only, and without it there is nothing to do here.
 - **The code that was hunted.** Cite lines as they stand at the hunted commit.
   If you or the user changed a cited file since then, do not dispute: the
   service reads that commit, not your working tree. Check each cited path with
+  `git cat-file -e <hunted commit>:<path>` (the file is tracked there) and
   `git diff --quiet <hunted commit> -- <path>` (the hunt's `meta.ref`); a file
-  that differs is not cited.
+  that fails either is not cited. A hunt with no hunted commit (no `meta.ref`:
+  uncommitted work or a folder sent as files) takes no dispute.
 - **Gather the evidence read-only, inside the repository.** In Claude Code,
   hand the finding, your reason, the repository root and the files changed since
   the hunted commit to the `dispute-envoy` subagent (it can only Read and Grep). Elsewhere, read it yourself with read-only commands. Either
@@ -1417,7 +1419,9 @@ keys only, and without it there is nothing to do here.
 - **The user says yes first.** Show the claim and each evidence item (path,
   line, note) and send the dispute only on their yes, as with any file you
   send. A dispute you change after their yes (an item dropped or fixed) goes
-  back to them first. With nobody to ask (a headless run), do not dispute. The plugin's
+  back to them first. With nobody to ask (a headless run), do not dispute.
+  Where the plugin's hooks do not run (Windows), do not dispute: nothing
+  checks it before it is sent. The plugin's
   scan refuses a dispute that quotes a credential or cites a path outside the
   repository (a path git does not list, a symlink, a key file): fix it as
   the refusal says, or judge without a dispute. A refused call sent nothing and
