@@ -585,14 +585,22 @@ snapshot() {
   set +e
   py "$CORE" --snapshot "$d/k/s.tgz" "$d/hits" > "$d/count"; rc=$?
   set -e
-  if [ "$rc" = 3 ] && [ -s "$d/hits" ]; then
-    cp "$d/hits" "$d/drop"
+  # A partial list is rebuilt on each pack, so a repack can bring in files the
+  # last scan never saw: drop their hits too, while each pass adds a new one.
+  # Bounded: every pass drops at least one more file, and 5 passes stop it.
+  i=0
+  while [ "$rc" = 3 ] && [ -s "$d/hits" ] && [ "$i" -lt 5 ]; do
+    i=$((i + 1))
+    n0=$(tr -cd '\0' < "$d/drop" | wc -c)
+    cat "$d/hits" >> "$d/drop"
+    py -c 'import sys; p = sys.argv[1]; r = [x for x in open(p, "rb").read().split(b"\0") if x]; open(p, "wb").write(b"".join(x + b"\0" for x in dict.fromkeys(r)))' "$d/drop"
+    [ "$(tr -cd '\0' < "$d/drop" | wc -c)" -gt "$n0" ] || break
     run_pack
     dropped=$(tr '\001-\037\177' '?' < "$d/drop" | tr '\0' '\n' | sed '/^$/d' | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')
     set +e
     py "$CORE" --snapshot "$d/k/s.tgz" "$d/hits" > "$d/count"; rc=$?
     set -e
-  fi
+  done
   case $rc in
     0) ;;
     *) die "omb-upload: could not scan the repository snapshot clean for credentials, so nothing was sent" ;;

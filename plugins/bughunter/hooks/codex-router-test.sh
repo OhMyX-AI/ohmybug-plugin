@@ -19,7 +19,7 @@ router, config, manifest, mcp, marketplace = sys.argv[1:]
 def run(event, payload=None):
     proc = subprocess.run(
         ["node", router, event],
-        input=None if payload is None else json.dumps(payload),
+        input="" if payload is None else json.dumps(payload),
         text=True,
         capture_output=True,
         check=True,
@@ -45,6 +45,12 @@ assert OFFER in run("session")["hookSpecificOutput"]["additionalContext"]
 assert OFFER in run("session")["hookSpecificOutput"]["additionalContext"]
 session = run("session")
 assert OFFER not in session["hookSpecificOutput"]["additionalContext"], "a fourth offer"
+# I11: a resumed, cleared or compacted session neither offers nor counts.
+mid = tempfile.mkdtemp(); os.environ["OMB_STATE_DIR"] = mid
+for src in ("resume", "clear", "compact"):
+    assert OFFER not in run("session", {"source": src})["hookSpecificOutput"]["additionalContext"], src
+assert not os.path.exists(os.path.join(mid, "intro-v1-offers")), "a mid-task session spent an offer"
+assert OFFER in run("session", {"source": "startup"})["hookSpecificOutput"]["additionalContext"]
 done = tempfile.mkdtemp(); open(os.path.join(done, "intro-v1"), "w").close()
 os.environ["OMB_STATE_DIR"] = done
 assert OFFER not in run("session")["hookSpecificOutput"]["additionalContext"], "offered after the setup"

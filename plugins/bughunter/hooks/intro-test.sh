@@ -102,5 +102,14 @@ printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publis
 grep -qi 'free review' "$G/intro.sh" "$G/../commands/setup.md" && fail "S intro text says free review" || :
 printf '%s' "$SEC" | grep -qi 'free review' && fail "S setup section says free review" || ok "S setup texts: no reward wording of their own"
 
+# I9: a state folder or counter that cannot be written: silent, exit 0, no
+# shell error (it would offer, or fail, every session). A leading zero counts.
+rm -rf "$S/state"; mkdir -p "$S/ro"; chmod 555 "$S/ro"
+o=$(OMB_STATE_DIR="$S/ro/state" HOME="$S" bash "$G/intro.sh" < /dev/null 2>&1); r=$?
+chmod 755 "$S/ro"
+[ "$r" = 0 ] && [ -z "$o" ] && ok "I9 unwritable state folder: silent, exit 0" || fail "I9 unwritable state: rc $r [$o]"
+mkdir -p "$S/state"; printf '08\n' > "$S/state/intro-v1-offers"
+[ -n "$(hook 2>/dev/null)" ] && [ "$(cat "$S/state/intro-v1-offers")" = 9 ] && fail "I9 08 read as under the cap" || ok "I9 counter 08 reads as 8: past the cap, silent"
+
 echo "intro: $([ "$fails" = 0 ] && echo ok || echo "$fails failing")"
 [ "$fails" = 0 ]

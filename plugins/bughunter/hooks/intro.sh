@@ -34,9 +34,11 @@ try: print(json.loads(sys.stdin.read() or "{}").get("source") or "")
 except Exception: print("")' 2>/dev/null) || src=
 case $src in ''|startup) ;; *) exit 0 ;; esac
 n=$(cat "$OFFERS" 2>/dev/null || :)
-case $n in ''|*[!0-9]*) n=0 ;; esac
+case $n in ''|*[!0-9]*) n=0 ;; ????????*) exit 0 ;; esac
+n=$((10#$n))
 [ "$n" -ge "$CAP" ] && exit 0
-mkdir -p "$STATE" && printf '%s\n' "$((n + 1))" > "$OFFERS"
+# A counter that cannot be written would offer forever: no offer then.
+{ mkdir -p "$STATE" && printf '%s\n' "$((n + 1))" > "$OFFERS"; } 2>/dev/null || exit 0
 
 NOTE='OhMyBug is installed. Three quick questions set your defaults: /bughunter:setup'
 CONTEXT='Run the First-run setup of the bughunter skill at the start of your first reply, then answer what the user asked. Only with the question tool: if this session has none, do nothing and say nothing about it.'

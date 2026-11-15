@@ -1125,6 +1125,22 @@ fresh; run "$PF" "$URL" partial --head
   && grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" && python3 -I "$G/omb_scan.py" --snapshot "$STUB/repo.1.sent" "$ROOT/hits" >/dev/null 2>&1 \
   && ok "PP11 a credential in a listed file: left out, the list built again, named, the copy sent scans clean" || fail "PP11 rescan: rc $rc [$(tarnames | tr '\n' ' ')] $out"
 g -C "$PF" reset -q --hard HEAD~1
+# PP11g: the second list GROWS. grow_name is in 9 files (past 8: no caller);
+# a_name brings in g1, whose credential drops it; now grow_name is in 8, all
+# 8 come in, and g2 holds a credential too. Every pass drops its hits; the copy
+# sent holds g3..g9 and scans clean (one repack used to die here).
+mkdir -p "$PF/gr"
+for i in 1 2 3 4 5 6 7 8 9; do printf 'grow_name(%s)\n' "$i" > "$PF/gr/g$i.py"; done
+printf 'a_name(1)\ngrow_name(1)\nk = "%s"\n' "$AWS" > "$PF/gr/g1.py"
+printf 'grow_name(2)\nk = "%s"\n' "$AWS" > "$PF/gr/g2.py"
+g -C "$PF" add -A; g -C "$PF" commit -qm grow
+printf 'def compute():\n    return a_name(grow_name(9))\n' > "$PF/src/core.py"
+fresh; run "$PF" "$URL" partial --head
+[ "$rc" = 0 ] && [ "$(tarnames)" = "$(want_names src/core.py package.json gr/g3.py gr/g4.py gr/g5.py gr/g6.py gr/g7.py gr/g8.py gr/g9.py)" ] \
+  && printf '%s' "$out" | grep -q 'gr/g1.py' && printf '%s' "$out" | grep -q 'gr/g2.py' \
+  && python3 -I "$G/omb_scan.py" --snapshot "$STUB/repo.1.sent" "$ROOT/hits" >/dev/null 2>&1 \
+  && ok "PP11g a list that grows after a drop: each pass drops its hits, the copy sent scans clean" || fail "PP11g grow: rc $rc [$(tarnames | tr '\n' ' ')] $out"
+g -C "$PF" checkout -q -- src/core.py 2>/dev/null; g -C "$PF" reset -q --hard HEAD~1
 # PP8: paths with a space, a quote, a leading '-', a line break and (where the
 # file system allows it) bytes that are not UTF-8: the exact members.
 odd="$(printf 'sp ace.py\nquo"te.py\n-dash.py\nnew\nline.py')"

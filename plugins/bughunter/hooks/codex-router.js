@@ -44,8 +44,22 @@ function offerSetup() {
 }
 
 if (event === 'session') {
-  emit(offerSetup() ? `${ROUTING} ${SETUP_OFFER}` : ROUTING, 'SessionStart');
-  process.exit(0);
+  // Only a new session spends an offer: a resumed, cleared or compacted one is
+  // mid-task. The payload's source says which; none (an older client) counts as new.
+  let raw = '', done = false;
+  const go = () => {
+    if (done) return;
+    done = true;
+    let src = '';
+    try { src = String(JSON.parse(raw.replace(/^\uFEFF/, '') || '{}').source || ''); } catch (_) {}
+    const fresh = src === '' || src === 'startup';
+    emit(fresh && offerSetup() ? `${ROUTING} ${SETUP_OFFER}` : ROUTING, 'SessionStart');
+    process.exit(0);
+  };
+  process.stdin.on('data', c => { raw += c; });
+  process.stdin.on('end', go);
+  process.stdin.on('error', go);
+  setTimeout(go, 1000).unref();
 }
 
 if (event === 'subagent') {
@@ -53,7 +67,7 @@ if (event === 'subagent') {
   process.exit(0);
 }
 
-if (event !== 'prompt') process.exit(0);
+if (event !== 'prompt' && event !== 'session') process.exit(0);
 
 let input = '';
 let finished = false;
@@ -81,7 +95,9 @@ function finish() {
   } else if (setup) emit(setup, 'UserPromptSubmit');
 }
 
-process.stdin.on('data', chunk => { input += chunk; });
-process.stdin.on('end', finish);
-process.stdin.on('error', () => { finish(); process.exit(0); });
-setTimeout(() => { finish(); process.exit(0); }, 1000).unref();
+if (event === 'prompt') {
+  process.stdin.on('data', chunk => { input += chunk; });
+  process.stdin.on('end', finish);
+  process.stdin.on('error', () => { finish(); process.exit(0); });
+  setTimeout(() => { finish(); process.exit(0); }, 1000).unref();
+}

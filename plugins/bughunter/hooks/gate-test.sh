@@ -3190,7 +3190,7 @@ plrow "diff-id.sh still reads the permission rule" 0 "$(cd "$PL" && HOME="$PLD/h
 IN=$(plj '{"tool_name":"mcp__plugin_bughunter_ohmybug__get_balance","tool_response":{"content":[{"type":"text","text":"{\"bugarium\":{\"vote\":{\"url\":\"https://example.invalid/bugs/vote/7\",\"closes_at\":\"2026-09-28T04:00:00.000Z\"}}}"}]}}')
 plrow "bugarium-notice.sh still hands the vote over" yes "$(printf '%s' "$IN" | (cd "$PL" && bash "$G/bugarium-notice.sh" 2>/dev/null) | grep -q 'example.invalid/bugs/vote/7' && echo yes)"
 plrow "first-run.sh still gives its notice" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s1" HOME="$PLD/h1" CLAUDE_PROJECT_DIR="$PLD/p1" PLUGIN_DATA= bash "$G/first-run.sh" </dev/null 2>/dev/null | grep -q . && echo yes)"
-plrow "intro.sh still gives its notice" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s2" HOME="$PLD/h2" PLUGIN_DATA= bash "$G/intro.sh" 2>/dev/null | grep -q '/bughunter:setup' && echo yes)"
+plrow "intro.sh still gives its notice" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s2" HOME="$PLD/h2" PLUGIN_DATA= bash "$G/intro.sh" </dev/null 2>/dev/null | grep -q '/bughunter:setup' && echo yes)"
 plrow "tools-check.sh still asks for the tools check" yes "$(cd "$PL" && OMB_STATE_DIR="$PLD/s3" HOME="$PLD/h3" PLUGIN_DATA= bash "$G/tools-check.sh" 2>/dev/null | grep -q 'additionalContext' && echo yes)"
 rm -rf "$(cd "$PL" && ohmybug_hunt_dir)" "$(cd "$PL" && ohmybug_hunt_dir).pending" "$PLD"
 # The skill's own recipes run in the user's repository too: every python3 an

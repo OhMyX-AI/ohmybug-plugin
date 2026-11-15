@@ -319,7 +319,10 @@ starts only on the user's word ("set up OhMyBug"). In Claude Code it needs
 the question tool (`AskUserQuestion`): without one (a headless run), do
 nothing and say nothing about it. Then answer what the user asked.
 
-1. Call `get_balance`. If it fails, say nothing about the setup, write
+1. Call `get_balance`. If it fails with an authentication error, say the
+   sign-in in one line as "If a tool call fails with an authentication
+   error" says, add that the setup runs after it with /bughunter:setup, write
+   nothing and stop. Any other failure: say nothing about the setup, write
    nothing and stop. If its `policy.intro.version` is 1 or more and this is
    not `/bughunter:setup`, run `bash '<skill_dir>/../../hooks/intro.sh' done`,
    say nothing and stop: the setup ran on another machine.
@@ -725,12 +728,13 @@ bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' <scope>
      copy goes` sent the whole copy. The hunt of a partial copy ends with one
      line from the server that says so: show it as it comes.
      **"Whole repository"** in the user's own words (they want the hunt to
-     see every file): first call `set_policy` with `upload: "full"`, so
-     tickets stop asking for a partial copy; then a new `submit_review`,
-     whose ticket asks for the whole copy, and its command as that ticket
-     says. Only when this hunt's ticket is not yet used (the command has not
-     run on it), run it with `required` instead of a new submit. Say it in
-     one line, with the way back (`upload: "partial"`, or /bughunter:setup).
+     see every file) is this hunt only: run the command with `required` in
+     place of `partial` (every ticket takes the whole copy). When this
+     ticket is already used (the command ran on it), a new `submit_review`
+     first, and its command with `required`. Saved settings stay as they
+     are; only when the user says so for every hunt ("always", "from now
+     on"), call `set_policy` with `upload: "full"` and say the way back
+     (`upload: "partial"`, or /bughunter:setup).
    - `3` – the diff or a context file carries what looks like a credential,
      and nothing was sent. Show the masked list. Never rerun with the scan
      off yourself: the user removes or redacts it and the same command runs
