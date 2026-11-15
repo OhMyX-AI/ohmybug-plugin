@@ -1389,6 +1389,29 @@ before the user approves the table. Rules:
   holding the merge, and treat it as one in step 6.
 This is not `known_from` (a deep hunt's repeat of its fast hunt's finding).
 
+**Dispute before the verdict (`challenge_finding`).** Only when the
+`challenge_finding` tool is in your tool list: the service offers it to some
+keys only, and without it there is nothing to do here. Use it for a delivered
+`critical`/`high`/`medium` finding that your trace says is `NOT_REAL` or only
+`low`, and only when you can cite the line that shows it:
+- **Before** that finding's verdict, never after it: a dispute does not change
+  a verdict already sent. One dispute per finding.
+- Gather the evidence read-only. In Claude Code, hand the finding and your
+  reason to the `dispute-envoy` subagent (it can only Read and Grep). Elsewhere,
+  read it yourself with read-only commands under the same limits: at most 5
+  `{path, line, note}` items, a claim under 1500 characters, at most 2 quoted
+  lines per note, and never a secret-looking value. If it finds no line that
+  disproves or limits the finding, do not dispute.
+- Call `challenge_finding(finding_id, claim, evidence)`. If the call ends before
+  the answer, call it again with the same finding: you get the recorded answer.
+- Read the `outcome`:
+  - `WITHDRAWN`: the service took it back. Send no verdict for it.
+  - `DOWNGRADED_LOW`: judge it as a `low`.
+  - `HELD`: it stands. Verify it again (run its `check` when one is given),
+    then judge it as usual.
+  - `null`: no answer. Judge it as you would without a dispute.
+- Show each dispute and its answer in the verdict table you show the user.
+
 Honesty rules (non-negotiable):
 - The verdict is the billing meter. A review with at least one `REAL` major
   (`critical`/`high`/`medium`) not marked `known` costs the user its flat price

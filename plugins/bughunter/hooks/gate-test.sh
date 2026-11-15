@@ -3216,5 +3216,27 @@ for code in omb_scan.py omb-upload.sh omb_paths.py; do
   rm -rf "$SGD"
 done
 
+# THE DISPUTE: offered only where the tool is listed, sent only before the verdict, each outcome read one way, and its
+# evidence gathered by a subagent that can only read. A lost rule here sends a dispute after a verdict, judges a
+# withdrawn finding, or lets the gatherer run commands in the user's repository.
+DSP=$(awk '/^\*\*Dispute before the verdict/{p=1} p&&/^Honesty rules/{exit} p' plugins/bughunter/skills/bughunter/SKILL.md | tr '\n' ' ' | tr -s ' ')
+while IFS= read -r rule; do
+  printf '%s' "$DSP" | grep -qF -- "$rule" || { echo "FAIL dispute: SKILL.md lost [$rule]"; fails=$((fails + 1)); }
+done <<'RULES'
+Only when the `challenge_finding` tool is in your tool list
+**Before** that finding's verdict, never after it
+One dispute per finding.
+`WITHDRAWN`: the service took it back. Send no verdict for it.
+`DOWNGRADED_LOW`: judge it as a `low`.
+`HELD`: it stands. Verify it again
+`null`: no answer. Judge it as you would without a dispute.
+If it finds no line that disproves or limits the finding, do not dispute.
+RULES
+ENVOY=plugins/bughunter/agents/dispute-envoy.md
+[ "$(awk '/^---$/{n++; next} n==1 && /^tools:/' "$ENVOY")" = 'tools: Read, Grep' ] \
+  || { echo "FAIL dispute: $ENVOY front matter must grant exactly 'tools: Read, Grep'"; fails=$((fails + 1)); }
+[ "$(awk '/^---$/{n++; next} n==1 && /^name:/' "$ENVOY")" = 'name: dispute-envoy' ] && grep -qF '`dispute-envoy` subagent' plugins/bughunter/skills/bughunter/SKILL.md \
+  || { echo "FAIL dispute: the skill names a subagent the plugin does not ship as dispute-envoy"; fails=$((fails + 1)); }
+
 rm -rf "$HOME"
 if [ "$fails" = 0 ]; then echo "gate+stamp: ok"; else echo "gate+stamp: $fails failing"; exit 1; fi
