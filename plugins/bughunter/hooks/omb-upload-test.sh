@@ -701,7 +701,8 @@ rm -f "$T2"/u?.txt
 
 # every setting that changes git's diff format, set in the repository, in
 # the user's config and in the environment, run from a subfolder: the payload
-# is byte-equal to the clean run. A moved submodule, a rename and a quoted name.
+# is byte-equal to the clean run. A moved submodule (a nested repository: out
+# of the diff, no Subproject line), a rename and a quoted name.
 T3="$ROOT/t3"; mkdir -p "$T3/src"; g -C "$T3" init -q
 mkdir -p "$ROOT/t3sm"; g -C "$ROOT/t3sm" init -q; printf 's\n' > "$ROOT/t3sm/s"; g -C "$ROOT/t3sm" add -A; g -C "$ROOT/t3sm" commit -qm s
 g -C "$T3" -c protocol.file.allow=always submodule add -q "$ROOT/t3sm" smod 2>/dev/null
@@ -711,7 +712,7 @@ g -C "$T3" add -A; g -C "$T3" commit -qm base
 ( cd "$T3/smod" && printf 't\n' > s && g commit -qam s2 )
 printf 'a\nb\nc\n\nd\nE\nf\ng\n' > "$T3/a.txt"; g -C "$T3" mv ren.txt ren2.txt; printf 'r6\n' >> "$T3/ren2.txt"; printf 'Q\n' > "$T3/src/sp ace.txt"
 fresh; run "$T3/src" "$URL" off --head; ref=$(payload_diff)
-[ "$rc" = 0 ] && printf '%s' "$ref" | grep -q '^rename from ren.txt' && printf '%s' "$ref" | grep -q '^+Subproject commit' && printf '%s' "$ref" | grep -q '^diff --git a/a.txt b/a.txt' \
+[ "$rc" = 0 ] && printf '%s' "$ref" | grep -q '^rename from ren.txt' && ! printf '%s' "$ref" | grep -q 'Subproject commit' && printf '%s' "$ref" | grep -q '^diff --git a/a.txt b/a.txt' \
   || fail "the clean run is not the expected git diff: rc $rc $out / $ref"
 HOSTILE="$ROOT/t3global"; cp "$GIT_CONFIG_GLOBAL" "$HOSTILE"
 for kv in diff.noprefix=true diff.mnemonicPrefix=true diff.submodule=log diff.relative=true color.ui=always color.diff=always \
@@ -1204,7 +1205,7 @@ fresh; run "$P15" "$URL" partial --commits 1
   && ok "PP15 only a binary change: the whole snapshot of HEAD, the reason named" || fail "PP15 binary only: rc $rc $out"
 
 
-# ---- 6f. The server's secret-file packing rule ----
+# ---- 6f. The server's secret-file and nested-repository packing rules ----
 # SF: kubeconfig files and prefixed .env files leave the snapshot unless their
 # name ends in a lower-case source extension; the case of the name aside.
 SF="$ROOT/sf"; mkdir -p "$SF/src" "$SF/conf"; g -C "$SF" init -q
@@ -1237,6 +1238,166 @@ fresh; out=$(cd "$SF" && GIT_LITERAL_PATHSPECS=1 PATH="$BIN:$PATH" "$TSH" "$UP" 
 sh_ext=$(grep -o 'case \$e in \*\.ts|[^)]*)' "$UP" | head -n 1 | sed 's/^case \$e in //; s/)$//' | tr '|' '\n' | sed 's/^\*\.//' | sort | tr '\n' ' ')
 py_ext=$(grep -o 'SOURCE = re.compile(rb"\\\.([^)]*)' "$UP" | sed 's/.*(//' | tr -d ')' | tr '|' '\n' | sort | tr '\n' ' ')
 [ -n "$sh_ext" ] && [ "$sh_ext" = "$py_ext" ] && ok "the source-extension lists of the pack and the diff agree" || fail "extension lists differ: [$sh_ext] [$py_ext]"
+# NR: nested repositories. An untracked repo with a commit and one without, a
+# bare one (HEAD beside a config holding a token), a gitlink, and a .gnupg
+# folder: none reaches the tar, each named once on stderr with the server's
+# sentence; the gitlink, unchanged, is no deletion in the diff.
+NOTE='left out nested repositories and submodules (to hunt a working repository among them, submit it on its own, from inside it):'
+notes() { printf '%s\n' "$out" | grep -c -F "$NOTE"; }
+bare() { mkdir -p "$1"; printf 'ref: refs/heads/main\n' > "$1/HEAD"; printf '[remote "o"]\n\turl = https://tok@example.invalid/%s\n' "${2:-r}" > "$1/config"; }
+[ "$(sed -n "s/^SNAPSHOT_NESTED_NOTE='\(.*\)'$/\1/p" "$UP")" = "$NOTE" ] && ok "the nested note is the server's sentence" || fail "nested note differs"
+EMPTY_SRV='nothing to pack: this folder has no files after ignored, secret-named and nested-repository paths are left out (top-level .gitmodules, .gitignore and .gitattributes alone do not count); nothing was sent. Without a snapshot this ticket expires on its own. A fast hunt can run in diff mode instead, on the diff alone with no repository, so its quality differs: only the user can turn that on, on the account policy page (/me/policy on the server this command uploads to); do not turn it on yourself'
+[ "$(sed -n "s/^SNAPSHOT_EMPTY='\(.*\)'$/\1/p" "$UP")" = "$EMPTY_SRV" ] && ok "the empty-snapshot refusal is the server's sentence" || fail "empty refusal differs"
+NR="$ROOT/nr"; mkdir -p "$NR/src" "$NR/.gnupg"; g -C "$NR" init -q
+printf 'x = 1\n' > "$NR/src/a.py"; printf 'key\n' > "$NR/.gnupg/pubring.kbx"
+bare "$NR/tracked.git" t
+g -C "$NR" add src tracked.git; g -C "$NR" commit -qm base
+g -C "$NR" update-index --add --cacheinfo "160000,$(g -C "$NR" rev-parse HEAD),sub"; g -C "$NR" commit -qm sub
+mkdir -p "$NR/sub" "$NR/nest1" "$NR/nest2"; g -C "$NR/nest1" init -q; printf 'n\n' > "$NR/nest1/n.py"; g -C "$NR/nest1" add -A; g -C "$NR/nest1" commit -qm n
+g -C "$NR/nest2" init -q; printf 'n\n' > "$NR/nest2/n.py"
+bare "$NR/mirror.git"
+printf 'x = 2\n' > "$NR/src/a.py"
+fresh; run "$NR" "$URL" required --head
+[ "$rc" = 0 ] && [ "$(names)" = src/a.py ] && [ "$(notes)" = 1 ] \
+  && printf '%s' "$out" | grep -qx '  nest1' && printf '%s' "$out" | grep -qx '  nest2' && printf '%s' "$out" | grep -qx '  mirror.git' && printf '%s' "$out" | grep -qx '  sub' && printf '%s' "$out" | grep -qx '  tracked.git' \
+  && ! grep -q 'sub\|tok@\|nest1\|nest2' "$STUB/payload.1.sent" \
+  && ok "NR nested repos (with and without commits, bare, gitlink) and .gnupg out of the tar, named once; the gitlink is no deletion in the diff" \
+  || fail "NR nested: rc $rc [$(names | tr '\n' ' ')] $out"
+# ND: diff mode (off): the same set leaves them out of the diff and names them.
+fresh; run "$NR" "$URL" off --head
+[ "$rc" = 0 ] && ! grep -q 'tok@\|nest1\|nest2' "$STUB/payload.1.sent" && printf '%s' "$out" | grep -qx '  mirror.git' && printf '%s' "$out" | grep -qx '  nest1' \
+  && ok "ND diff mode: untracked nested and bare repositories out of the diff, named" || fail "ND diff mode: rc $rc $out"
+# NB: in diff mode a context file inside a bare repository is not sent.
+fresh; run "$NR" "$URL" off --head mirror.git/config tracked.git/config
+[ "$rc" = 0 ] && ! grep -q 'tok@' "$STUB/payload.1.sent" && printf '%s' "$out" | grep -q 'Not sent (secret-named, in a nested repository.*mirror.git/config' && ok "NB context files inside bare repositories: not sent" || fail "NB bare context: rc $rc $out"
+# NO: a nested repository and a credential hit (two packs): the note once.
+printf 'k = "%s"\n' "$AWS" > "$NR/src/keys.py"; g -C "$NR" add src/keys.py; g -C "$NR" commit -qm keys
+fresh; run "$NR" "$URL" required --head
+[ "$rc" = 0 ] && [ "$(notes)" = 1 ] && printf '%s' "$out" | grep -q 'left out of the snapshot for a credential match: src/keys.py' \
+  && ok "NO a nested repository and a credential hit (two packs): the note once" || fail "NO note once: rc $rc $out"
+# NC: --commits: the snapshot is HEAD's tree; a committed bare repository (its
+# config holds a token) and a gitlink are left out and named.
+NCO="$ROOT/nc"; mkdir -p "$NCO/src" "$NCO/tools"; g -C "$NCO" init -q; printf 'x = 1\n' > "$NCO/src/a.py"
+bare "$NCO/tools"
+g -C "$NCO" add -A; g -C "$NCO" commit -qm base; g -C "$NCO" update-index --add --cacheinfo "160000,$(g -C "$NCO" rev-parse HEAD),sub"
+printf 'x = 2\n' > "$NCO/src/a.py"; g -C "$NCO" add src; g -C "$NCO" commit -qm two
+fresh; run "$NCO" "$URL" required --commits 1
+[ "$rc" = 0 ] && [ "$(names)" = src/a.py ] && printf '%s' "$out" | grep -qx '  tools' && printf '%s' "$out" | grep -qx '  sub' && ! grep -q 'Subproject' "$STUB/payload.1.sent" \
+  && ok "NC --commits: a committed bare repository and a gitlink out of HEAD's snapshot and the diff, named" || fail "NC commits nested: rc $rc [$(names | tr '\n' ' ')] $out"
+# NCa: a bare repository the diff range adds: out of the diff as out of the snapshot.
+fresh; run "$NCO" "$URL" required --all
+[ "$rc" = 0 ] && ! grep -q 'tok@' "$STUB/payload.1.sent" && [ "$(names)" = src/a.py ] && ok "NCa a bare repository added in the range: out of the diff and the snapshot" || fail "NCa bare in range: rc $rc [$(names | tr '\n' ' ')] $out"
+# NH: a tracked docs/HEAD with no config anywhere is no repository: packed, no note.
+NH="$ROOT/nh"; mkdir -p "$NH/docs" "$NH/src"; g -C "$NH" init -q; printf 'x = 1\n' > "$NH/src/a.py"; printf 'the head chapter\n' > "$NH/docs/HEAD"
+g -C "$NH" add -A; g -C "$NH" commit -qm base; printf 'x = 2\n' > "$NH/src/a.py"; g -C "$NH" commit -qam two
+fresh; run "$NH" "$URL" required --commits 1
+[ "$rc" = 0 ] && names | grep -qx 'docs/HEAD' && [ "$(notes)" = 0 ] && ok "NH --commits: docs/HEAD without a config packed, no note" || fail "NH docs/HEAD: rc $rc [$(names | tr '\n' ' ')] $out"
+# NCr: the last commit deletes a bare folder: its token is not in the diff, the folder is named.
+NCR="$ROOT/ncr"; mkdir -p "$NCR/src"; g -C "$NCR" init -q; printf 'x = 1\n' > "$NCR/src/a.py"; bare "$NCR/old.git"
+g -C "$NCR" add -A; g -C "$NCR" commit -qm base; g -C "$NCR" rm -rq old.git; printf 'x = 2\n' > "$NCR/src/a.py"; g -C "$NCR" commit -qam drop
+fresh; run "$NCR" "$URL" required --commits 1
+[ "$rc" = 0 ] && ! grep -q 'tok@' "$STUB/payload.1.sent" && printf '%s' "$out" | grep -qx '  old.git' \
+  && ok "NCr --commits: a bare folder the range deletes: out of the diff, named" || fail "NCr removed bare: rc $rc $out"
+# NCc: --commits, diff mode: a context file in a tracked bare folder whose
+# config is gone from disk, and one in an untracked bare folder: neither sent.
+NCC="$ROOT/ncc"; mkdir -p "$NCC/src"; g -C "$NCC" init -q; printf 'x = 1\n' > "$NCC/src/a.py"; bare "$NCC/tb"; printf 'zmark1 = 1\n' > "$NCC/tb/z.py"
+g -C "$NCC" add -A; g -C "$NCC" commit -qm base; printf 'x = 2\n' > "$NCC/src/a.py"; g -C "$NCC" commit -qam two
+rm "$NCC/tb/config"; bare "$NCC/ub"; printf 'zmark2 = 1\n' > "$NCC/ub/z.py"
+fresh; run "$NCC" "$URL" off --commits 1 tb/z.py ub/z.py
+[ "$rc" = 0 ] && ! grep -q 'zmark' "$STUB/payload.1.sent" && printf '%s' "$out" | grep -q 'Not sent (.*): tb/z.py, ub/z.py' \
+  && ok "NCc --commits: context files in a tracked bare folder (config gone from disk) and an untracked one: not sent" || fail "NCc commits context: rc $rc $out"
+# NBa: --base: a bare folder the branch adds and one it removes since the merge base: in neither the diff nor the tar.
+NBA="$ROOT/nba"; mkdir -p "$NBA/src"; g -C "$NBA" init -q; printf 'x = 1\n' > "$NBA/src/a.py"; bare "$NBA/rb.git" rb
+g -C "$NBA" add -A; g -C "$NBA" commit -qm base; g -C "$NBA" update-ref refs/remotes/origin/main HEAD
+g -C "$NBA" rm -rq rb.git; bare "$NBA/ab.git" ab; printf 'x = 2\n' > "$NBA/src/a.py"; g -C "$NBA" add -A; g -C "$NBA" commit -qm branch
+fresh; run "$NBA" "$URL" required --base main
+[ "$rc" = 0 ] && ! grep -q 'tok@' "$STUB/payload.1.sent" && [ "$(names)" = src/a.py ] && printf '%s' "$out" | grep -qx '  ab.git' && printf '%s' "$out" | grep -qx '  rb.git' \
+  && ok "NBa --base: a bare folder added and one removed on the branch: out of the diff and the tar, named" || fail "NBa base bare: rc $rc [$(names | tr '\n' ' ')] $out"
+# NI: a tracked HEAD beside a git-ignored config on disk: the folder is out, named.
+NI="$ROOT/ni"; mkdir -p "$NI/ic" "$NI/src"; g -C "$NI" init -q; printf 'x = 1\n' > "$NI/src/a.py"; printf 'h\n' > "$NI/ic/HEAD"; printf 'y = 1\n' > "$NI/ic/x.py"; printf 'ic/config\n' > "$NI/.gitignore"
+g -C "$NI" add -A; g -C "$NI" commit -qm base; printf 'c\n' > "$NI/ic/config"; printf 'x = 2\n' > "$NI/src/a.py"
+fresh; run "$NI" "$URL" required --head
+[ "$rc" = 0 ] && ! names | grep -q '^ic/' && names | grep -qx 'src/a.py' && printf '%s' "$out" | grep -qx '  ic' \
+  && ok "NI a tracked HEAD beside an ignored config on disk: the folder out, named" || fail "NI ignored config: rc $rc [$(names | tr '\n' ' ')] $out"
+# NS: a submodule bump alone: nothing to hunt; with another change, no Subproject line.
+NS="$ROOT/ns"; mkdir -p "$NS/src" "$NS/sub"; g -C "$NS" init -q; printf 'x = 1\n' > "$NS/src/a.py"; g -C "$NS" add -A; g -C "$NS" commit -qm base; S1=$(g -C "$NS" rev-parse HEAD)
+g -C "$NS" update-index --add --cacheinfo "160000,$S1,sub"; g -C "$NS" commit -qm sub; S2=$(g -C "$NS" rev-parse HEAD)
+g -C "$NS" update-index --cacheinfo "160000,$S2,sub"
+fresh; run "$NS" "$URL" off --head
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && printf '%s' "$out" | grep -q 'the diff is empty' && ok "NS a submodule bump alone: the diff is empty, nothing sent" || fail "NS bump alone: rc $rc $out"
+printf 'x = 2\n' > "$NS/src/a.py"
+fresh; run "$NS" "$URL" off --head
+[ "$rc" = 0 ] && ! grep -q 'Subproject' "$STUB/payload.1.sent" && ok "NS a bump with another change: no Subproject line in the diff" || fail "NS bump with change: rc $rc $out"
+# NSr: the range removes the submodule: no Subproject line, the other change is sent.
+g -C "$NS" add -A; g -C "$NS" commit -qm bump; g -C "$NS" rm -q --cached sub; printf 'x = 3\n' > "$NS/src/a.py"
+fresh; run "$NS" "$URL" off --head
+[ "$rc" = 0 ] && ! grep -q 'Subproject' "$STUB/payload.1.sent" && grep -q 'x = 3' "$STUB/payload.1.sent" && ok "NSr a removed submodule: no Subproject line in the diff" || fail "NSr removed sub: rc $rc $out"
+# NRp: the range turns a bare folder into code: the new code is sent, the old config is not.
+NRP="$ROOT/nrp"; mkdir -p "$NRP/src"; g -C "$NRP" init -q; printf 'x = 1\n' > "$NRP/src/a.py"; bare "$NRP/app"
+g -C "$NRP" add -A; g -C "$NRP" commit -qm base; g -C "$NRP" rm -rq app; mkdir -p "$NRP/app"; printf 'newcode = 1\n' > "$NRP/app/main.py"; g -C "$NRP" add -A; g -C "$NRP" commit -qm code
+fresh; run "$NRP" "$URL" off --commits 1
+[ "$rc" = 0 ] && ! grep -q 'tok@' "$STUB/payload.1.sent" && grep -q 'newcode' "$STUB/payload.1.sent" && ok "NRp a bare folder replaced by code: the code is sent, the old config is not" || fail "NRp replaced bare: rc $rc $out"
+# NHm: --commits in diff mode reads no working copy for its content: a project that is the home folder is not refused.
+NHM="$ROOT/nhm"; mkdir -p "$NHM"; g -C "$NHM" init -q; printf 'x = 1\n' > "$NHM/a.py"; g -C "$NHM" add -A; g -C "$NHM" commit -qm base; printf 'x = 2\n' > "$NHM/a.py"; g -C "$NHM" commit -qam two
+fresh; out=$(cd "$NHM" && HOME="$NHM" PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" off --commits 1 2>&1); rc=$?
+[ "$rc" = 0 ] && ok "NHm --commits off in the home folder: sent as before" || fail "NHm home commits: rc $rc $out"
+# NP: partial: a changed file defines a name a file inside a tracked bare folder uses: nothing under it in the partial tar.
+NPA="$ROOT/np"; mkdir -p "$NPA/src" "$NPA/lib"; g -C "$NPA" init -q; printf 'x = 1\n' > "$NPA/src/a.py"; bare "$NPA/tb"
+printf 'nested_call_name(1)\n' > "$NPA/tb/use.py"; printf 'nested_call_name(2)\n' > "$NPA/lib/use.py"
+g -C "$NPA" add -A; g -C "$NPA" commit -qm base; printf 'def nested_call_name(n):\n    return n\n' > "$NPA/src/a.py"
+fresh; run "$NPA" "$URL" partial --head
+[ "$rc" = 0 ] && grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" && names | grep -qx 'lib/use.py' && ! names | grep -q '^tb/' \
+  && ok "NP partial: a caller inside a tracked bare folder is not in the partial tar" || fail "NP partial: rc $rc [$(names | tr '\n' ' ')] $out"
+# NA: --all in git: an untracked repository with no commit no longer aborts the read.
+NA="$ROOT/na"; mkdir -p "$NA/inner"; g -C "$NA" init -q; printf 'x = 1\n' > "$NA/a.py"; g -C "$NA/inner" init -q; printf 'i\n' > "$NA/inner/i.py"
+fresh; run "$NA" "$URL" required --all
+[ "$rc" = 0 ] && [ "$(names)" = a.py ] && printf '%s' "$out" | grep -qx '  inner' && ok "NA --all: an untracked repository with no commit is left out, named, exit 0" || fail "NA no-commit nested: rc $rc [$(names | tr '\n' ' ')] $out"
+# NZ: a nested folder name with a newline: excluded, printed as one line with '?'.
+NZ="$ROOT/nz"; mkdir -p "$NZ/src"; g -C "$NZ" init -q; printf 'x = 1\n' > "$NZ/src/a.py"; g -C "$NZ" add -A; g -C "$NZ" commit -qm base
+mkdir "$NZ/we
+ird"; g -C "$NZ/we
+ird" init -q; printf 'w\n' > "$NZ/we
+ird/w.py"; printf 'x = 2\n' > "$NZ/src/a.py"
+fresh; run "$NZ" "$URL" required --head
+[ "$rc" = 0 ] && [ "$(names)" = src/a.py ] && printf '%s' "$out" | grep -qx '  we?ird' && ok "NZ a nested folder name with a newline: left out, named on one line" || fail "NZ newline name: rc $rc [$(names | tr '\n' ' ')] $out"
+# NEc: nothing left once the credential hits are out: that cause, last line.
+NX="$ROOT/nx"; mkdir -p "$NX"; g -C "$NX" init -q
+{ printf 'k = "%s"\n' "$AWS"; for i in 1 2 3 4 5 6 7 8 9 10; do printf 'pad%s = %s\n' "$i" "$i"; done; printf 'v = 1\n'; } > "$NX/conf.py"
+g -C "$NX" add -A; g -C "$NX" commit -qm base; sed -i.b 's/^v = 1$/v = 2/' "$NX/conf.py"; rm -f "$NX/conf.py.b"
+fresh; run "$NX" "$URL" required --head
+[ "$rc" = 1 ] && ! grep -q '^CURL repo' "$STUB/transcript" && [ "$(printf '%s\n' "$out" | tail -n 1 | grep -c 'nothing is left to pack once the files with a credential match are left out (conf.py)')" = 1 ] \
+  && ok "NEc only credential-hit files: that cause as the last line, nothing sent" || fail "NEc credential empty: rc $rc $out"
+# NE: nothing left once secret-named files and nested repositories are out
+# (top-level .gitignore alone does not count): the server's sentence, exit 1,
+# no snapshot sent.
+EMPTY_LINE=$(sed -n "s/^SNAPSHOT_EMPTY='\(.*\)'$/\1/p" "$UP")
+NE="$ROOT/ne"; mkdir -p "$NE/inner"; g -C "$NE" init -q; printf '*.log\n' > "$NE/.gitignore"; printf 'A=1\n' > "$NE/.env"
+g -C "$NE/inner" init -q; printf 'i\n' > "$NE/inner/i.py"
+fresh; run "$NE" "$URL" required --all
+[ "$rc" = 1 ] && ! grep -q '^CURL repo' "$STUB/transcript" && [ -n "$EMPTY_LINE" ] && [ "$(printf '%s\n' "$out" | tail -n 1)" = "$EMPTY_LINE" ] \
+  && ok "NE nothing left to pack: the server's sentence, exit 1, nothing sent" || fail "NE empty: rc $rc $out"
+# NG: a folder without git: a nested repository in it is named and left out.
+NGI="$ROOT/ng"; mkdir -p "$NGI/inner"; printf 'x = 1\n' > "$NGI/a.py"; g -C "$NGI/inner" init -q; printf 'i\n' > "$NGI/inner/i.py"; g -C "$NGI/inner" add -A; g -C "$NGI/inner" commit -qm i
+fresh; run "$NGI" "$URL" required --all
+[ "$rc" = 0 ] && [ "$(names)" = a.py ] && printf '%s' "$out" | grep -qx '  inner' && ok "NG folder without git: the nested repository named and left out" || fail "NG no-git nested: rc $rc [$(names | tr '\n' ' ')] $out"
+# NGb: a folder without git: a bare folder in it is out and named; then the
+# folder itself a bare repository (HEAD beside config at the top): refused,
+# exit 1, no request, the server's sentence with a snapshot and its own without.
+NGB="$ROOT/ngb"; mkdir -p "$NGB"; printf 'x = 1\n' > "$NGB/a.py"; bare "$NGB/mir"
+fresh; run "$NGB" "$URL" required --all
+[ "$rc" = 0 ] && [ "$(names)" = a.py ] && ! grep -q 'tok@' "$STUB/payload.1.sent" && printf '%s' "$out" | grep -qx '  mir' \
+  && ok "NGb folder without git: a bare folder out of the tar and the diff, named" || fail "NGb bare folder: rc $rc [$(names | tr '\n' ' ')] $out"
+bare "$NGB"
+fresh; run "$NGB" "$URL" required --all
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1)" = "$EMPTY_LINE" ] \
+  && ok "NGb the folder itself is a bare repository: the server's sentence, exit 1, nothing sent" || fail "NGb top bare: rc $rc $out"
+fresh; run "$NGB" --dry-run required --all
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "NGb ...on --dry-run too" || fail "NGb top bare dry-run: rc $rc $out"
+fresh; run "$NGB" "$URL" off --all
+[ "$rc" = 1 ] && [ "$(calls)" = 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1)" = "omb-upload: this folder is itself a bare repository (HEAD beside config); nothing was sent" ] \
+  && ok "NGb ...in diff mode: its own sentence, exit 1, nothing sent" || fail "NGb top bare diff mode: rc $rc $out"
+# The archive's pathspec list ends in the server's spare repeat of its first secret exclude.
+grep -q "set -- \"\$@\" ':(exclude,icase,glob)\*\*/.env\*'" "$UP" && ok "the archive list ends in the spare .env* exclude" || fail "no spare exclude"
 
 # ---- 7. URL and arguments ------------------------------------------------------
 for bad in "https://evil.example/u/tok" "http://mcp.ohmybug.ai/u/tok" "https://mcp.ohmybug.ai/u/x; touch $ROOT/pwned" "https://mcp.ohmybug.ai/u/" "https://mcp.ohmybug.ai.evil/u/tok" "https://mcp.ohmybug.ai/u/a/../b"; do

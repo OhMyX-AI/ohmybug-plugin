@@ -206,8 +206,9 @@ repository per week, and is not a merge gate.
   file and line, with the value masked. A payload hunt sends the diff and a
   snapshot of the working copy (without ignored files, secret-named files such
   as `.env*`, `*.pem`, `.npmrc` or `.ssh/`, kubeconfig and `prod.env`-style
-  files that are not source code, and submodules; the same names stay out of
-  the diff and context files); the upload script
+  files that are not source code, and submodules and other nested
+  repositories, each named; the same names stay out of the diff and context
+  files); the upload script
   scans both before anything is sent. A credential in the diff refuses the
   upload; a snapshot file that carries one is left out and named, and
   secret-named files are left out of the diff too. A payload it cannot read is
