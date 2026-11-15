@@ -39,7 +39,8 @@ pass() { # the call goes on: a submit is recorded exactly as before
 # The user's way out, in the env block of settings.json: no scan at all. A
 # provide_files still goes through python, which fills its paths unscanned.
 if [ "${OHMYBUG_SECRET_SCAN:-1}" = 0 ]; then
-  case "$INPUT" in *'__provide_files"'*) ;; *) pass ;; esac
+  # A dispute's paths are still held to the repository below: the opt-out skips the credential scan only.
+  case "$INPUT" in *'__provide_files"'*|*'__challenge_finding"'*) ;; *) pass ;; esac
 fi
 command -v python3 >/dev/null 2>&1 || {
   printf '%s\n' '{"systemMessage":"OhMyBug: secret scan skipped before this upload (python3 not found)."}'
@@ -128,6 +129,34 @@ if str(d.get("tool_name") or "").endswith("__provide_files") and "paths" in ti a
     note = "OhMyBug read %d requested file(s) from disk for provide_files%s." % (len(sent), (": " + ", ".join(sent)) if sent else "")
     if skipped:
         note += " Not sent (missing, unreadable, not a regular file, a symlink, under .git or outside the repository): " + ", ".join(skipped) + "."
+# A dispute (challenge_finding) sends a claim and quoted lines of the repository. Each evidence path must name a file
+# inside it: relative, no empty, "." or ".." part, not under .git, not a file that holds keys. The claim and every note
+# are scanned like file contents. A path outside the repository is refused even with the scan turned off.
+if str(d.get("tool_name") or "").endswith("__challenge_finding"):
+    from omb_scan import KEY_FILE, ENV_FILE
+    claim = ti.get("claim")
+    if claim is not None and not isinstance(claim, str):
+        raise TypeError("claim")
+    ev = ti.get("evidence")
+    if ev is None:
+        ev = []
+    if not isinstance(ev, list):
+        raise TypeError("evidence")
+    bad, notes = [], []
+    for e in ev:
+        if not isinstance(e, dict) or not isinstance(e.get("path"), str):
+            raise TypeError("evidence item")
+        p = e["path"]
+        parts = p.replace("\\", "/").split("/")
+        if p.startswith(("/", "\\", "~")) or re.match(r"^[A-Za-z]:", p) or any(x in ("", ".", "..") for x in parts) or parts[0] == ".git" or KEY_FILE.search(p) or ENV_FILE.search(p):
+            bad.append(p)
+        note = e.get("note")
+        if note is not None and not isinstance(note, str):
+            raise TypeError("note")
+        notes.append({"path": p, "content": note or ""})
+    if bad:
+        stop(6, "\n".join("  - " + p for p in bad))
+    ti = {"files": [{"path": "claim", "content": claim or ""}] + notes}
 if os.environ.get("OHMYBUG_SECRET_SCAN", "1") == "0":
     ti = {}
 
@@ -152,6 +181,14 @@ if [ "$rc" = 4 ] && [ -n "$OUT" ]; then
   } >&2
   exit 2
 fi
+if [ "$rc" = 6 ] && [ -n "$OUT" ]; then
+  {
+    echo "OhMyBug: a dispute cites only files inside this repository, by a relative path, never a file that holds keys. Not sent, because of:"
+    printf '%s\n' "$OUT"
+    echo "Drop those items and dispute again, or judge the finding without a dispute."
+  } >&2
+  exit 2
+fi
 if [ "$rc" = 5 ]; then
   echo "OhMyBug: provide_files paths are read from the git repository this session runs in, and this directory is not inside one, so nothing was sent. Call provide_files again with files [{path, content}] for the files you approve." >&2
   exit 2
@@ -161,6 +198,7 @@ if [ "$rc" != 3 ] || [ -z "$OUT" ]; then
     echo "OhMyBug: could not scan this payload for credentials, so it was NOT sent."
     case "$INPUT" in
       *'__provide_files"'*) echo "Call provide_files again for the same review (do not start a new hunt for this), or set OHMYBUG_SECRET_SCAN=0 to skip the scan." ;;
+      *'__challenge_finding"'*) echo "Dispute again, or judge the finding without a dispute." ;;
       *) echo "Resend it, or set OHMYBUG_SECRET_SCAN=0 to skip the scan. A submit with meta.repo + meta.ref and no payload has nothing to scan." ;;
     esac
   } >&2
@@ -171,6 +209,7 @@ fi
   printf '%s\n' "$OUT" | LC_ALL=C sed 's/^/  - /'
   case "$INPUT" in
     *'__provide_files"'*) echo "Call provide_files again for the same review without those files (or with each value replaced by [REDACTED]); an empty list is a valid answer. Do not start a new hunt for this." ;;
+    *'__challenge_finding"'*) echo "Dispute again with each value named instead of quoted, or judge the finding without a dispute." ;;
     *) echo "Drop those files or replace each value with [REDACTED], then submit again. Or submit with meta.repo + meta.ref and no payload: the server reads the pushed commit and nothing leaves this machine." ;;
   esac
 } >&2

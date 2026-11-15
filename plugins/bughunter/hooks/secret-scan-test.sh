@@ -70,6 +70,21 @@ row "upload=true with no payload passes"        0 "$(j "{'upload':True}")"
 TOOL=provide_files
 row "provide_files carrying a token is refused" 2 "$(j "{'review_id':'r','files':[{'path':'ci.sh','content':'T=$GHP'}]}")" "ci.sh:1 GitHub token"
 row "a refused provide_files is told to resend, not to hunt again" 2 "$(j "{'review_id':'r','files':[{'path':'ci.sh','content':'T=$GHP'}]}")" "Call provide_files again"
+# A dispute quotes the repository back to the service: its claim and notes are scanned, and every evidence path must
+# name a file inside the repository that does not hold keys, whatever the scan setting.
+TOOL=challenge_finding
+row "a dispute with a token in a note is refused" 2 "$(j "{'finding_id':'f','claim':'guarded','evidence':[{'path':'ci.sh','line':3,'note':'T=$GHP'}]}")" "ci.sh:1 GitHub token"
+row "a dispute with a token in its claim is refused" 2 "$(j "{'finding_id':'f','claim':'uses $AWS','evidence':[]}")" "claim:1 AWS access key"
+row "a refused dispute is told to dispute again or judge without" 2 "$(j "{'finding_id':'f','claim':'uses $AWS'}")" "judge the finding without a dispute"
+for p in /etc/passwd ../../.aws/credentials 'a/../../x' '~/.ssh/config' 'C:/x/y' .git/config keys/id_rsa deploy/.env 'a//b' './a'; do
+  row "a dispute citing $p is refused" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'$p','line':1}]}")" "  - $p"
+done
+OHMYBUG_SECRET_SCAN=0 row "a dispute outside the repository is refused with the scan off" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'../x','line':1}]}")" "  - ../x"
+OHMYBUG_SECRET_SCAN=0 row "a dispute citing a key file is refused with the scan off" 2 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'keys/id_rsa','line':1}]}")" "  - keys/id_rsa"
+OHMYBUG_SECRET_SCAN=0 row "the scan off lets a token in a note through" 0 "$(j "{'finding_id':'f','claim':'c','evidence':[{'path':'ci.sh','line':1,'note':'T=$GHP'}]}")"
+row "a clean dispute passes" 0 "$(j "{'finding_id':'f','claim':'the caller checks it first','evidence':[{'path':'src/a.py','line':12,'note':'if x is None: return'},{'path':'.env.example','line':1}]}")"
+row "a dispute with no evidence passes" 0 "$(j "{'finding_id':'f','claim':'the caller checks it first'}")"
+hook "$(j "{'finding_id':'f','claim':'c'}")" >/dev/null; check "a dispute is never recorded as a hunt" "$(stamped)" no
 TOOL=submit_review
 
 # A refused submit must leave no attempt behind: the gate reads a lone attempt
@@ -88,6 +103,8 @@ print(" ".join(c for c in (k["command"].rsplit("/", 1)[-1] for e in pre
 PY2
 )
 check "submit_review has one PreToolUse hook, the scan" "$wired" "secret-scan.sh"
+dwired=$(python3 -c "import json,re,sys; pre=json.load(open(sys.argv[1]))['hooks']['PreToolUse']; print(any(re.search(e.get('matcher',''),'mcp__plugin_bughunter_ohmybug__challenge_finding') and any(k['command'].endswith('/secret-scan.sh') for k in e['hooks']) for e in pre))" "$G/hooks.json")
+check "challenge_finding goes through the scan" "$dwired" "True"
 
 full=$(hook "$(j "{'diff':'+k=\"$AWS\"'}")")
 if printf '%s' "$full" | LC_ALL=C grep -qF "$AWS"; then echo "FAIL the full key reached the message"; fails=$((fails + 1)); else echo "ok   the full key never reaches the message"; fi
