@@ -19,7 +19,11 @@
 # never reads the diff for structure: secret-named files are left out by
 # git's own exclude pathspecs (the snapshot's list), and a file whose diff is
 # not UTF-8 is found by path and left out. --only limits the diff to a path
-# below the current folder. --dry-run does everything before the first
+# below the current folder. Nested repositories (untracked ones, submodules,
+# and a folder with an entry HEAD beside an entry config) are one set, read
+# once from the disk listing and both trees of the range: nothing under them is
+# sent by the diff, the snapshot or a context file, and they are named once on
+# stderr. --dry-run does everything before the first
 # request, prints the manifest and the file names, and sends nothing. In a
 # partial clone, git fetches the trees and blobs the diff needs into the
 # user's own object store (on --dry-run too): one batched request for the
@@ -71,8 +75,6 @@
 # scan and send inside the skill's 600 s call on a slow machine (the client
 # then stops the call, which counts as exit 75); a `-diff` or `binary`
 # attribute is not applied to the diff (git's own NUL-byte check still is);
-# a file edited between the diff and the snapshot goes as it was at each
-# of the two moments;
 # more than 200 files that are not UTF-8 refuse instead of being left out.
 #
 # env: OMB_SNAPSHOT_HOME_OK=1     the project is the home folder (a container)
@@ -92,6 +94,9 @@ OMB_SECRETS='.env* *secret* *credential* id_rsa* id_dsa* id_ecdsa* id_ed25519* *
   *.ppk *.jks *.keystore .ssh .aws .gnupg'
 nl='
 '
+# The server's sentences, word for word (omb-upload-test.sh holds the parity check).
+SNAPSHOT_NESTED_NOTE='left out nested repositories and submodules (to hunt a working repository among them, submit it on its own, from inside it):'
+SNAPSHOT_EMPTY='nothing to pack: this folder has no files after ignored, secret-named and nested-repository paths are left out (top-level .gitmodules, .gitignore and .gitattributes alone do not count); nothing was sent. Without a snapshot this ticket expires on its own. A fast hunt can run in diff mode instead, on the diff alone with no repository, so its quality differs: only the user can turn that on, on the account policy page (/me/policy on the server this command uploads to); do not turn it on yourself'
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
 # Every exclude below is pathspec magic; with GIT_LITERAL_PATHSPECS=1 git would
@@ -208,9 +213,13 @@ home_check() { # $1: what is refused (pack, read)
 # `git add -A` that also reaches files outside a sparse checkout's cone: with
 # --sparse where git has it (2.34+; before it, plain add -A has no such
 # refusal). A skip-worktree entry is left as it is either way, never staged as
-# a deletion. $@: options before `add`.
+# a deletion. $1: a NUL pathspec file ("$d/addx.z": "." and an exclude for
+# each untracked nested repository, which add would abort on or pack as an
+# empty folder); then options before `add`.
 add_all() {
-  if git add -h 2>&1 | grep -q -E -e '--(\[no-\])?sparse'; then git "$@" add -A --sparse; else git "$@" add -A; fi
+  a=$1; shift
+  if git add -h 2>&1 | grep -q -E -e '--(\[no-\])?sparse'; then git "$@" add -A --sparse --pathspec-from-file="$a" --pathspec-file-nul
+  else git "$@" add -A --pathspec-from-file="$a" --pathspec-file-nul; fi
 }
 
 # The working copy as a tree (step A): an index copy, a private object
@@ -227,7 +236,7 @@ worktree_tree() (
   printf '%s\n' "$o" > "$k/o/info/alternates"
   cp -p "$(git rev-parse --git-path index)" "$k/i" 2>/dev/null || :
   export GIT_INDEX_FILE="$k/i" GIT_OBJECT_DIRECTORY="$k/o"
-  add_all -c splitIndex.maxPercentChange=100
+  add_all "$d/addx.z" -c splitIndex.maxPercentChange=100
   git -c splitIndex.maxPercentChange=100 write-tree > "$d/D"
 )
 
@@ -246,6 +255,17 @@ case $scope in
       from=$empty
     } ;;
 esac
+top=$(git rev-parse --show-toplevel)
+# What git lists on disk, read once (the nested-repository set below takes its
+# disk names from here): an untracked repository is listed as dir/, never
+# its files. The working-copy tree's add leaves those dir/ entries out.
+set +e
+( set -e; unset CDPATH; cd "$top"; home_check read; git ls-files -z -co --exclude-standard > "$d/disk.z" ); rc=$?
+set -e
+[ "$rc" = 0 ] || die "omb-upload: the working copy could not be listed (above); nothing was sent"
+py -c 'import sys
+d = [x for x in open(sys.argv[1], "rb").read().split(b"\0") if x.endswith(b"/")]
+open(sys.argv[2], "wb").write(b".\0" + b"".join(b":(exclude,literal)" + x[:-1] + b"\0" for x in d))' "$d/disk.z" "$d/addx.z"
 if [ -z "$to" ]; then
   set +e; worktree_tree; rc=$?; set -e
   [ "$rc" = 0 ] || die "omb-upload: the working copy could not be read into a tree (above); nothing was sent"
@@ -253,7 +273,6 @@ if [ -z "$to" ]; then
 fi
 prefix=$(git rev-parse --show-prefix)
 objects=$(cd "$(git rev-parse --git-path objects)" && pwd)
-top=$(git rev-parse --show-toplevel)
 
 # The diff's repository (step B): bare, no work tree, its own empty config and
 # no attributes, borrowing the objects of the repository and of step A.
@@ -290,10 +309,11 @@ fi
 
 # The payload. The client reads the diff only to decode it (JSON carries
 # text); its files, names and counts come from git by path.
-export OMB_SECRETS excl only
-py - "$d" "$DIR" "$from" "$to" "$prefix" "$top" "$PATH" "$snap" "$@" <<'PY' || exit 1
+export OMB_SECRETS excl only SNAPSHOT_NESTED_NOTE
+set +e
+py - "$d" "$DIR" "$from" "$to" "$prefix" "$top" "$PATH" "$snap" "$nogit" "$@" <<'PY'
 import json, os, re, subprocess, sys
-d, here, frm, to, prefix, top, path, snap, args = sys.argv[1:9] + [sys.argv[9:]]
+d, here, frm, to, prefix, top, path, snap, nogit, args = sys.argv[1:10] + [sys.argv[10:]]
 sys.path.insert(0, here)
 from omb_scan import read_listed
 
@@ -307,8 +327,10 @@ EXCL = [x for x in os.environ["excl"].split("\n") if x]
 ONLY = [x for x in os.environ["only"].split("\n") if x]
 ONLY = [] if "." in ONLY and not prefix else [":(top,literal)" + (prefix + x if x != "." else prefix) for x in ONLY]
 
+NEST = []  # the nested-repository excludes, set below before the first call
+
 def git(extra, specs):
-    p = subprocess.run(["git", "--git-dir=" + d + "/g"] + FLAGS + extra + [frm, to, "--"] + specs,
+    p = subprocess.run(["git", "--git-dir=" + d + "/g"] + FLAGS + extra + [frm, to, "--"] + specs + NEST,
                        env=ENV, stdout=subprocess.PIPE)
     if p.returncode:
         sys.stderr.write("omb-upload: git could not write the diff; nothing was sent.\n")
@@ -342,15 +364,79 @@ if os.path.isdir(d + "/j/o"):
 # 1. Every tree the diff walks, secret-named folders too (a treeless clone
 #    fetches them here).
 p = subprocess.run(["git", "diff-tree", "-r", "--raw", "--no-renames", "-z", frm, to, "--"] + ONLY,
-                   env=RENV, stdout=subprocess.DEVNULL)
+                   env=RENV, stdout=subprocess.PIPE)
 if p.returncode:
     say("git could not list the changed files (a partial clone whose remote is out of reach?)")
+changed = [n for n in p.stdout.split(b"\0")[1::2] if n]
+
+# Nested repositories, the server's rule, as ONE set of top-relative folders
+# (and gitlink paths) read from the three sources a sent byte can come from:
+# nothing at or under a member is sent, by the diff, the snapshot or a
+# context file. Names only; a HEAD file is never read.
+def out(*a):
+    p = subprocess.run(["git"] + list(a), env=RENV, stdout=subprocess.PIPE)
+    if p.returncode:
+        say("git could not list the trees")
+    return p.stdout
+def parents(p):
+    while b"/" in p:
+        p = p.rsplit(b"/", 1)[0]
+        yield p
+def under(p, S):
+    return p in S or any(q in S for q in parents(p))
+S = set()
+# The disk, as git lists it: an untracked repository (dir/, with or without
+# commits), and a HEAD beside a config on disk; "." only without git.
+disk = [x for x in open(d + "/disk.z", "rb").read().split(b"\0") if x]
+for n in disk:
+    if n.endswith(b"/"):
+        S.add(n[:-1])
+    elif n == b"HEAD" or n.endswith(b"/HEAD"):
+        b = n[:-5].rstrip(b"/")
+        if os.path.lexists(os.path.join(os.fsencode(top), b, b"config")):
+            if b:
+                S.add(b)
+            elif nogit == "1":
+                S.add(b".")
+# The tree that is sent: gitlinks, and an entry HEAD beside an entry config.
+tree = [r.split(b"\t", 1) for r in out("ls-tree", "-r", "-z", "--full-tree", to).split(b"\0") if r]
+anyp = set()
+for _, n in tree:
+    anyp.add(n)
+    anyp.update(parents(n))
+for m, n in tree:
+    if m.startswith(b"160000 "):
+        S.add(n)
+    elif n.endswith(b"/HEAD") and n[:-5] + b"/config" in anyp:
+        S.add(n[:-5])
+# The range's other side: a bare repository the range removes or changes, only
+# for the folders above a changed path. A gitlink there is no member: it has
+# no content in any tree, and its name would hide the files that replace it.
+if frm != subprocess.run(["git", "hash-object", "-t", "tree", "/dev/null"], env=RENV, stdout=subprocess.PIPE).stdout.strip().decode():
+    cand = sorted(q for q in {q for n in changed for q in parents(n)} if not under(q, S))
+    for i in range(0, len(cand), 200):
+        part = cand[i:i + 200]
+        got = {}
+        for r in out("ls-tree", "-z", "--full-tree", frm, "--", *[os.fsdecode(q + x) for q in part for x in (b"/HEAD", b"/config")]).split(b"\0"):
+            if r:
+                got[r.split(b"\t", 1)[1]] = r.split(b" ")[1]
+        for q in part:
+            if got.get(q + b"/HEAD") in (b"blob", b"commit") and q + b"/config" in got:
+                S.add(q)
+if S:
+    sys.stderr.write(os.environ["SNAPSHOT_NESTED_NOTE"] + "\n" + "".join("  " + clean1(n) + "\n" for n in sorted(S)))
+open(d + "/nest.z", "wb").write(b"".join(n + b"\0" for n in sorted(S)))
+open(d + "/nestpaths.z", "wb").write(b"".join(n + b"\0" for _, n in tree if under(n, S)))
+if b"." in S:
+    sys.exit(5)  # the folder itself is a bare repository: the shell says so
+# The excludes: one per member at or above a changed path.
+NEST = [":(exclude,top,literal)" + os.fsdecode(q) for q in sorted({q for n in changed for q in [n] + list(parents(n)) if q in S})]
 # 2. One prefetch of every blob the diff reads, in one request: git's diff
 #    machinery fetches the missing blobs of a diff as one batch. Its exit
 #    status is not read; the blob read below decides.
-subprocess.run(["git"] + FLAGS + ["-p", frm, to, "--"] + specs, env=RENV, stdout=subprocess.DEVNULL)
+subprocess.run(["git"] + FLAGS + ["-p", frm, to, "--"] + specs + NEST, env=RENV, stdout=subprocess.DEVNULL)
 # 3. The blobs of the files the diff keeps (files and symlinks, both sides).
-p = subprocess.run(["git", "diff-tree", "-r", "--raw", "--no-abbrev", "--no-renames", "-z", frm, to, "--"] + specs,
+p = subprocess.run(["git", "diff-tree", "-r", "--raw", "--no-abbrev", "--no-renames", "-z", frm, to, "--"] + specs + NEST,
                    env=RENV, stdout=subprocess.PIPE)
 if p.returncode:
     say("git could not list the changed files")
@@ -434,7 +520,7 @@ new = [n for n in final if n in untracked]
 
 files, sent, skipped, dotdot = [], [], [], []
 if args:
-    listed = set(open(d + "/listed", "rb").read().split(b"\0"))
+    listed = set(x for x in open(d + "/listed", "rb").read().split(b"\0") if not under(x, S))
     rtop = os.path.realpath(top)
     for a in args:
         # Lexically below the top level, then opened part by part from it with
@@ -494,6 +580,14 @@ with open(d + "/meta", "w", encoding="utf-8") as f:
     f.write("\n".join([str(len(final)), ", ".join(clean(sent)), ", ".join(clean(skipped)), cap(dropped),
                        str(len(diff.encode("utf-8"))), cap(notutf8), newline, ", ".join(clean(dotdot))]) + "\n")
 PY
+rc=$?
+set -e
+case $rc in
+  0) ;;
+  5) if [ -n "$snap" ]; then die "$SNAPSHOT_EMPTY"; fi
+     die "omb-upload: this folder is itself a bare repository (HEAD beside config); nothing was sent" ;;
+  *) exit 1 ;;
+esac
 { IFS= read -r nfiles; IFS= read -r ctx_sent; IFS= read -r ctx_skipped; IFS= read -r diff_dropped; IFS= read -r diff_bytes; IFS= read -r diff_notutf8; IFS= read -r diff_new; IFS= read -r ctx_dotdot; } < "$d/meta" || :
 
 scan_off=0
@@ -515,9 +609,9 @@ fi
 # pack), removed from the temporary index before write-tree; the tree id
 # kept in "$k/t"; and the archive is of a commit of that tree with a fixed
 # author, committer and date, not of the tree, so its bytes (mtimes, the pax
-# header) do not depend on the time it was packed. With --commits the tree
-# is HEAD's (the diff is commits only, so is the snapshot), skip-worktree
-# entries left out as for the working copy. Called only as a
+# header) do not depend on the time it was packed. The index is the tree the
+# diff ends at ($to: the working copy's, or HEAD's with --commits), skip-worktree
+# entries and the nested-repository paths left out. Called only as a
 # plain statement (see run_pack): on the left of || or in an if, set -e inside
 # it would be off, and a failed step would pack a stale tree as a success.
 pack() (
@@ -525,7 +619,7 @@ pack() (
   set -e; umask 077; unset CDPATH; r=$(git rev-parse --show-toplevel); cd "$r"
   home_check pack
   o=$(cd "$(git rev-parse --git-path objects)" && pwd); rm -rf "$k"; mkdir "$k"
-  cp -p "$(git rev-parse --git-path index)" "$k/i" 2>/dev/null || :; f=$(git rev-parse --show-object-format 2>/dev/null) || :; case $f in sha1|sha256) g=--object-format=$f;; *) g=;; esac; mkdir -p "$k/o/info"; printf '%s\n' "$o" > "$k/o/info/alternates"; export GIT_INDEX_FILE="$k/i" GIT_OBJECT_DIRECTORY="$k/o"; s='-c splitIndex.maxPercentChange=100'
+  cp -p "$(git rev-parse --git-path index)" "$k/i" 2>/dev/null || :; f=$(git rev-parse --show-object-format 2>/dev/null) || :; case $f in sha1|sha256) g=--object-format=$f;; *) g=;; esac; mkdir -p "$k/o/info"; printf '%s\n' "$o" > "$k/o/info/alternates"; if [ -d "$d/j/o" ]; then printf '%s\n' "$d/j/o" >> "$k/o/info/alternates"; fi; export GIT_INDEX_FILE="$k/i" GIT_OBJECT_DIRECTORY="$k/o"; s='-c splitIndex.maxPercentChange=100'
   # A partial clone: every blob the snapshot reads, fetched in ONE request
   # before the index is touched (older git fetches a missing blob one at a
   # time in read-tree and write-tree), into this private object folder; the
@@ -539,9 +633,11 @@ pack() (
     if [ "$scope" = commits ]; then pre "$to^{tree}"; elif git rev-parse -q --verify 'HEAD^{tree}' >/dev/null; then pre 'HEAD^{tree}'; fi
   fi
   git ls-files -z -t > "$k/l"; xargs -0 sh -c 'for e; do case $e in "S "*) printf "%s\0" "${e#S }";; esac; done' sh < "$k/l" > "$k/s"
-  [ "$scope" = commits ] && git $s read-tree "$to"
+  # The tree the diff ends at, in every scope (the working copy's, or HEAD's
+  # with --commits): the nested-repository list was read from it.
+  git $s read-tree "$to"
   git $s update-index -z --force-remove --stdin < "$k/s"
-  [ "$scope" = commits ] || add_all $s
+  git $s update-index -z --force-remove --stdin < "$d/nestpaths.z"
   git $s update-index -z --force-remove --stdin < "$drop"
   # Secret FILE names (the server's packing rule): kubeconfig files under any
   # name and .env files with a prefix leave the index, unless the name ends in
@@ -550,11 +646,20 @@ pack() (
   git ls-files -z -- ':(icase,glob)**/*kubeconfig*' ':(icase,glob)**/*kube[-_]config*' ':(icase,glob)**/*.env' ':(icase,glob)**/*.env[!a-z0-9]*' > "$k/k"
   xargs -0 sh -c 'for e; do case $e in *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.py|*.go|*.java|*.kt|*.kts|*.rb|*.rs|*.cs|*.php|*.swift|*.scala|*.c|*.cc|*.cpp|*.h|*.hpp|*.m|*.ex|*.exs|*.dart|*.lua) ;; *) printf "%s\0" "$e";; esac; done' sh < "$k/k" > "$k/x"
   git $s update-index -z --force-remove --stdin < "$k/x"
+  # Nothing left to pack (only secret-named files, only nested repositories,
+  # only top-level git metadata) is refused here, as the server does; the
+  # list is the archive's pathspecs below plus the three metadata names.
+  set -- .
+  set -f
+  for q in $OMB_SECRETS; do set -- "$@" ":(exclude,icase,glob)**/$q" ":(exclude,icase,glob)**/$q/**"; done
+  set +f
+  git ls-files -- "$@" ':(exclude,literal).gitmodules' ':(exclude,literal).gitignore' ':(exclude,literal).gitattributes' > "$k/e"
+  [ -s "$k/e" ] || exit 5  # run_pack says why, as the last line
   t=$(git $s write-tree); printf '%s\n' "$t" > "$k/t"
   [ -z "$partial" ] || pre "$t"  # what the index holds beyond HEAD; no request when nothing is missing
   c=$(GIT_AUTHOR_NAME=omb GIT_AUTHOR_EMAIL=omb GIT_AUTHOR_DATE='946684800 +0000' GIT_COMMITTER_NAME=omb GIT_COMMITTER_EMAIL=omb GIT_COMMITTER_DATE='946684800 +0000' git commit-tree --no-gpg-sign -m omb "$t")
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
-  { git init -q --bare $g "$k/g" 2>/dev/null || git init -q --bare "$k/g"; }; mkdir -p "$k/g/info"; printf '%s\n%s\n' "$o" "$k/o" > "$k/g/objects/info/alternates"
+  { git init -q --bare $g "$k/g" 2>/dev/null || git init -q --bare "$k/g"; }; mkdir -p "$k/g/info"; printf '%s\n%s\n' "$o" "$k/o" > "$k/g/objects/info/alternates"; if [ -d "$d/j/o" ]; then printf '%s\n' "$d/j/o" >> "$k/g/objects/info/alternates"; fi
   echo '* -filter -text -ident -working-tree-encoding -export-ignore -export-subst' > "$k/g/info/attributes"
   # The partial copy: the file list of the tree just written, built in the
   # archive's bare repository under no setting, then a second tree of exactly
@@ -585,12 +690,19 @@ pack() (
   set -f
   for q in $OMB_SECRETS; do set -- "$@" ":(exclude,icase,glob)**/$q" ":(exclude,icase,glob)**/$q/**"; done
   set +f
+  # The server's list ends in a spare repeat of its first secret exclude (a
+  # client exclude glued to the last word breaks only the spare): kept for parity.
+  set -- "$@" ':(exclude,icase,glob)**/.env*'
   git --git-dir="$k/g" archive --format=tar.gz -o "$k/s.tgz" "$c" -- "$@"
 )
 run_pack() {
   set +e
   pack "$d/k" "$d/drop"; rc=$?
   set -e
+  if [ "$rc" = 5 ]; then
+    [ -s "$d/drop" ] || die "$SNAPSHOT_EMPTY"
+    die "omb-upload: nothing is left to pack once the files with a credential match are left out ($(tr '\001-\037\177' '?' < "$d/drop" | tr '\0' '\n' | sed '/^$/d' | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')); remove or redact the credentials, then run the same command again; nothing was sent"
+  fi
   [ "$rc" = 0 ] || die "omb-upload: the repository could not be packed (above); nothing was sent"
 }
 
@@ -635,7 +747,7 @@ manifest() { # $1: what the snapshot part says
   [ -n "$diff_dropped" ] && line="$line. Left out of the diff as secret-named: $diff_dropped"
   [ -n "$diff_notutf8" ] && line="$line. Left out of the diff as not UTF-8 text: $diff_notutf8"
   [ -n "$diff_new" ] && line="$line. The diff includes $diff_new"
-  [ -n "$ctx_skipped" ] && line="$line. Not sent (secret-named, not listed by git, outside the repository, not a regular file, through a symlink, or not UTF-8): $ctx_skipped"
+  [ -n "$ctx_skipped" ] && line="$line. Not sent (secret-named, in a nested repository, not listed by git, outside the repository, not a regular file, through a symlink, or not UTF-8): $ctx_skipped"
   [ -n "$ctx_dotdot" ] && line="$line. Not sent (a path with '..'; give it below the current folder, or as a full path): $ctx_dotdot"
   if [ "$scan_off" = 1 ]; then
     line="$line. Credential scan: off (OHMYBUG_SECRET_SCAN=0)."
