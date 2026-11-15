@@ -310,6 +310,88 @@ created automatically, once per machine. Then retry the tool call.
 (Do not run `claude mcp login` or `codex mcp login` yourself: they need
 an interactive tty.)
 
+## First-run setup
+
+Three questions that set the account's defaults, asked once per machine. In
+Claude Code the session-start hook asks for it in your first reply, at most
+three times per machine; `/bughunter:setup` runs it any time. In Codex it
+starts only on the user's word ("set up OhMyBug"). In Claude Code it needs
+the question tool (`AskUserQuestion`): without one (a headless run), do
+nothing and say nothing about it. Then answer what the user asked.
+
+1. Call `get_balance`. If it fails with an authentication error, say the
+   sign-in in one line as "If a tool call fails with an authentication
+   error" says, add that the setup runs after it with /bughunter:setup, write
+   nothing and stop. Any other failure: say nothing about the setup, write
+   nothing and stop. If its `policy.intro.version` is 1 or more and this is
+   not `/bughunter:setup`, run `bash '<skill_dir>/../../hooks/intro.sh' done`,
+   say nothing and stop: the setup ran on another machine.
+2. Say, as plain text: "OhMyBug hunts bugs in your changes in the cloud. You
+   pay only when a real bug is found: a clean change costs nothing. Three quick
+   questions set your defaults; change them any time with /bughunter:setup or
+   on ohmybug.ai/me/policy." Add "Your first hunt that finds a bug costs
+   nothing." only when `get_balance` shows one still free.
+3. Ask the three questions in ONE question-tool call (in Codex: in chat,
+   numbered, a free-text answer accepted). The option equal to the saved
+   value in `get_balance` `policy` is marked "(current)".
+   - **Upload.** "When OhMyBug cannot read your code on GitHub, a copy goes
+     to the hunt sandbox. Which copy?" Git-ignored and secret-named files
+     are left out either way.
+     - "Changed files and the files around them (recommended)": "About 5% of
+       a typical repository. On our benchmark of 22 pull requests it scored
+       77.2 against 76.1 for the whole repository, in 137 s against 183 s."
+       Sends `upload: "partial"`.
+     - "The whole working copy": "Slower; for bugs that live far from the
+       change." Sends `upload: "full"`.
+     - "Skip (keep the current setting)".
+   - **Default hunt.** "Which hunt runs when you name none?" A deep hunt
+     runs only when asked: say its price in the question, from `get_balance`.
+     - "Let OhMyBug choose (recommended)": sends `hunt_mode: "auto"`.
+     - "Quick check, <snap price>": sends `hunt_mode: "snap"`.
+     - "Fast hunt, <fast price>": sends `hunt_mode: "fast"`.
+     - "Skip (keep the current setting)".
+
+     Prices come only from `get_balance` `modes` (`price_usd`); a mode not
+     listed there is not offered.
+   - **Stories.** Not asked when the saved `stories` is `auto`: say in one
+     line that automatic posting stays as it is, and send no `stories`. The
+     question: "When a hunt finds a real bug, your agent can write a short
+     story of it: two sentences on the trap and how it fires, plus the rule
+     that avoids it. Kept together in your account, they show the mistakes
+     your agents make most. Before a story goes public, your agent removes
+     every name (repo, file, company, code), and our check removes names
+     again and holds any story it is unsure about." Then `get_balance`
+     `free_review_rule` word for word, when present; never a reward rule of
+     your own.
+     - "Keep them in my account only (recommended)": "Off every public page,
+       at ohmybug.ai/me/stories. Your agent still asks before each story, and
+       private stories earn nothing toward the reward." Sends
+       `stories: "private"`.
+     - "Publish them, signed with my GitHub name": "Your agent asks before
+       each story." Sends `stories: "ask"`, `author: "handle"`.
+     - "Publish them unsigned": "The same, without your name." Sends
+       `stories: "ask"`, `author: "anonymous"`.
+     - "Don't write them": "No stories, no questions." Sends
+       `stories: "never"`.
+4. A skipped question, or a dismissed dialog, sends nothing for its fields.
+5. Run `bash '<skill_dir>/../../hooks/intro.sh' done`: it writes this
+   machine's marker and prints the time (no such script, as in a skill-only
+   install: `date -u +%Y-%m-%dT%H:%M:%SZ`). Then make ONE `set_policy` call:
+   the answered fields plus `intro: {"version": 1, "at": "<that time>"}`.
+   Never a second policy write in the setup: it would void a `confirm_url`.
+6. Say: "Done. /bughunter:review hunts what you have, /bughunter:scan a
+   GitHub repository, /bughunter:stats shows your record." (In Codex, in
+   words: "ask for an OhMyBug review, a scan of this repository, or your
+   record.") When the answer carries `confirm_url` (signed stories over a
+   saved unsigned setting), add last: "Open this link to sign your stories
+   with your GitHub name: <confirm_url>. It is valid for 24 hours; until then
+   stories stay unsigned." Nothing waits on it.
+7. `set_policy` refused or unreachable: one line, "Your choices were not
+   saved: <the server's sentence>. Run /bughunter:setup to try again.", and
+   go on with the session. No retry. The marker stays written.
+
+In Codex, say "set up OhMyBug" wherever these lines name `/bughunter:setup`.
+
 ## The flow
 
 ### 1. Scope the diff
@@ -374,10 +456,11 @@ upload and, with `required`, packs and scans the repository snapshot exactly
 as the upload will, so its manifest line is the one the upload prints.
 `<snapshot>` here is `required`, unless an upload ticket earlier in this
 session answered `snapshot: "off"` (the account is in diff mode, the only
-way you can know before the submit): then `off`. When you cannot know, use
-`required`: it over-states what leaves the machine rather than
-under-stating it. After `submit_review`, the ticket's `snapshot` decides,
-and if it says `off`, the upload's own manifest line is the one that counts.
+way you can know before the submit): then `off`. Never `partial` here,
+even when a ticket earlier in this session carried `pack: "partial"`: the
+dry run over-states what leaves the machine rather than under-stating it.
+After `submit_review`, the ticket's `snapshot` and `pack` decide, and the
+upload's own manifest line is the one that counts.
 
 ```bash
 bash '<skill_dir>/../../hooks/omb-upload.sh' --dry-run '<snapshot>' <scope>
@@ -458,6 +541,10 @@ Work down this list and stop at the first rung that applies:
    repository root (untracked files in; ignored files, secret-named files and
    submodules out; nothing written to your index or object store), scans it
    and the diff for credentials, and sends the snapshot before the payload.
+   `snapshot: "required"` with `pack: "partial"`: a fast hunt that asks for
+   a partial copy: the changed files, the build manifests above them and the
+   files that use the names the change calls or defines (the script builds
+   that list itself, from git, and says so in its manifest line).
    `snapshot: "off"`: the account is in diff mode, so the payload goes alone.
    An inline `diff` runs only in diff mode; anywhere else
    it is refused `snapshot_required` with nothing started or charged, so submit
@@ -567,7 +654,8 @@ inline `diff` outside diff mode is refused anyway.
 
 1. `submit_review` with `upload: true`, full `meta`, and NO diff/files –
    it returns `upload_url` (one-time) + `review_id` + `status_url`, and
-   `snapshot` (`required` or `off`). Send `meta.repo` + `ref` + `base_branch`
+   `snapshot` (`required` or `off`), and on a fast hunt maybe
+   `pack: "partial"`. Send `meta.repo` + `ref` + `base_branch`
    anyway: the reviewers read files with them. **Except a no-branch ladder
    payload:** leave `base_branch`
    out there (the server would review its own empty merge-base diff instead),
@@ -578,12 +666,19 @@ inline `diff` outside diff mode is refused anyway.
 2. Run the plugin's upload script in ONE shell call, with the block below as
    it stands. `<skill_dir>` is the folder this SKILL.md was loaded from (the
    client names it when it loads the skill); the script sits in the plugin's
-   `hooks/` folder beside it. `<upload_url>` and `<snapshot>`
-   are the answer's `upload_url` and `snapshot`; `<scope>` is
+   `hooks/` folder beside it. `<upload_url>` is the answer's `upload_url`.
+   `<snapshot>` is `partial` only when the answer that gave you this
+   `upload_url` carries `pack: "partial"`; with no `pack` field it is the
+   answer's `snapshot` (`required`, or `off` in diff mode). A deep ticket is
+   always `required`. Never add `?pack=partial` to a URL or build a file list
+   yourself: the script does both or neither, and its manifest line says
+   which. A rerun after `75` is the same command with the same second
+   argument, even though `get_findings` no longer shows `pack` once the
+   snapshot is stored. `<scope>` is
    `--base '<base_branch>'` (`meta.base_branch`) for a branch, or the ladder
    rung's scope. Check every value BEFORE you write the command:
    `<upload_url>` is `https://mcp.ohmybug.ai/u/` followed only by letters, digits, `_` or `-`,
-   `<snapshot>` is exactly `required` or `off`, `<base_branch>` holds only
+   `<snapshot>` is exactly `required`, `partial` or `off`, `<base_branch>` holds only
    letters, digits, `.`, `_`, `/` or `-` and does not start with `-`, `<N>` is
    a number from 1 to 999 with no leading zero, and an `--only` path goes
    inside single quotes and holds no single quote.
@@ -613,7 +708,10 @@ inline `diff` outside diff mode is refused anyway.
    handled: a hard kill leaves its private temporary folder behind; a full temporary folder fails
    a write and nothing is sent; a working copy near the server's 1 GiB
    ceiling may not pack, scan and send inside the 600 s call on a slow machine
-   (a call the client stops at 600 s counts as `75` below).
+   (a call the client stops at 600 s counts as `75` below). A partial copy of
+   a repository of more than 200,000 files or 512 MB gets no search for the
+   files that use the changed names: the changed files and their build
+   manifests only, and the manifest line says so.
 
 ```bash
 bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' <scope>
@@ -622,7 +720,21 @@ bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' <scope>
 3. Before the first POST the script prints one manifest line: what leaves
    the machine and what was left out. Show it to the user word for word; do
    not ask. Its exit status says the rest:
-   - `0` – the payload was accepted (the answer is printed).
+   - `0` – the payload was accepted (the answer is printed). A partial copy's
+     manifest line reads `+ partial repository snapshot: 83 of 6333 files
+     (41 of 41 changed, 3 build manifests, 20 files that use the changed
+     names), 310 KB packed. Left out: every other file, ...`; one that ends
+     `A partial copy was asked for and not built (...), so the whole working
+     copy goes` sent the whole copy. The hunt of a partial copy ends with one
+     line from the server that says so: show it as it comes.
+     **"Whole repository"** in the user's own words (they want the hunt to
+     see every file) is this hunt only: run the command with `required` in
+     place of `partial` (every ticket takes the whole copy). When this
+     ticket is already used (the command ran on it), a new `submit_review`
+     first, and its command with `required`. Saved settings stay as they
+     are; only when the user says so for every hunt ("always", "from now
+     on"), call `set_policy` with `upload: "full"` and say the way back
+     (`upload: "partial"`, or /bughunter:setup).
    - `3` – the diff or a context file carries what looks like a credential,
      and nothing was sent. Show the masked list. Never rerun with the scan
      off yourself: the user removes or redacts it and the same command runs
@@ -648,7 +760,14 @@ bash '<skill_dir>/../../hooks/omb-upload.sh' '<upload_url>' '<snapshot>' <scope>
      names `OMB_SNAPSHOT_HOME_OK=1`: that is the user's call too (the project
      really is the home folder, as in a container). Ask; only on a yes, run
      the same command again as one call with `OMB_SNAPSHOT_HOME_OK=1` in
-     front of it.
+     front of it. Three last lines about the partial copy: "the server
+     refused the partial mark" (the ticket stays valid): run the same command
+     again with `required` in place of `partial`, once, and tell the user to
+     update the plugin. "this was a deep-hunt ticket and it is retired":
+     submit the deep hunt again and run this command with `required`. "the
+     hunt was not started and nothing was billed": one new `submit_review`
+     with `upload: true`, then this command with the new ticket's values; the
+     same answer a second time in a row: stop and tell the user.
 4. The review starts on upload – arm the background monitor on `status_url`
    as usual once the script exits 0. Lite and snap never take this path:
    a submit with `upload: true` in one of those modes is refused

@@ -24,26 +24,42 @@ function emit(context, hookEventName) {
   }));
 }
 
-// Once per machine, the first Codex session after install: what to say to try it.
-// Codex has no slash commands, so the welcome names phrases, and asks the assistant
-// to pass them on, since a systemMessage alone is small print.
-const WELCOME = 'OhMyBug is installed: a cloud bug hunt for your code, from $4 only when a real bug is found (the first is free). No pull request needed. Ask Codex: "Run the OhMyBug cloud hunt on my code" (your branch, uncommitted changes, recent commits, or a folder with no git), "Run an OhMyBug scan of this repository" (a GitHub repository, everything changed in the last 30 days, up to 150 minutes), or "Show my OhMyBug balance and record". Nothing starts until you ask.';
+// The first-session offer of the setup, until the setup is done (the marker,
+// written only by the skill's First-run setup) and at most 3 times (a counter
+// shared with intro.sh). The questions start only on the user's word, so
+// `codex exec` never waits on one.
+const SETUP_OFFER = 'In your first reply add one line: OhMyBug is installed, say \'set up OhMyBug\' for three quick questions; then go on.';
 
-function firstSession() {
+function offerSetup() {
   const fs = require('fs'), path = require('path'), os = require('os');
   const dir = process.env.OMB_STATE_DIR || path.join(os.homedir(), '.ohmybug');
-  const mark = path.join(dir, 'codex-welcome-v1');
-  try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(mark, '', { flag: 'wx' }); return true; } catch (_) { return false; }
+  if (fs.existsSync(path.join(dir, 'intro-v1'))) return false;
+  const counter = path.join(dir, 'intro-v1-offers');
+  let n = 0;
+  try { n = parseInt(fs.readFileSync(counter, 'utf8'), 10) || 0; } catch (_) {}
+  if (n >= 3) return false;
+  // A counter that cannot be written would offer forever: no offer then.
+  try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(counter, `${n + 1}\n`); } catch (_) { return false; }
+  return true;
 }
 
 if (event === 'session') {
-  if (firstSession()) {
-    process.stdout.write(JSON.stringify({
-      systemMessage: WELCOME,
-      hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: `${ROUTING} ${WELCOME} (For the assistant: in your first reply this session, tell the user in two or three plain lines that OhMyBug is installed, and offer once to hunt their current branch or uncommitted changes now, before you answer what they asked. A hunt sends their code: start it only if they say yes.)` }
-    }));
-  } else emit(ROUTING, 'SessionStart');
-  process.exit(0);
+  // Only a new session spends an offer: a resumed, cleared or compacted one is
+  // mid-task. The payload's source says which; none (an older client) counts as new.
+  let raw = '', done = false;
+  const go = () => {
+    if (done) return;
+    done = true;
+    let src = '';
+    try { src = String(JSON.parse(raw.replace(/^\uFEFF/, '') || '{}').source || ''); } catch (_) {}
+    const fresh = src === '' || src === 'startup';
+    emit(fresh && offerSetup() ? `${ROUTING} ${SETUP_OFFER}` : ROUTING, 'SessionStart');
+    process.exit(0);
+  };
+  process.stdin.on('data', c => { raw += c; });
+  process.stdin.on('end', go);
+  process.stdin.on('error', go);
+  setTimeout(go, 1000).unref();
 }
 
 if (event === 'subagent') {
@@ -51,7 +67,7 @@ if (event === 'subagent') {
   process.exit(0);
 }
 
-if (event !== 'prompt') process.exit(0);
+if (event !== 'prompt' && event !== 'session') process.exit(0);
 
 let input = '';
 let finished = false;
@@ -60,6 +76,10 @@ function finish() {
   finished = true;
   let prompt = '';
   try { prompt = String(JSON.parse(input.replace(/^\uFEFF/, '')).prompt || ''); } catch (_) { process.exit(0); }
+  // The setup ask never swallows a review ask in the same prompt: both go.
+  const setup = /\bset\s*up\s+ohmybug\b|\bohmybug\s+setup\b/i.test(prompt)
+    ? 'The user asks for the OhMyBug setup: run the First-run setup of the bughunter skill now, in chat, numbered, free text accepted.'
+    : '';
   if (/\b(?:review|reviewing|bug.?hunt|hunt\s+bugs?|deep\s+(?:review|hunt)|(?:lite|snap)\s+hunt|full[- ]repo(?:sitory)?\b|pull\s+request|\bpr\b|merge)\b/i.test(prompt)) {
     // The user's own words are the only thing that puts deep first (the server
     // takes deep: true from nobody else); the sentence says so only when the
@@ -71,11 +91,13 @@ function finish() {
     const deep = /\bdeep\s+(?:hunt|review|scan|pass|mode)\b|\bfull[- ]repo(?:sitory)?\b|--deep\b|\bbughunter:review\s+(?:--)?deep\b/i.test(prompt)
       ? ' The prompt names the deep hunt: if the user is asking for it, submit_review with deep: true is the first and only review – no fast stage first, no second question.'
       : '';
-    emit(`${ROUTING} Route this request now; do not launch local review agents.${deep}`, 'UserPromptSubmit');
-  }
+    emit(`${ROUTING} Route this request now; do not launch local review agents.${deep}${setup ? ` ${setup}` : ''}`, 'UserPromptSubmit');
+  } else if (setup) emit(setup, 'UserPromptSubmit');
 }
 
-process.stdin.on('data', chunk => { input += chunk; });
-process.stdin.on('end', finish);
-process.stdin.on('error', () => { finish(); process.exit(0); });
-setTimeout(() => { finish(); process.exit(0); }, 1000).unref();
+if (event === 'prompt') {
+  process.stdin.on('data', chunk => { input += chunk; });
+  process.stdin.on('end', finish);
+  process.stdin.on('error', () => { finish(); process.exit(0); });
+  setTimeout(() => { finish(); process.exit(0); }, 1000).unref();
+}

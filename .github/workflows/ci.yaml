@@ -33,6 +33,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
       - run: bash plugins/bughunter/hooks/gate-test.sh
       - run: bash plugins/bughunter/hooks/codex-router-test.sh
+      - run: bash plugins/bughunter/hooks/intro-test.sh
       # The scan must read a payload under a multibyte locale; its test fails,
       # not skips, when a locale is missing, so generate the ones it runs under.
       - run: |
@@ -44,6 +45,8 @@ jobs:
       - run: bash plugins/bughunter/hooks/omb-upload-test.sh
       # The same rows with the script under bash (sh above is dash here).
       - run: OMB_TEST_SH=bash OMB_TEST_SKIP_SLOW=1 bash plugins/bughunter/hooks/omb-upload-test.sh
+      # The partial copy's file list against the server rule's own lists.
+      - run: bash plugins/bughunter/hooks/omb-paths-test.sh
       - run: bash plugins/bughunter/hooks/watch-guard-test.sh
       - run: bash plugins/bughunter/hooks/version-check-test.sh
       - run: bash plugins/bughunter/hooks/mcp-headers-test.sh
@@ -61,8 +64,12 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The whole path is compared with the previous release's script, read from history.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - run: OMB_TEST_SKIP_SLOW=1 bash plugins/bughunter/hooks/omb-upload-test.sh
+      - run: bash plugins/bughunter/hooks/omb-paths-test.sh
 
   mod:
     name: Claude Code mod

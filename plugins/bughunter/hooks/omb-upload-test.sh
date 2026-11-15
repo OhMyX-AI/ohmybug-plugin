@@ -36,7 +36,7 @@ while [ $# -gt 0 ]; do
   case $1 in -o) o=$2; shift ;; -D) h=$2; shift ;; -X) m=$2; shift ;; -H|-w|--connect-timeout) shift ;; --data-binary) f=${2#@}; shift ;; -*) ;; *) u=$1 ;; esac
   shift
 done
-case $m:$u in DELETE:*) door=delete ;; POST:*/repo) door=repo ;; POST:*) door=payload ;; *) door=other ;; esac
+case $m:$u in DELETE:*) door=delete ;; POST:*/repo|POST:*/repo[?]*) door=repo ;; POST:*) door=payload ;; *) door=other ;; esac
 n=$(cat "$STUB/$door.n" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$STUB/$door.n"
 line=$(sed -n "${n}p" "$STUB/$door.plan" 2>/dev/null)
 [ -n "$line" ] || line='200|{"ok":true}|'
@@ -534,6 +534,11 @@ done
 st "R10 no answer (curl 7): 75" 75 '000|x|' '' '' required "repo " "$AGAIN;"
 st "R10 a 1xx as the last status: no answer, 75" 75 '100|x|' '' '' required "repo " "$AGAIN;"
 st "R10 a 200 cut mid-body (curl 18): no answer, 75" 75 'cut|{"ok":true}|' '' '' required "repo " "$AGAIN;"
+st "R11 400 snapshot_mark_unknown on the marked snapshot: final, the ticket kept, rerun with required" 1 '400|{"code":"snapshot_mark_unknown"}|' '' '' partial "repo " "Run the same command again with required in place of partial, and update the plugin."
+grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" && ok "R11 ...the marked request went to /repo?pack=partial" || fail "R11 url: $(cat "$STUB/transcript")"
+st "R12 410 snapshot_partial: a deep ticket, retired, submit the deep hunt again" 1 '410|{"code":"snapshot_partial"}|' '' '' partial "repo " "this was a deep-hunt ticket and it is retired"
+st "R13 410 without a code on the marked snapshot: used or expired, as before" 1 '410|{}|' '' '' partial "repo " "$GONE_T; the payload was not sent" "deep-hunt"
+st "U1 payload 410 snapshot_partial_unsupported: not started, nothing billed, submit again" 1 '' '410|{"code":"snapshot_partial_unsupported"}|' '' partial "repo payload " "the hunt was not started and nothing was billed"
 st "P1 200: exit 0, the body printed" 0 '' '200|{"ok":true,"status":"running"}|' '' required "repo payload " '"status":"running"'
 st "P1 200 duplicate: exit 0" 0 '' '200|{"ok":true,"status":"running","duplicate":true}|' '' required "repo payload " '"duplicate":true'
 st "P2 409 snapshot_required in diff mode: get_findings, then the value it gives" 1 '' '409|{"code":"snapshot_required"}|' '' off "payload " "run the command again with the snapshot value it gives"
@@ -1027,13 +1032,185 @@ done
 fresh; run "$T3" "$URL" off --head --only ./
 [ "$rc" = 0 ] && payload_diff | grep -q 'ren2.txt' && payload_diff | grep -q 'sp ace' && ok "--only ./ at the top: the whole repository" || fail "--only ./ top: rc $rc $(payload_diff | grep '^diff')"
 
+# ---- 6e. The partial copy: argv[2] partial, the list, the mark ----------------
+# Rows PP1-PP14 (the partial path's own numbering, apart from the payload
+# door's P rows above).
+# A fixture where the list is known: the change calls part_helper_name, which
+# two unchanged files use; a manifest sits at the top; the rest is left out.
+# tarnames: the members of the snapshot sent, one per line, exactly as stored.
+tarnames() { python3 -I -c 'import sys, tarfile
+for m in sorted(tarfile.open(sys.argv[1]).getmembers(), key=lambda m: m.name):
+    if not m.isdir(): print(repr(m.name[2:] if m.name.startswith("./") else m.name))' "$STUB/repo.1.sent"; }
+want_names() { printf '%s\n' "$@" | python3 -I -c 'import sys
+for l in sorted(sys.stdin.read().split("\n")[:-1]): print(repr(l))'; }
+PF="$ROOT/pf"; mkdir -p "$PF/src" "$PF/lib" "$PF/docs"; g -C "$PF" init -q
+printf '{"name":"pf"}\n' > "$PF/package.json"
+printf 'def compute():\n    return 1\n' > "$PF/src/core.py"
+printf 'part_helper_name(1)\n' > "$PF/lib/use.py"; printf 'part_helper_name(2)\n' > "$PF/lib/use2.py"
+printf 'x = 1\n' > "$PF/lib/other.py"; printf 'part_helper_name\n' > "$PF/docs/guide.md"
+g -C "$PF" add -A; g -C "$PF" commit -qm base
+printf 'def compute():\n    return part_helper_name(1)\n' > "$PF/src/core.py"
+PWANT=$(want_names src/core.py package.json lib/use.py lib/use2.py)
+# A python3 on PATH that counts the runs of the file list.
+PYW="$ROOT/pywrap"; mkdir -p "$PYW"
+printf '#!/bin/sh
+case "$*" in *omb_paths.py*) echo run >> "%s/pathruns" ;; esac
+exec %s "$@"
+' "$ROOT" "$(command -v python3)" > "$PYW/python3"; chmod +x "$PYW/python3"
+pathruns() { wc -l < "$ROOT/pathruns" 2>/dev/null | tr -d ' ' || echo 0; }
+: > "$ROOT/pathruns"
+fresh; out=$(cd "$PF" && PATH="$PYW:$BIN:$PATH" "$TSH" "$UP" "$URL" partial --head 2>&1); rc=$?
+[ "$(pathruns)" = 1 ] || fail "PP2 the file list ran $(pathruns) times, want 1"
+[ "$rc" = 0 ] && [ "$(tarnames)" = "$PWANT" ] && grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" && [ "$(seq_)" = "repo payload " ] \
+  && ok "PP2 partial: the snapshot is exactly the list, and only its request carries ?pack=partial" || fail "PP2 partial: rc $rc [$(tarnames | tr '\n' ' ')] $(cat "$STUB/transcript")"
+grep -q "^CURL payload $URL\$" "$STUB/transcript" || fail "PP2 the payload door got a mark: $(cat "$STUB/transcript")"
+printf '%s' "$out" | grep -q '+ partial repository snapshot: 4 of 6 files (1 of 1 changed, 1 build manifest, 2 files that use the changed names), ' \
+  && printf '%s' "$out" | grep -q 'Left out: every other file, git-ignored files, submodules, 0 secret-named files' \
+  && ok "PP2 ...the manifest says partial, N of M, by kind, and what is left out" || fail "PP2 manifest: $out"
+PSHA=$(sha "$STUB/repo.1.sent"); PLINE=$(printf '%s\n' "$out" | grep '^OhMyBug upload')
+: > "$ROOT/pathruns"
+fresh; out=$(cd "$PF" && PATH="$PYW:$BIN:$PATH" "$TSH" "$UP" "$URL" required --head 2>&1); rc=$?
+[ "$rc" = 0 ] && [ "$(tarnames | wc -l | tr -d ' ')" = 6 ] && grep -q "^CURL repo $URL/repo\$" "$STUB/transcript" && [ "$(pathruns)" = 0 ] \
+  && ok "PP1 required on the same working copy: the file list never runs; the whole snapshot, no mark" || fail "PP1 required: list runs $(pathruns), rc $rc [$(tarnames | tr '\n' ' ')] $(cat "$STUB/transcript")"
+# PP12: the same working copy packs to the same bytes, and a ticket that holds them takes the payload.
+fresh; plan repo "$(taken "$PSHA")"; run "$PF" "$URL" partial --head
+[ "$rc" = 0 ] && [ "$(sha "$STUB/repo.1.sent")" = "$PSHA" ] && [ "$(seq_)" = "repo payload " ] \
+  && ok "PP12 partial twice: the same bytes, and a 409 snapshot_taken with that digest sends the payload" || fail "PP12 determinism: rc $rc $(seq_) $out"
+# PP13: the dry run packs the same list and prints the same line, with no request.
+fresh; run "$PF" --dry-run partial --head
+[ "$rc" = 0 ] && [ "$(calls)" = 0 ] && [ "$(printf '%s\n' "$out" | grep '^OhMyBug upload')" = "$PLINE" ] \
+  && ok "PP13 --dry-run partial: the upload's manifest line, no request" || fail "PP13 dry run: rc $rc calls $(calls) [$out] want [$PLINE]"
+# PP3/PP5: the list fails (a stand-in that exits 2): the whole copy, unmarked, the reason named, exit 0.
+FP="$ROOT/fakepaths"; mkdir -p "$FP"; cp "$UP" "$G/omb_scan.py" "$FP/"; printf 'import sys\nsys.stderr.write("first\\nboom\\033 here\\n")\nraise SystemExit(2)\n' > "$FP/omb_paths.py"
+fresh; out=$(cd "$PF" && PATH="$BIN:$PATH" "$TSH" "$FP/omb-upload.sh" "$URL" partial --head 2>&1); rc=$?
+[ "$rc" = 0 ] && [ "$(tarnames | wc -l | tr -d ' ')" = 6 ] && grep -q "^CURL repo $URL/repo\$" "$STUB/transcript" \
+  && printf '%s' "$out" | grep -q 'A partial copy was asked for and not built (the file list could not be built: boom  here), so the whole working copy goes' \
+  && ok "PP3/PP5 a list that fails: the whole copy, no mark, the reason in the manifest, exit 0" || fail "PP3/PP5 list failure: rc $rc $(cat "$STUB/transcript") $out"
+# PP4: a diff of deletions only: no changed file is in the tree, so the whole copy.
+g -C "$PF" add -A; g -C "$PF" commit -qm two; git -C "$PF" rm -q lib/other.py
+fresh; run "$PF" "$URL" partial --head
+[ "$rc" = 0 ] && [ "$(tarnames | wc -l | tr -d ' ')" = 5 ] && grep -q "^CURL repo $URL/repo\$" "$STUB/transcript" \
+  && printf '%s' "$out" | grep -q 'not built (no changed file is in the working copy)' \
+  && ok "PP4 deletions only: the whole copy, no mark, the reason named" || fail "PP4 deletions: rc $rc $(cat "$STUB/transcript") $out"
+g -C "$PF" reset -q --hard
+# PP6: --all, and a folder without git: the whole copy, no mark.
+fresh; run "$PF" "$URL" partial --all
+[ "$rc" = 0 ] && grep -q "^CURL repo $URL/repo\$" "$STUB/transcript" && printf '%s' "$out" | grep -q 'not built (all of it is new code)' \
+  && ok "PP6 --all partial: the whole copy, no mark" || fail "PP6 --all: rc $rc $(cat "$STUB/transcript") $out"
+fresh; run "$NGT" "$URL" partial --all
+[ "$rc" = 0 ] && grep -q "^CURL repo $URL/repo\$" "$STUB/transcript" && printf '%s' "$out" | grep -q 'folder without git' \
+  && ok "PP6 a folder without git, partial: the whole copy, no mark" || fail "PP6 no git: rc $rc $(cat "$STUB/transcript") $out"
+# PP7: user and environment settings that would change grep's or git's output
+# reach no list call: the same snapshot bytes as the clean run.
+printf 'def compute():\n    return part_helper_name(7)\n' > "$PF/src/core.py"
+fresh; run "$PF" "$URL" partial --head; P7A=$(sha "$STUB/repo.1.sent")
+HG="$ROOT/p7global"; cp "$GIT_CONFIG_GLOBAL" "$HG"
+for kv in grep.lineNumber=true grep.column=true grep.fullName=true grep.patternType=perl core.quotePath=false diff.noprefix=true; do git config --file "$HG" "${kv%%=*}" "${kv#*=}"; done
+printf 'lib/use.py binary\n' > "$PF/.git/info/attributes"
+fresh; out=$(cd "$PF" && GIT_CONFIG_GLOBAL="$HG" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=grep.lineNumber GIT_CONFIG_VALUE_0=true PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" partial --head 2>&1); rc=$?
+[ "$rc" = 0 ] && [ "$(sha "$STUB/repo.1.sent")" = "$P7A" ] && [ "$(tarnames)" = "$PWANT" ] \
+  && ok "PP7 grep and diff settings (user, environment, attributes): the same list and bytes" || fail "PP7 settings: rc $rc [$(tarnames | tr '\n' ' ')] $out"
+rm -f "$PF/.git/info/attributes"
+# L7 through the script: a tree past the line names the cut in the manifest.
+fresh; out=$(cd "$PF" && OMB_TEST_MODE=1 OMB_TEST_PATHS_LIMITS="3 1000000000" PATH="$BIN:$PATH" "$TSH" "$UP" "$URL" partial --head 2>&1); rc=$?
+[ "$rc" = 0 ] && printf '%s' "$out" | grep -q '1 build manifest, files that use the changed names not searched (more than 200,000 files))' \
+  && [ "$(tarnames)" = "$(want_names src/core.py package.json)" ] && grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" \
+  && ok "L7m past the line: head and manifests only, still partial, the manifest says so" || fail "L7m manifest: rc $rc $out"
+# PP11: a credential in a file of the list: left out, the list built again on
+# the second pack, named in the manifest; the copy sent scans clean.
+printf 'part_helper_name(3)\nk = "%s"\n' "$AWS" > "$PF/lib/use2.py"; g -C "$PF" add -A; g -C "$PF" commit -qm leak
+printf 'def compute():\n    return part_helper_name(9)\n' > "$PF/src/core.py"
+fresh; run "$PF" "$URL" partial --head
+[ "$rc" = 0 ] && [ "$(tarnames)" = "$(want_names src/core.py package.json lib/use.py)" ] && printf '%s' "$out" | grep -q 'credential match: lib/use2.py' \
+  && grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" && python3 -I "$G/omb_scan.py" --snapshot "$STUB/repo.1.sent" "$ROOT/hits" >/dev/null 2>&1 \
+  && ok "PP11 a credential in a listed file: left out, the list built again, named, the copy sent scans clean" || fail "PP11 rescan: rc $rc [$(tarnames | tr '\n' ' ')] $out"
+g -C "$PF" reset -q --hard HEAD~1
+# PP11g: the second list GROWS. grow_name is in 9 files (past 8: no caller);
+# a_name brings in g1, whose credential drops it; now grow_name is in 8, all
+# 8 come in, and g2 holds a credential too. Every pass drops its hits; the copy
+# sent holds g3..g9 and scans clean (one repack used to die here).
+mkdir -p "$PF/gr"
+for i in 1 2 3 4 5 6 7 8 9; do printf 'grow_name(%s)\n' "$i" > "$PF/gr/g$i.py"; done
+printf 'a_name(1)\ngrow_name(1)\nk = "%s"\n' "$AWS" > "$PF/gr/g1.py"
+printf 'grow_name(2)\nk = "%s"\n' "$AWS" > "$PF/gr/g2.py"
+g -C "$PF" add -A; g -C "$PF" commit -qm grow
+printf 'def compute():\n    return a_name(grow_name(9))\n' > "$PF/src/core.py"
+fresh; run "$PF" "$URL" partial --head
+[ "$rc" = 0 ] && [ "$(tarnames)" = "$(want_names src/core.py package.json gr/g3.py gr/g4.py gr/g5.py gr/g6.py gr/g7.py gr/g8.py gr/g9.py)" ] \
+  && printf '%s' "$out" | grep -q 'gr/g1.py' && printf '%s' "$out" | grep -q 'gr/g2.py' \
+  && python3 -I "$G/omb_scan.py" --snapshot "$STUB/repo.1.sent" "$ROOT/hits" >/dev/null 2>&1 \
+  && ok "PP11g a list that grows after a drop: each pass drops its hits, the copy sent scans clean" || fail "PP11g grow: rc $rc [$(tarnames | tr '\n' ' ')] $out"
+g -C "$PF" checkout -q -- src/core.py 2>/dev/null; g -C "$PF" reset -q --hard HEAD~1
+# PP8: paths with a space, a quote, a leading '-', a line break and (where the
+# file system allows it) bytes that are not UTF-8: the exact members.
+odd="$(printf 'sp ace.py\nquo"te.py\n-dash.py\nnew\nline.py')"
+PO="$ROOT/podd"; mkdir -p "$PO"; g -C "$PO" init -q; printf 'pass\n' > "$PO/m.py"; printf 'x = 1\n' > "$PO/other.py"
+( cd "$PO" && printf 'odd_name_call()\n' > 'sp ace.py' && printf 'odd_name_call()\n' > 'quo"te.py' && printf 'odd_name_call()\n' > ./-dash.py && printf 'odd_name_call()\n' > "$(printf 'new\nline.py')" )
+NONU=; if ( cd "$PO" && printf 'odd_name_call()\n' > "$(printf 'caf\351.py')" ) 2>/dev/null && [ -e "$PO/$(printf 'caf\351.py')" ]; then NONU=1; fi
+g -C "$PO" add -A; g -C "$PO" commit -qm base; printf 'pass\nodd_name_call()\n' > "$PO/m.py"
+fresh; run "$PO" "$URL" partial --head
+want=$(python3 -I -c 'import sys
+n = ["m.py", "sp ace.py", "quo\"te.py", "-dash.py", "new\nline.py"] + (["caf\udce9.py"] if sys.argv[1] else [])
+for x in sorted(n): print(repr(x))' "$NONU")
+[ "$rc" = 0 ] && [ "$(tarnames)" = "$want" ] && grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" && ok "PP8 odd paths (space, quote, leading '-', line break$([ -n "$NONU" ] && echo ', not UTF-8')): the exact members" || fail "PP8 odd paths: rc $rc [$(tarnames)] want [$want] $out"
+# PP9: a sparse checkout: a file outside the cone that uses the name is not in the working tree's index, so not in the copy.
+SPS="$ROOT/sps-src"; mkdir -p "$SPS/src" "$SPS/far"; g -C "$SPS" init -q
+printf 'pass\n' > "$SPS/src/a.py"; printf 'far_helper_name()\n' > "$SPS/far/b.py"; printf 'far_helper_name()\n' > "$SPS/src/c.py"
+g -C "$SPS" add -A; g -C "$SPS" commit -qm one
+SPP="$ROOT/sps"; g clone -q "file://$SPS" "$SPP" 2>/dev/null; g -C "$SPP" sparse-checkout init --cone 2>/dev/null; g -C "$SPP" sparse-checkout set src 2>/dev/null
+printf 'pass\nfar_helper_name()\n' > "$SPP/src/a.py"
+fresh; run "$SPP" "$URL" partial --head
+[ "$rc" = 0 ] && [ -n "$(git -C "$SPP" ls-files -t | grep '^S far/')" ] && [ "$(tarnames)" = "$(want_names src/a.py src/c.py)" ] \
+  && ok "PP9 a sparse checkout: the list never reaches outside the cone" || fail "PP9 sparse: rc $rc [$(tarnames | tr '\n' ' ')] $out"
+# PP10: a blobless clone whose HEAD blobs were never fetched: still one fetch
+# for the pack, and the list searches every file of the tree.
+BLS="$ROOT/bl-src"; mkdir -p "$BLS"; g -C "$BLS" init -q
+for i in $(seq 1 20); do printf 'v %d\n' "$i" > "$BLS/f$i.py"; done; printf 'blob_helper_name()\n' > "$BLS/f20.py"
+g -C "$BLS" add -A; g -C "$BLS" commit -qm one; printf 'blob_helper_name()\n' >> "$BLS/f1.py"; g -C "$BLS" commit -qam two
+g -C "$BLS" config uploadpack.allowFilter true; g -C "$BLS" config uploadpack.allowAnySHA1InWant true
+g clone -q --no-checkout --filter=blob:none --upload-pack="$ROOT/p50-up" "file://$BLS" "$ROOT/bl" 2>/dev/null
+g -C "$ROOT/bl" config remote.origin.uploadpack "$ROOT/p50-up"
+: > "$ROOT/p50-count"; fresh; run "$ROOT/bl" "$URL" partial --commits 1
+nf=$(wc -l < "$ROOT/p50-count" | tr -d ' ')
+[ "$rc" = 0 ] && [ "$nf" = 2 ] && [ "$(tarnames)" = "$(want_names f1.py f20.py)" ] && grep -q "^CURL repo $URL/repo?pack=partial\$" "$STUB/transcript" \
+  && ok "PP10 a blobless clone: one fetch for the diff, one for the pack, and the list finds the caller" || fail "PP10 blobless: rc $rc fetches $nf [$(tarnames | tr '\n' ' ')] $out"
+# PP14: against a server that never sends pack, argv required: every byte and
+# request as the plugin before the partial copy existed.
+OLD="$ROOT/old"; mkdir -p "$OLD"; cp "$G/omb_scan.py" "$OLD/"
+if git -C "$G" show 3186e5a:plugins/bughunter/hooks/omb-upload.sh > "$OLD/omb-upload.sh" 2>/dev/null; then
+  argsof() { sed -E 's#[^ ]*/(body|hdr|payload\.json|s\.tgz)#T/\1#g' "$STUB/args"; }
+  for sc in "--head" "--commits 1" "--all"; do
+    fresh; out=$(cd "$PF" && PATH="$BIN:$PATH" "$TSH" "$OLD/omb-upload.sh" "$URL" required $sc 2>&1); o1=$out; s1=$(sha "$STUB/repo.1.sent"); p1=$(sha "$STUB/payload.1.sent"); q1=$(seq_); a1=$(argsof)
+    fresh; run "$PF" "$URL" required $sc
+    [ "$out" = "$o1" ] && [ "$(sha "$STUB/repo.1.sent")" = "$s1" ] && [ "$(sha "$STUB/payload.1.sent")" = "$p1" ] && [ "$(seq_)" = "$q1" ] && [ "$(argsof)" = "$a1" ] \
+      && ok "PP14 required $sc: output, snapshot, payload and requests byte for byte as before" \
+      || fail "PP14 required $sc: out $([ "$out" = "$o1" ] && echo same || echo "[$out] / [$o1]"), snapshot $([ "$(sha "$STUB/repo.1.sent")" = "$s1" ] && echo same || echo differs), payload $([ "$(sha "$STUB/payload.1.sent")" = "$p1" ] && echo same || echo differs), requests [$(seq_)] / [$q1], args $([ "$(argsof)" = "$a1" ] && echo same || echo "[$(argsof)] / [$a1]")"
+  done
+elif [ -n "${CI:-}" ]; then fail "PP14 the older script is not in this clone's history (CI fetches it: fetch-depth 0)"
+else echo "skip PP14 (the older script is not in this clone's history)"; fi
+# PP15: a secret-named file that uses the name takes no caller slot (the
+# manifest counts one caller, not two); a commit whose only change is binary
+# packs the whole snapshot of HEAD, and says why.
+P15="$ROOT/p15"; mkdir -p "$P15"; g -C "$P15" init -q; printf 'pass\n' > "$P15/m.py"
+printf 'bin_call_name()\n' > "$P15/u.py"; printf 'bin_call_name()\n' > "$P15/app_secret.py"; printf '\0a' > "$P15/data.bin"
+g -C "$P15" add -A; g -C "$P15" commit -qm base; printf 'pass\nbin_call_name()\n' > "$P15/m.py"; g -C "$P15" commit -qam call
+fresh; run "$P15" "$URL" partial --commits 1
+[ "$rc" = 0 ] && printf '%s' "$out" | grep -q '(1 of 1 changed, 0 build manifests, 1 file that uses the changed names)' && [ "$(tarnames)" = "$(want_names m.py u.py)" ] \
+  && ok "PP15 a secret-named file is no caller" || fail "PP15 secret caller: rc $rc [$(tarnames | tr '\n' ' ')] $out"
+printf '\0b' > "$P15/data.bin"; g -C "$P15" commit -qam bin
+fresh; run "$P15" "$URL" partial --commits 1
+[ "$rc" = 0 ] && grep -q "^CURL repo $URL/repo\$" "$STUB/transcript" \
+  && printf '%s' "$out" | grep -q 'not built (every changed file is over 4 MiB, binary or a git-lfs pointer), so the whole snapshot of HEAD goes' \
+  && ok "PP15 only a binary change: the whole snapshot of HEAD, the reason named" || fail "PP15 binary only: rc $rc $out"
+
+
 # ---- 7. URL and arguments ------------------------------------------------------
 for bad in "https://evil.example/u/tok" "http://mcp.ohmybug.ai/u/tok" "https://mcp.ohmybug.ai/u/x; touch $ROOT/pwned" "https://mcp.ohmybug.ai/u/" "https://mcp.ohmybug.ai.evil/u/tok" "https://mcp.ohmybug.ai/u/a/../b"; do
   fresh; run "$R" "$bad" required "$P"
   [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ok "refused before anything runs: $bad" || fail "URL $bad: rc $rc calls $(calls)"
 done
 [ -e "$ROOT/pwned" ] && fail "a URL was evaluated"
-for m in maybe partial Required ''; do
+for m in maybe Partial Required ''; do
   fresh; run "$R" "$URL" "$m" "$P"
   [ "$rc" = 1 ] && [ "$(calls)" = 0 ] && ! grep -q '^OhMyBug upload' "$STUB/transcript" && ok "dispatch: argv[2] '$m' refuses before anything" || fail "dispatch $m: rc $rc calls $(calls)"
 done
