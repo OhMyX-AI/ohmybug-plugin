@@ -706,10 +706,13 @@ for gone in ("polls status_url once", "awaiting_client_files/files_requested rat
 for gone in ("its wake polls `status_url` once", "`status_url` read,\n  whichever", "or the `status_url` body"):
     assert gone not in codex_bullet, gone
 assert "on retiring, print bughunt · <mode> · watch-retired, then call get_findings once" in router_text
-# The server's deep wake_rule still names a status_url read, and the wake copies it word for word: the
-# fallback turns that read into the MCP one, or a no-network wake curls, reads nothing and retires.
-assert "Where the copied wake_rule names a status_url read, make that read with get_findings." in router_text
-assert "Where the copied `wake_rule` names a `status_url` read, make that read with\n  `get_findings`." in codex_bullet
+# The server's deep wake_rule still names a status_url read, and the wake copies it word for word. The
+# substitution sentence must travel INTO the heartbeat prompt (a wake holds nothing else), and it names
+# where get_findings carries a file request, or a no-network wake curls, reads nothing and retires.
+SUBST = "Where the rule above names a status_url read, make that read with get_findings, whose status word carries needs_files."
+assert "Write the next sentence into the heartbeat prompt right after the copied wake_rule, and into any heartbeat that replaces it, because the deep rule names a status_url read and a wake holds nothing but its prompt: \"" + SUBST + "\"" in router_text
+assert "Write the next sentence into the heartbeat prompt right after the copied\n  `wake_rule`, and into any heartbeat that replaces it" in codex_bullet
+assert ": \"" + SUBST[:60] in codex_bullet
 # Every surface re-arms on the same predicate: needs_files is not terminal, so a
 # watch retired while the reviewers wait for files must come back.
 assert "call `get_findings` once: if the review is\n  still running or waiting for files, tell the user and — if the retirement came\n  from unreadable wakes, not from the age cap — arm a fresh heartbeat" in codex_bullet

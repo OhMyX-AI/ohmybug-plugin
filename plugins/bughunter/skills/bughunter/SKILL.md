@@ -112,8 +112,9 @@ This is a required client action, not a reminder to do later:
   deep hunt runs up to 2 hours, and its wake makes the same one read through the
   MCP tools as a fast wake, never a shell `curl` of `status_url`: Codex can run
   shell commands with no network, and the MCP tools run outside that sandbox.
-  Where the copied `wake_rule` names a `status_url` read, make that read with
-  `get_findings`.
+  Write the next sentence into the heartbeat prompt right after the copied
+  `wake_rule`, and into any heartbeat that replaces it, because the deep rule
+  names a `status_url` read and a wake holds nothing but its prompt: "Where the rule above names a status_url read, make that read with get_findings, whose status word carries needs_files."
   On `needs_files`, send files first; on `done` or
   `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Retire it too when
   it is older than 180 minutes or after 3 consecutive wakes that could not read
