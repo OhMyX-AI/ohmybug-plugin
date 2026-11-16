@@ -76,7 +76,7 @@ This is a required client action, not a reminder to do later:
   context holding nothing but that prompt; copy `wake_rule` into the prompt word for word,
   because it is the sentence that makes a wake a reading rather than a
   recollection: every wake reports the status it just read — from `wait_review`
-  or `get_findings` on a fast hunt, from the `status_url` read on a deep one —
+  or `get_findings`, on a fast hunt and a deep one alike —
   and a wake with no answer prints `bughunt · <mode> · poll-failed`, never the
   previous status. A heartbeat that
   answers from memory reported `running` on three wakes — twelve minutes — after
@@ -109,16 +109,13 @@ This is a required client action, not a reminder to do later:
   exactly as the next wake fires, and one that leaves the handover to the
   `heartbeat_s`–`interval_s` gap shrinks it on exactly the slow links whose
   calls need it. A repo or deep submit never needs this. A
-  deep hunt runs up to 2 hours: its wake polls `status_url` once and reports
-  that, which is the read `wake_rule` names for a deep hunt. That body
-  keys a file request off `awaiting_client_files`/`files_requested`, not off its
-  status word, so a wake that sees either flag prints `bughunt · <mode> ·
-  needs-files` and serves the files first. If the poll itself fails, the wake
-  falls back to one `get_findings` before it counts as a wake that read nothing.
+  deep hunt runs up to 2 hours, and its wake makes the same one read through the
+  MCP tools as a fast wake, never a shell `curl` of `status_url`: Codex can run
+  shell commands with no network, and the MCP tools run outside that sandbox.
   On `needs_files`, send files first; on `done` or
   `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Retire it too when
   it is older than 180 minutes or after 3 consecutive wakes that could not read
-  a status at all — a failed `wait_review`, `get_findings` or `status_url` read,
+  a status at all — a failed `wait_review` or `get_findings` read,
   whichever that wake uses: print `bughunt · <mode> ·
   watch-retired`, then delete it, then call `get_findings` once: if the review is
   still running or waiting for files, tell the user and — if the retirement came
@@ -156,8 +153,8 @@ This is a required client action, not a reminder to do later:
     older than its `retire_at` is retired at wake regardless of what the wake
     believes.
   - **A terminal line quotes the answer it came from.** On `done`, print
-    `findings=N` read from that wake's read — `wait_review`, `get_findings`
-    or the `status_url` body, all of which carry a findings count (`bughunt ·
+    `findings=N` read from that wake's read — `wait_review` or `get_findings`,
+    both of which carry a findings count (`bughunt ·
     fast · done · findings=3`) — the bare word is what a memory produces.
     Non-terminal wakes keep the enumerated lines; no answer from this wake's
     read → the only line allowed is `bughunt · <mode> · poll-failed`.
@@ -1322,7 +1319,7 @@ server's `deep_offer` once the user agrees.
 - **Arm the monitor for the deep hunt too, and give the user the
   `review_id`.** The wait is exactly how long it takes to forget: the deep run
   rarely needs files from you, so little prods you mid-run — the heartbeat's
-  `status_url` poll is what catches a request when it does — and an agent that
+  read is what catches a request when it does — and an agent that
   armed a monitor for every 15-minute fast pass will skip it on the one run
   that waits many times as long. Then the user paid hours of attention for a
   result nobody read. Tell them in chat that it is running and name the
