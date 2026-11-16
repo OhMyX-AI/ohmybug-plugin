@@ -709,10 +709,13 @@ assert "on retiring, print bughunt · <mode> · watch-retired, then call get_fin
 # The server's deep wake_rule still names a status_url read, and the wake copies it word for word. The
 # substitution sentence must travel INTO the heartbeat prompt (a wake holds nothing else), and it names
 # where get_findings carries a file request, or a no-network wake curls, reads nothing and retires.
-SUBST = "Where the rule above names a status_url read, make that read with get_findings, whose status word carries needs_files."
-assert "Write the next sentence into the heartbeat prompt right after the copied wake_rule, and into any heartbeat that replaces it, because the deep rule names a status_url read and a wake holds nothing but its prompt: \"" + SUBST + "\"" in router_text
-assert "Write the next sentence into the heartbeat prompt right after the copied\n  `wake_rule`, and into any heartbeat that replaces it" in codex_bullet
-assert ": \"" + SUBST[:60] in codex_bullet
+SUBST = ("Where the rule above names a status_url read, make that read with get_findings, whose status word carries needs_files; "
+         "copy this sentence into any heartbeat that replaces this one.")
+SUBST_INTRO = "Write the next sentence into the heartbeat prompt right after the copied wake_rule, because the deep rule names a status_url read and a wake holds nothing but its prompt: "
+# The whole sentence, its copy-into-replacements clause inside the quotes, on both surfaces (a wake that re-arms
+# sees only its own prompt), as the deep_offer sentence is pinned.
+assert SUBST_INTRO + '"' + SUBST + '"' in router_text
+assert SUBST_INTRO.replace("wake_rule", "`wake_rule`").replace("status_url read", "`status_url` read") + '"' + SUBST + '"' in flat_bullet
 # Every surface re-arms on the same predicate: needs_files is not terminal, so a
 # watch retired while the reviewers wait for files must come back.
 assert "call `get_findings` once: if the review is\n  still running or waiting for files, tell the user and — if the retirement came\n  from unreadable wakes, not from the age cap — arm a fresh heartbeat" in codex_bullet
