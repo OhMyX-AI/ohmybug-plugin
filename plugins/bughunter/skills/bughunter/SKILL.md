@@ -313,7 +313,7 @@ an interactive tty.)
 
 ## First-run setup
 
-Three questions that set the account's defaults, asked once per machine. In
+Four questions that set the account's defaults, asked once per machine. In
 Claude Code the session-start hook asks for it in your first reply, at most
 three times per machine; `/bughunter:setup` runs it any time. In Codex it
 starts only on the user's word ("set up OhMyBug"). In Claude Code it needs
@@ -328,11 +328,11 @@ nothing and say nothing about it. Then answer what the user asked.
    not `/bughunter:setup`, run `bash '<skill_dir>/../../hooks/intro.sh' done`,
    say nothing and stop: the setup ran on another machine.
 2. Say, as plain text: "OhMyBug hunts bugs in your changes in the cloud. You
-   pay only when a real bug is found: a clean change costs nothing. Three quick
+   pay only when a real bug is found: a clean change costs nothing. Four quick
    questions set your defaults; change them any time with /bughunter:setup or
    on ohmybug.ai/me/policy." Add "Your first hunt that finds a bug costs
    nothing." only when `get_balance` shows one still free.
-3. Ask the three questions in ONE question-tool call (in Codex: in chat,
+3. Ask the four questions in ONE question-tool call (in Codex: in chat,
    numbered, a free-text answer accepted). The option equal to the saved
    value in `get_balance` `policy` is marked "(current)".
    - **Upload.** "When OhMyBug cannot read your code on GitHub, a copy goes
@@ -397,6 +397,17 @@ nothing and say nothing about it. Then answer what the user asked.
        `stories: "ask"`, `author: "anonymous"`.
      - "Don't write them": "No stories, no questions." Sends
        `stories: "never"`.
+   - **Test gaps.** Not asked when `get_balance` `policy` has no `test_gaps`
+     (an older server): send nothing for it. The question: "Some findings
+     are only about tests: a missing or weak test, while the code itself
+     works. Should they block the merge?"
+     - "Block the merge (recommended)": "Like any other finding: your agent
+       fixes them before the merge, and a confirmed one is charged." Sends
+       `test_gaps: "block"`.
+     - "Show them, but don't block": "Listed in their own section after the
+       other findings. They do not block the merge and are not charged."
+       Sends `test_gaps: "not_block"`.
+     - "Skip (keep the current setting)".
 4. A skipped question, or a dismissed dialog, sends nothing for its fields.
 5. Run `bash '<skill_dir>/../../hooks/intro.sh' done`: it writes this
    machine's marker and prints the time (no such script, as in a skill-only
@@ -1341,6 +1352,13 @@ killed, what was NOT checked, verdict). Relay it to the user verbatim or as
 a faithful tight summary – especially on 0-finding reviews, where it is the
 only evidence the hunt was real. Never paraphrase it into "all good".
 
+**Test gaps.** A finding marked `kind: "test"` is only about tests (a missing
+or weak test; the code itself does what it should). Show those after the
+other findings, under "Test gaps", and say how many there are. One that also
+carries `reported_severity` was delivered as `low` by the user's setting
+(`test_gaps: "not_block"`): it does not block the merge and is not charged.
+Say so once, with its reported severity beside it.
+
 ### 4. Verify each finding honestly
 
 For every finding: open the referenced files, trace the failure scenario the
@@ -1358,7 +1376,11 @@ consequence, and say why in `reason` – the finder's original is kept
 alongside. Severity describes the CONSEQUENCE, not the finding's category: a
 missing test whose mutation reopens a security hole, loses data or misbills
 is `critical`/`high`, never "just a test gap". Correct downward just as
-readily when the failure turns out to need an unreachable state. Anything a
+readily when the failure turns out to need an unreachable state. A finding
+delivered `low` with `reported_severity` (a test gap under the user's
+`test_gaps: "not_block"`) stays `low` unless your trace shows the production
+code failing today: then it is not a test gap, and the severity you set is
+what blocks and bills. Anything a
 reviewer would block a merge over (`critical`/`high`/`medium`) makes the
 review billable unless it is a `medium` marked `known` (below), `low` is free – so this decision is the bill, and the user
 sees the table before you send it.
