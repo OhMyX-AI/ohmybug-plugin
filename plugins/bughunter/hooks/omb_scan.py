@@ -66,6 +66,8 @@ def scan_diff(hits, diff):
     path, gone, new, old_left, new_left = "diff", "diff", 0, 0, 0
     for raw in diff.splitlines():
         if old_left <= 0 and new_left <= 0:
+            if raw.startswith(("--- ", "+++ ", "diff ")):
+                scan(hits, "diff file name", raw)  # a file name is sent too
             if raw.startswith("--- "):
                 gone = raw[6:].strip() if raw.startswith("--- a/") else raw[4:].strip()
                 continue
@@ -120,6 +122,8 @@ def scan_payload(hits, ti):
         ph = []
         scan(ph, "", path)
         label = "<flagged path>" if ph else path  # a credential in the path text never reaches a label
+        if ph:
+            scan(hits, "file path", path)  # the path is sent too: the upload path has no other check
         if KEY_FILE.search(path) or ENV_FILE.search(path):
             hits.append("%s is a file that holds keys" % label)
         if content:

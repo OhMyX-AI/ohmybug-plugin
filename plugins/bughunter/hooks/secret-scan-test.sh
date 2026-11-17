@@ -347,11 +347,15 @@ PY2
 }
 j "{'diff':'+++ b/app.py\n@@ -1,1 +1,2 @@\n x\n+k = \"$AWS\"\n','files':[]}" > "$FM/hit.json"
 j "{'diff':'+++ b/app.py\n+print(1)\n','files':[{'path':'c.py','content':'x = 1'}]}" > "$FM/clean.json"
+j "{'diff':'','files':[{'path':'logs/T=$AWS.txt','content':'ok'}]}" > "$FM/pathkey.json"
+j "{'diff':'+++ b/logs/T=$AWS.txt\n@@ -0,0 +1,1 @@\n+ok\n','files':[]}" > "$FM/diffname.json"
 j "{'diff':'+print(1)\n','files':[{'path':'c.py','content':'T=$GHP'}]}" > "$FM/ctx.json"
 printf 'not json' > "$FM/bad.json"
 fm "--payload: a key in the diff"              3 payload "$FM/hit.json"   "" "app.py:2 AWS access key"
 fm "--payload: a key in a context file"        3 payload "$FM/ctx.json"   "" "c.py:1 GitHub token"
 fm "--payload: clean"                          0 payload "$FM/clean.json"
+fm "--payload: a key in a file path"           3 payload "$FM/pathkey.json"  "" "file path:1 AWS access key"
+fm "--payload: a key in a diff file name"      3 payload "$FM/diffname.json" "" "diff file name:1 AWS access key"
 fm "--payload: unreadable refuses"             2 payload "$FM/bad.json"
 fm "--payload: a missing file refuses"         2 payload "$FM/none.json"
 err=$(python3 -I "$CORE" --payload "$FM/hit.json" 2>&1)
