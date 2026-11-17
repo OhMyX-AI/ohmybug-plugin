@@ -1,6 +1,6 @@
 #!/bin/bash
 # The first-session notice: asks the assistant to run the skill's First-run
-# setup (three questions that set the account's defaults) at the start of its
+# setup (four questions that set the account's defaults) at the start of its
 # first reply. It only ADDS context: the setup itself needs the question tool,
 # so a session without one (a headless `claude -p` run) asks, writes and marks
 # nothing. The hook never writes the marker: only a finished (or skipped)
@@ -40,7 +40,7 @@ n=$((10#$n))
 # A counter that cannot be written would offer forever: no offer then.
 { mkdir -p "$STATE" && printf '%s\n' "$((n + 1))" > "$OFFERS"; } 2>/dev/null || exit 0
 
-NOTE='OhMyBug is installed. Three quick questions set your defaults: /bughunter:setup'
+NOTE='OhMyBug is installed. Four quick questions set your defaults: /bughunter:setup'
 CONTEXT='Run the First-run setup of the bughunter skill at the start of your first reply, then answer what the user asked. Only with the question tool: if this session has none, do nothing and say nothing about it.'
 python3 -I - "$NOTE" "$CONTEXT" <<'PY'
 import json, sys
