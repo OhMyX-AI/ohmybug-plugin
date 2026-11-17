@@ -122,6 +122,19 @@ session() {
   wait "$pid" 2>/dev/null || true
 }
 
+# delivered <line> <texts>: what the agent got instead (#62), the text around the line's longest delivered prefix,
+# JSON-quoted so an invisible change shows.
+delivered() {
+  node -e '
+    const [line, t] = [process.argv[1], require("fs").readFileSync(process.argv[2], "utf8")];
+    let n = line.length;
+    while (n > 0 && !t.includes(line.slice(0, n))) n--;
+    if (n === 0) { console.log("  delivered: no prefix of it reached the agent"); process.exit(0); }
+    const at = t.indexOf(line.slice(0, n)) + n;
+    console.log("  delivered: " + JSON.stringify(t.slice(Math.max(0, at - 80), at)) + " <then> " + JSON.stringify(t.slice(at, at + 160)));
+  ' "$1" "$2"
+}
+
 # check <checkout>: prints what fails; 0 when both checks pass.
 check() {
   local src=$1 skill=$1/plugins/bughunter/skills/bughunter/SKILL.md dir=$work/c$RANDOM bad=0 f
@@ -138,7 +151,7 @@ check() {
   fi
   while IFS= read -r line; do
     [ -n "${line// }" ] || continue
-    grep -qF -- "$line" "$dir/s/texts" || { echo "prompt-check: the agent got this skill line altered: $line"; bad=1; }
+    grep -qF -- "$line" "$dir/s/texts" || { echo "prompt-check: the agent got this skill line altered: $line"; delivered "$line" "$dir/s/texts"; bad=1; }
   done < <(awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { fm = 0; next } !fm' "$skill")
 
   # 2. Every bash block as one Bash call, plus the control the client must refuse.
@@ -181,6 +194,7 @@ if [ -n "$self_test" ]; then
   printf '\n```bash\ncanary() { echo "$1"; }\n```\n' >>"$copy/plugins/bughunter/skills/bughunter/SKILL.md"
   out=$(check "$copy" || true)
   grep -q 'altered: canary' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, the argument substitution passed"; exit 1; }
+  grep -q '  delivered: .*<then>' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, an altered line did not show what was delivered"; exit 1; }
   grep -q 'warning on this command' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, the brace warning passed"; exit 1; }
   echo "prompt-check self-test ($v): ok"
 else
