@@ -814,7 +814,7 @@ itself. The `meta` object is REQUIRED plumbing, not garnish – fill it every ti
 | `pr` | PR number, if reviewing a PR | `gh pr view --json number` |
 | `pr_title` | the PR's title; with no PR, the branch's purpose in one line | `gh pr view --json title -q .title` |
 | `pr_body` | the PR's description, verbatim; with no PR, the branch's commit subjects, one per line | `gh pr view --json body -q .body`, else `git log --format=%s <base>..HEAD` |
-| `ticket` | the task this change implements, verbatim: the ticket or issue body with its acceptance criteria, or the spec excerpt you worked from; omit it when there is none. The reviewers read it as the requirement, so behaviour it asks for is not reported as a bug for being asked (an unsafe requirement still is) | the issue the PR closes: `gh issue view <n> --json title,body`; else the text you were given |
+| `ticket` | the task this change implements, verbatim: the issue body with its acceptance criteria, or the spec excerpt you worked from (up to 8000 characters are kept); omit it when there is none or when reading it failed – never send an error message as the task. The reviewers read it as the author's stated task, framed as untrusted data: behaviour it asks for is not reported as a bug for being asked, but data or money loss, a security hole or a crash still is. A private tracker's text leaves the machine only when the user says so | the issues the PR closes: `gh pr view --json closingIssuesReferences`, then `gh issue view <n> -R <owner/repo> --json title,body` for each; else the text you were given |
 | `language`, `framework` | repo facts | what you already know |
 | `repo_hint` | the briefing (below) | composed by you |
 
@@ -1822,7 +1822,8 @@ working copy (without ignored files, secret-named files such as `.env*`,
 diff, both scanned for credentials first. A snapshot file the scan flags is
 left out; a key the scan's patterns miss, under a name off the list, is sent,
 so say so when the repository holds one. In diff mode a payload hunt sends
-the diff and its context files only. Files the reviewers ask for and your
+the diff and its context files only. Every hunt also sends its `meta`: the PR's title and description and,
+when you send one, the task (`ticket`) – an issue body or a spec excerpt. Files the reviewers ask for and your
 verdicts are sent too – a `known` verdict's ticket ref included. The review runs in memory
 on OhMyBug's cloud and payloads are deleted after the review. Nothing is used
 for model training.
