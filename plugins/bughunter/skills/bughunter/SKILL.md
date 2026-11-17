@@ -418,9 +418,10 @@ nothing and say nothing about it. Then answer what the user asked.
        fixes them before the merge, and a confirmed one is charged." Sends
        `docs_findings: "block"`.
      - "Show them, but don't block": "Listed in their own section after the
-       other findings. They do not block the merge and are not charged.
-       Wrong text that your product shows its users is never one of them."
-       Sends `docs_findings: "not_block"`.
+       other findings. They do not block the merge and are not charged,
+       unless your agent finds the code itself wrong. Wrong text that your
+       product shows its users is never one of them." Sends
+       `docs_findings: "not_block"`.
      - "Skip (keep the current setting)".
 4. A skipped question, or a dismissed dialog, sends nothing for its fields.
 5. Run `bash '<skill_dir>/../../hooks/intro.sh' done`: it writes this
@@ -1424,7 +1425,9 @@ when the missing test guards a sensitive path, unless your trace shows the
 production code itself failing today. Then it is not a test gap, and the
 severity you set is what blocks and bills. The same holds for a docs finding
 delivered `low` under `docs_findings: "not_block"`: it stays `low` unless your
-trace shows the code itself wrong. Anything a
+trace shows the code itself wrong, or the text is one your product shows or
+sends its users (a screen, a message, an email, a generated file). Then it is
+not a docs finding, and the severity you set is what blocks and bills. Anything a
 reviewer would block a merge over (`critical`/`high`/`medium`) makes the
 review billable unless it is a `medium` marked `known` (below), `low` is free – so this decision is the bill, and the user
 sees the table before you send it.
