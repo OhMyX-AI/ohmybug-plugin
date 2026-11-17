@@ -210,6 +210,13 @@ if os.environ.get("OHMYBUG_SECRET_SCAN", "1") == "0":
 
 hits = []
 scan_payload(hits, ti)
+# The prose labels of a submit leave the machine on every rung, a repo+ref hunt included: the task (meta.ticket, an
+# issue or a spec), the PR title and description, the briefing. Scanned by content like the rest.
+meta = ti.get("meta") if isinstance(ti, dict) else None
+if isinstance(meta, dict):
+    for k in ("ticket", "pr_title", "pr_body", "repo_hint"):
+        if isinstance(meta.get(k), str):
+            scan(hits, "meta." + k, meta[k])
 for where, text in dstrings:
     scan(hits, where, text)
 

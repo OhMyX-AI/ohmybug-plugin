@@ -57,6 +57,9 @@ done
 for name in id_rsa id_dsa id_ecdsa id_ed25519 k.pem k.p12 k.pfx k.key .env; do
   row "$name attached as context is refused" 2 "$(j "{'files':[{'path':'keys/$name','content':'x'}]}")" "keys/$name is a file that holds keys"
 done
+row "a key pasted into the task text (meta.ticket) on a repo+ref submit" 2 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'Fix login.\\nlog: token=$GHP'}}")" "meta.ticket:2 GitHub token"
+row "a key in the PR description (meta.pr_body)" 2 "$(j "{'meta':{'repo':'a/b','pr_body':'T=$AWS'}}")" "meta.pr_body:1 AWS access key"
+row "a clean task text passes"                   0 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'Refunds keep the fee.'}}")"
 row "a secret in a deleted file names that file" 2 "$(j "{'diff':'--- a/old.py\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-k = \"$AWS\"\n'}")" "old.py (a removed line) AWS access key"
 row "a diff deleting a key file is refused"      2 "$(j "{'diff':'--- a/certs/old.pem\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-abc\n'}")" "diff changes certs/old.pem"
 row "AWS documentation placeholder passes"      0 "$(j "{'diff':'+k=\"AKIAIOSFODNN7EXAMPLE\"'}")"

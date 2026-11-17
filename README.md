@@ -219,8 +219,8 @@ repository per week, and is not a merge gate.
   message. A `challenge_finding` (a dispute, offered to some keys only) is
   held to tracked files of this repository and lines that exist in them, and
   every string it carries is scanned; without `python3` it is refused, and its
-  path checks run even with the scan turned off. Not scanned: submits that send no payload (repo + ref) have
-  nothing to scan; it does not run on Windows; and a key the patterns miss,
+  path checks run even with the scan turned off. A submit's text labels (`meta.ticket`, `pr_title`, `pr_body`,
+  `repo_hint`) are scanned on every submit, a repo + ref one included. Not scanned: it does not run on Windows; and a key the patterns miss,
   under a name off the list, is sent. The account's diff mode on
   `/me/policy` sends the diff without the snapshot. When a fast hunt's
   ticket asks for a partial copy, the snapshot holds only the changed files,

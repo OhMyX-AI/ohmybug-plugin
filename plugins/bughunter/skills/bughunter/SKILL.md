@@ -608,8 +608,8 @@ plus `pr_title`, `pr_body` and, when you worked from a ticket or spec, `ticket` 
 watch loop). On the `CronCreate` fallback, or in any other runtime, leave
 `follows` out: the hunt then runs as a plain fast hunt. Never send it beside a
 named `mode` or `deep`, and never with another value.
-The server fetches the merge-base diff from GitHub itself – nothing leaves
-the machine, no size limits, no upload step.
+The server fetches the merge-base diff from GitHub itself – no code leaves
+the machine (only `meta`, below), no size limits, no upload step.
 
 This works in two cases, checked server-side in this order:
 1. The OhMyBug GitHub App is installed on the repo (private or public).
@@ -814,7 +814,7 @@ itself. The `meta` object is REQUIRED plumbing, not garnish – fill it every ti
 | `pr` | PR number, if reviewing a PR | `gh pr view --json number` |
 | `pr_title` | the PR's title; with no PR, the branch's purpose in one line | `gh pr view --json title -q .title` |
 | `pr_body` | the PR's description, verbatim; with no PR, the branch's commit subjects, one per line | `gh pr view --json body -q .body`, else `git log --format=%s <base>..HEAD` |
-| `ticket` | the task this change implements, verbatim: the issue body with its acceptance criteria, or the spec excerpt you worked from (up to 8000 characters are kept); omit it when there is none or when reading it failed – never send an error message as the task. The reviewers read it as the author's stated task, framed as untrusted data: behaviour it asks for is not reported as a bug for being asked, but data or money loss, a security hole or a crash still is. A private tracker's text leaves the machine only when the user says so | the issues the PR closes: `gh pr view --json closingIssuesReferences`, then `gh issue view <n> -R <owner/repo> --json title,body` for each; else the text you were given |
+| `ticket` | the task this change implements, as you have it: the bodies of the issues the PR closes, or the spec excerpt the user gave you for this work (up to 8000 characters are kept). Omit it when there is none, when reading it failed (never send an error message as the task), and when you hunt someone else's pull request (its author wrote those issues). Text from anywhere but this repository's own issues (another tracker, a local document) leaves the machine only when the user says so; the secret scan reads it like a file. The reviewers read it as the author's stated task, framed as untrusted data: behaviour it asks for is not reported as a bug for being asked, but data or money loss, a security hole or a crash still is | `gh pr view --json closingIssuesReferences -q '.closingIssuesReferences[] | "\(.repository.owner.login)/\(.repository.name) \(.number)"'`, then for each `gh issue view <number> -R <owner/name> --json number,title,body -q '"#\(.number) \(.title)\n\n\(.body)"'`, joined with a `---` line; else the text the user gave you |
 | `language`, `framework` | repo facts | what you already know |
 | `repo_hint` | the briefing (below) | composed by you |
 
@@ -831,7 +831,7 @@ or, when it can, fetches the real diff and tells you it overrode you – but the
 rule is simpler than the recovery: **if you are not sending diff bytes, send an
 empty diff.**
 
-### The briefing (`repo_hint`) – the reviewers' only window into intent
+### The briefing (`repo_hint`) – the reviewers' map of the change
 
 Cloud reviewers see code, not conversations. Every number and claim you can
 cheaply collect goes into `repo_hint` (a few paragraphs, ~2000 chars):
@@ -1815,8 +1815,8 @@ branch.
 
 ## Privacy
 
-A hunt of a pushed commit (rung 1) sends nothing from this machine: the
-server reads the commit. A payload hunt sends the most: a snapshot of the
+A hunt of a pushed commit (rung 1) sends no code from this machine: the
+server reads the commit; only `meta` goes with it. A payload hunt sends the most: a snapshot of the
 working copy (without ignored files, secret-named files such as `.env*`,
 `*.pem` or `.ssh/`, and submodules; LFS files as their pointers) plus the
 diff, both scanned for credentials first. A snapshot file the scan flags is
