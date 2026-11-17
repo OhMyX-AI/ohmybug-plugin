@@ -11,8 +11,8 @@
 # shapes: high-signal ones only, every value masked. This hook reads the call.
 #
 # It reads whatever payload the call carries: submit_review's diff and files,
-# provide_files' files, every string of a challenge_finding, and every string under a submit's meta (sent on every
-# submit, a repo+ref one included).
+# provide_files' files, every string of a challenge_finding, and every other field of a call (a submit's meta, sent on
+# every submit, a repo+ref one included).
 #
 # It also FILLS provide_files' `paths`: the agent names the requested files,
 # and this hook reads them from disk and hands the call on with their contents
@@ -86,16 +86,16 @@ def stop(rc, msg):
 
 # Every string under a value, with a label that says where it sits. Scanned by content only (scan, not
 # scan_payload): a label is not a file name, so it never meets the key-file check. A dict key is a string too.
-def collect(v, where):
+def collect(v, where, flat=False):
     if isinstance(v, str):
         dstrings.append((where, v))
     elif isinstance(v, dict):
         for k, x in v.items():
             dstrings.append((where + " key", k))
-            collect(x, where if k in ("note", "claim") else "%s.%s" % (where, k))
+            collect(x, where if flat and k in ("note", "claim") else "%s.%s" % (where, k), flat)
     elif isinstance(v, list):
         for i, x in enumerate(v):
-            collect(x, "%s[%d]" % (where, i))
+            collect(x, "%s[%d]" % (where, i), flat)
 
 
 # The selection rules of the files_url recipe the server hands out: the git top level of
@@ -205,9 +205,9 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
         stop(6, "\n".join("  - " + p for p in bad))
     for k, v in ti.items():
         if k != "evidence":
-            collect(v, k)
+            collect(v, k, True)
     for i, e in enumerate(ev):
-        collect({k: v for k, v in e.items() if k != "path"}, "evidence[%d] note (%s)" % (i, e["path"]))
+        collect({k: v for k, v in e.items() if k != "path"}, "evidence[%d] note (%s)" % (i, e["path"]), True)
     ti = {}
 if os.environ.get("OHMYBUG_SECRET_SCAN", "1") == "0":
     ti, dstrings = {}, []
@@ -217,8 +217,13 @@ scan_payload(hits, ti)
 # Every other string the call carries leaves the machine too (meta on every submit, a repo+ref one included), so
 # each is read whatever its key, shape and depth: no list of known keys to fall behind the server.
 for k, v in ti.items():
+    dstrings.append(("field name", k))
     if k not in ("diff", "files"):
         collect(v, k)
+# scan_payload reads the path and content of a file entry; any other field of it is read here.
+for i, f in enumerate(ti.get("files") or []):
+    if isinstance(f, dict):
+        collect({k: v for k, v in f.items() if k not in ("path", "content")}, "files[%d]" % i)
 for where, text in dstrings:
     scan(hits, where, text)
 

@@ -69,6 +69,8 @@ row "a key as a meta key name is refused"        2 "$(j "{'meta':{'repo':'a/b','
 row "meta sent as a string is scanned as text"   2 "$(j "{'meta':'T=$AWS'}")" "meta:1 AWS access key"
 row "a clean meta list passes"                   0 "$(j "{'meta':['a']}")"
 row "a key in another top-level field is refused" 2 "$(j "{'meta':{'repo':'a/b'},'repo_hint':'T=$AWS'}")" "repo_hint:1 AWS access key"
+row "a key in an extra field of a file entry is refused" 2 "$(j "{'files':[{'path':'a.txt','content':'ok','note':'T=$AWS'}]}")" "files[0].note:1 AWS access key"
+row "a key as a top-level field name is refused" 2 "$(j "{'meta':{'repo':'a/b'},'$AWS':1}")" "field name:1 AWS access key"
 row "a key in meta beside a clean diff is refused" 2 "$(j "{'diff':'+ok','meta':{'ticket':'T=$AWS'}}")" "meta.ticket:1 AWS access key"
 row "meta numbers, booleans and null pass"       0 "$(j "{'meta':{'repo':'a/b','pr':58,'draft':False,'ticket':None}}")"
 row "a meta hit says how to go on"               2 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")" "leave that file or meta field out"
