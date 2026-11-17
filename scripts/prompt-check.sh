@@ -217,7 +217,7 @@ if [ -n "$self_test" ]; then
     r.on("error", e => { console.log("prompt-check self-test: the split request failed: " + e.message); process.exit(0); });
     setTimeout(() => { console.log("prompt-check self-test: the split request timed out"); process.exit(0); }, 10000).unref();
     r.write(b.subarray(0, cut)); setTimeout(() => r.end(b.subarray(cut)), 50);
-  ' -- "$(cat "$work/u/port" 2>/dev/null)"
+  ' -- "$(cat "$work/u/port" 2>/dev/null)" || echo "prompt-check self-test: the split request could not run"
   kill "$pid" 2>/dev/null || true
   grep -qF 'refuse – and carrying' "$work/u/texts" || { echo "prompt-check self-test ($v): FAILED, the stub broke a character split across chunks"; exit 1; }
   grep -q 'warning on this command' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, the brace warning passed"; exit 1; }

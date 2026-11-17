@@ -117,10 +117,13 @@ def scan_payload(hits, ti):
         if content is not None and not isinstance(content, str):
             raise TypeError("content")
         path = str(f.get("path") or "?")
+        ph = []
+        scan(ph, "", path)
+        label = "<flagged path>" if ph else path  # a credential in the path text never reaches a label
         if KEY_FILE.search(path) or ENV_FILE.search(path):
-            hits.append("%s is a file that holds keys" % path)
+            hits.append("%s is a file that holds keys" % label)
         if content:
-            scan(hits, path, content)
+            scan(hits, label, content)
 
 
 CHUNK = 1 << 20

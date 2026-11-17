@@ -75,6 +75,9 @@ row "a key as a top-level field name is refused" 2 "$(j "{'meta':{'repo':'a/b'},
 row "a meta field named note keeps its name in the label" 2 "$(j "{'meta':{'note':'T=$AWS'}}")" "meta.note:1 AWS access key"
 got=$(hook "$(j "{'meta':{'$AWS':{'t':'T=$AWS'}}}")")
 case "$got" in *"$AWS"*) check "a flagged key never reaches a label in full" leaked masked ;; *) check "a flagged key never reaches a label in full" masked masked ;; esac
+row "a content hit under a flagged path is labelled <flagged path>" 2 "$(j "{'diff':'+ok','files':[{'path':'logs/T=$AWS.txt','content':'k=$AWS'}]}")" "<flagged path>:1 AWS access key"
+got=$(hook "$(j "{'diff':'+ok','files':[{'path':'logs/T=$AWS.txt','content':'k=$AWS'}]}")")
+case "$got" in *"$AWS"*) check "a flagged path never reaches a label in full" leaked masked ;; *) check "a flagged path never reaches a label in full" masked masked ;; esac
 row "a key in meta beside a clean diff is refused" 2 "$(j "{'diff':'+ok','meta':{'ticket':'T=$AWS'}}")" "meta.ticket:1 AWS access key"
 row "meta numbers, booleans and null pass"       0 "$(j "{'meta':{'repo':'a/b','pr':58,'draft':False,'ticket':None}}")"
 row "a meta hit says how to go on"               2 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")" "leave that file or meta field out"
