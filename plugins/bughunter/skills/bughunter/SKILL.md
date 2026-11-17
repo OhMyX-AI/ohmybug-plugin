@@ -601,7 +601,7 @@ reformulate.
 If the repo lives on GitHub and the head commit is PUSHED, try the zero-payload
 mode FIRST: call `submit_review` with NO diff, NO files, and full `meta`
 including `repo`, `ref` (head sha), `base_branch` (and `pr` number if known),
-plus `pr_title` and `pr_body` (the table below).
+plus `pr_title`, `pr_body` and, when you worked from a ticket or spec, `ticket` (the table below).
 **The route opt-in: `follows`.** On this submit with no `mode` and no `deep`, add
 `follows: "continued_by"` when the watch loop below runs in background `Bash`
 (Claude Code): it follows a routed hunt to the end (§the routed hunt under the
@@ -814,6 +814,7 @@ itself. The `meta` object is REQUIRED plumbing, not garnish – fill it every ti
 | `pr` | PR number, if reviewing a PR | `gh pr view --json number` |
 | `pr_title` | the PR's title; with no PR, the branch's purpose in one line | `gh pr view --json title -q .title` |
 | `pr_body` | the PR's description, verbatim; with no PR, the branch's commit subjects, one per line | `gh pr view --json body -q .body`, else `git log --format=%s <base>..HEAD` |
+| `ticket` | the task this change implements, verbatim: the ticket or issue body with its acceptance criteria, or the spec excerpt you worked from; omit it when there is none. The reviewers read it as the requirement, so behaviour it asks for is not reported as a bug for being asked (an unsafe requirement still is) | the issue the PR closes: `gh issue view <n> --json title,body`; else the text you were given |
 | `language`, `framework` | repo facts | what you already know |
 | `repo_hint` | the briefing (below) | composed by you |
 
