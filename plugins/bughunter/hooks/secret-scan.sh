@@ -86,13 +86,19 @@ def stop(rc, msg):
 
 # Every string under a value, with a label that says where it sits. Scanned by content only (scan, not
 # scan_payload): a label is not a file name, so it never meets the key-file check. A dict key is a string too.
+# A key that itself looks like a credential never goes into a label in full: the label is printed.
+def named(k):
+    kh = []
+    scan(kh, "", str(k))
+    return "<flagged key>" if kh else str(k)
+
 def collect(v, where, flat=False):
     if isinstance(v, str):
         dstrings.append((where, v))
     elif isinstance(v, dict):
         for k, x in v.items():
             dstrings.append((where + " key", k))
-            collect(x, where if flat and k in ("note", "claim") else "%s.%s" % (where, k), flat)
+            collect(x, where if flat and k in ("note", "claim") else "%s.%s" % (where, named(k)), flat)
     elif isinstance(v, list):
         for i, x in enumerate(v):
             collect(x, "%s[%d]" % (where, i), flat)
@@ -219,7 +225,7 @@ scan_payload(hits, ti)
 for k, v in ti.items():
     dstrings.append(("field name", k))
     if k not in ("diff", "files"):
-        collect(v, k)
+        collect(v, named(k))
 # scan_payload reads the path and content of a file entry; any other field of it is read here.
 for i, f in enumerate(ti.get("files") or []):
     if isinstance(f, dict):

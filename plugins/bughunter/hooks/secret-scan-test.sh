@@ -71,11 +71,14 @@ row "a clean meta list passes"                   0 "$(j "{'meta':['a']}")"
 row "a key in another top-level field is refused" 2 "$(j "{'meta':{'repo':'a/b'},'repo_hint':'T=$AWS'}")" "repo_hint:1 AWS access key"
 row "a key in an extra field of a file entry is refused" 2 "$(j "{'files':[{'path':'a.txt','content':'ok','note':'T=$AWS'}]}")" "files[0].note:1 AWS access key"
 row "a key as a top-level field name is refused" 2 "$(j "{'meta':{'repo':'a/b'},'$AWS':1}")" "field name:1 AWS access key"
+row "a meta field named note keeps its name in the label" 2 "$(j "{'meta':{'note':'T=$AWS'}}")" "meta.note:1 AWS access key"
+got=$(hook "$(j "{'meta':{'$AWS':{'t':'T=$AWS'}}}")")
+case "$got" in *"$AWS"*) check "a flagged key never reaches a label in full" leaked masked ;; *) check "a flagged key never reaches a label in full" masked masked ;; esac
 row "a key in meta beside a clean diff is refused" 2 "$(j "{'diff':'+ok','meta':{'ticket':'T=$AWS'}}")" "meta.ticket:1 AWS access key"
 row "meta numbers, booleans and null pass"       0 "$(j "{'meta':{'repo':'a/b','pr':58,'draft':False,'ticket':None}}")"
 row "a meta hit says how to go on"               2 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")" "leave that file or meta field out"
 got=$(hook "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")")
-case "$got" in *"nothing leaves"*|*"Drop those files"*) check "a meta hit is not told that repo+ref sends nothing" bad good ;; *) check "a meta hit is not told that repo+ref sends nothing" good good ;; esac
+case "$got" in *"nothing leaves"*|*"Drop those files"*) check "a meta hit is not told that repo+ref sends nothing" bad good ;; *"drops the diff and files only"*) check "a meta hit is not told that repo+ref sends nothing" good good ;; *) check "a meta hit is not told that repo+ref sends nothing" missing good ;; esac
 hook "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")" >/dev/null; check "a refused meta records nothing" "$(stamped)" no
 OHMYBUG_SECRET_SCAN=0 row "the scan off lets a key in meta through" 0 "$(j "{'meta':{'repo':'a/b','ticket':'T=$AWS'}}")"
 row "a secret in a deleted file names that file" 2 "$(j "{'diff':'--- a/old.py\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-k = \"$AWS\"\n'}")" "old.py (a removed line) AWS access key"

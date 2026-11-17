@@ -1838,8 +1838,7 @@ This section is the one statement of what leaves the machine; "no code" anywhere
 exactly this. Every hunt sends `meta`, the labels you write: the repository's name, the ref and base branch,
 the PR's number, title and description, the briefing (`repo_hint`) and, when you send one, the task
 (`ticket`): the bodies of this repository's issues the PR closes, or the spec the user gave you. Keep credentials
-out of what you write into `meta`: the plugin's secret scan does not run everywhere (README, What the scan
-misses). What may go into `ticket` without a question is the task paragraph's rule. A hunt of a pushed commit (rung 1) sends no code: the server reads the commit, and `meta` is all
+out of what you write into `meta`: the plugin's secret scan does not run everywhere. What may go into `ticket` without a question is the task paragraph's rule. A hunt of a pushed commit (rung 1) sends no code: the server reads the commit, and `meta` is all
 that goes. A payload hunt sends the most: a snapshot of the
 working copy (without ignored files, secret-named files such as `.env*`,
 `*.pem` or `.ssh/`, and submodules; LFS files as their pointers) plus the
