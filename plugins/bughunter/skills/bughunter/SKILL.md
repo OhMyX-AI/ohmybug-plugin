@@ -827,7 +827,7 @@ reported as a bug for being asked, but data or money loss, a security hole or a 
   ```
   then, for each number, `gh issue view <number> -R <meta.repo> --json number,title,body -q '"#\(.number) \(.title)\n\n\(.body)"'`,
   joined with a `---` line. On rung 1 the server reads this repository itself, so these issues need no
-  question. On a payload hunt it does not, and they follow the next rule.
+  question; say in one line which go (`task: #12, #15`). On a payload hunt it does not, and they follow the next rule.
 - Anything else goes in only after the user says yes to that text: an issue of another repository the PR
   closes (the command above leaves it out; name it and ask once), another tracker, a local document. With
   no answer, or in a headless run, leave it out. A spec the user handed you for this work and told you to
@@ -869,7 +869,8 @@ cheaply collect goes into `repo_hint` (a few paragraphs, ~2000 chars):
    every linked one when you send no `ticket`): for each `#NNN` (`gh issue view NNN --json title,body`),
    one-two sentences – especially observed magnitudes, client timeouts, incident data. A reviewer who knows
    "clients give up at ~330s" can judge a 300s default; one who doesn't, cannot. Do not repeat the ticket:
-   the reviewers read it whole. Issues of another repository follow the ticket's rule: ask first.
+   the reviewers read it whole. These issues follow the ticket's rule on what may leave the machine: on a payload hunt, and for
+   another repository's, ask first.
 
 This is what separates a calibrated review from a blind one – do not skip
 it to save a minute.
@@ -1836,8 +1837,10 @@ branch.
 This section is the one statement of what leaves the machine; "no code" anywhere else in this skill means
 exactly this. Every hunt sends `meta`, the labels you write: the repository's name, the ref and base branch,
 the PR's number, title and description, the briefing (`repo_hint`) and, when you send one, the task
-(`ticket`): the bodies of this repository's issues the PR closes, or the spec the user gave you. The
-plugin's secret scan reads every string under `meta` before the call goes. Text from outside this repository
+(`ticket`): the bodies of this repository's issues the PR closes, or the spec the user gave you. Where the
+plugin's hook runs (Claude Code or Codex with python3; not on Windows, not in a skill-only install), its secret
+scan reads every string the call carries before it goes; elsewhere nothing checks `meta`, so keep credentials
+out of what you write into it. Text from outside this repository
 (an issue of another repository, another tracker, a local document) goes into `meta` only after the user
 says yes. A hunt of a pushed commit (rung 1) sends no code: the server reads the commit, and `meta` is all
 that goes. A payload hunt sends the most: a snapshot of the

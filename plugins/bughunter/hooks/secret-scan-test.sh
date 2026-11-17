@@ -66,8 +66,10 @@ done
 row "a key in a meta list is refused"            2 "$(j "{'meta':{'repo':'a/b','ticket':['ok','T=$AWS']}}")" "meta.ticket[1]:1 AWS access key"
 row "a key in a nested meta object is refused"   2 "$(j "{'meta':{'repo':'a/b','x':{'y':[{'z':'T=$AWS'}]}}}")" "meta.x.y[0].z:1 AWS access key"
 row "a key as a meta key name is refused"        2 "$(j "{'meta':{'repo':'a/b','$AWS':1}}")" "meta key:1 AWS access key"
-row "meta that is not an object refuses"         2 "$(j "{'meta':'T=$AWS'}")" "could not scan"
-row "a meta list refuses"                        2 "$(j "{'meta':['a']}")" "could not scan"
+row "meta sent as a string is scanned as text"   2 "$(j "{'meta':'T=$AWS'}")" "meta:1 AWS access key"
+row "a clean meta list passes"                   0 "$(j "{'meta':['a']}")"
+row "a key in another top-level field is refused" 2 "$(j "{'meta':{'repo':'a/b'},'repo_hint':'T=$AWS'}")" "repo_hint:1 AWS access key"
+row "a key in meta beside a clean diff is refused" 2 "$(j "{'diff':'+ok','meta':{'ticket':'T=$AWS'}}")" "meta.ticket:1 AWS access key"
 row "meta numbers, booleans and null pass"       0 "$(j "{'meta':{'repo':'a/b','pr':58,'draft':False,'ticket':None}}")"
 row "a meta hit says how to go on"               2 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")" "leave that file or meta field out"
 got=$(hook "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")")

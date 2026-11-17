@@ -1,5 +1,5 @@
 #!/bin/bash
-# Refuse a submit_review whose payload or meta text carries a credential, and a challenge_finding (a dispute) that quotes
+# Refuse a submit_review whose payload or any other text it carries (meta on every submit) holds a credential, and a challenge_finding (a dispute) that quotes
 # one or cites a path git does not list in this repository.
 #
 # Why a shell hook and not the Claude Code mod: a check that only some clients
@@ -214,13 +214,11 @@ if os.environ.get("OHMYBUG_SECRET_SCAN", "1") == "0":
 
 hits = []
 scan_payload(hits, ti)
-# meta leaves the machine on every submit, a repo+ref one included, so every string under it is read, whatever
-# its key and however deep: no list of known keys to fall behind the server. meta that is not an object is the
-# unexpected shape of the rule above.
-meta = ti.get("meta")
-if meta is not None and not isinstance(meta, dict):
-    raise TypeError("meta")
-collect(meta, "meta")
+# Every other string the call carries leaves the machine too (meta on every submit, a repo+ref one included), so
+# each is read whatever its key, shape and depth: no list of known keys to fall behind the server.
+for k, v in ti.items():
+    if k not in ("diff", "files"):
+        collect(v, k)
 for where, text in dstrings:
     scan(hits, where, text)
 
@@ -268,7 +266,7 @@ if [ "$rc" != 3 ] || [ -z "$OUT" ]; then
     case "$INPUT" in
       *'__provide_files"'*) echo "Call provide_files again for the same review (do not start a new hunt for this), or set OHMYBUG_SECRET_SCAN=0 to skip the scan." ;;
       *'__challenge_finding"'*) echo "Dispute again, or judge the finding without a dispute." ;;
-      *) echo "Resend it, or set OHMYBUG_SECRET_SCAN=0 to skip the scan. (When meta is sent it must be an object; its text is scanned on every submit, one with no payload included.)" ;;
+      *) echo "Resend it, or set OHMYBUG_SECRET_SCAN=0 to skip the scan." ;;
     esac
   } >&2
   exit 2
