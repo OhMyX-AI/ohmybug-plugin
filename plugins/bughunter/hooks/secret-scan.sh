@@ -1,5 +1,5 @@
 #!/bin/bash
-# Refuse a submit_review whose inline payload carries a credential, and a challenge_finding (a dispute) that quotes
+# Refuse a submit_review whose payload or meta text carries a credential, and a challenge_finding (a dispute) that quotes
 # one or cites a path git does not list in this repository.
 #
 # Why a shell hook and not the Claude Code mod: a check that only some clients
@@ -11,7 +11,8 @@
 # shapes: high-signal ones only, every value masked. This hook reads the call.
 #
 # It reads whatever payload the call carries: submit_review's diff and files,
-# provide_files' files, every string of a challenge_finding. A repo+ref submit carries none, so nothing is read.
+# provide_files' files, every string of a challenge_finding, and every string under a submit's meta (sent on every
+# submit, a repo+ref one included).
 #
 # It also FILLS provide_files' `paths`: the agent names the requested files,
 # and this hook reads them from disk and hands the call on with their contents
@@ -267,7 +268,7 @@ if [ "$rc" != 3 ] || [ -z "$OUT" ]; then
     case "$INPUT" in
       *'__provide_files"'*) echo "Call provide_files again for the same review (do not start a new hunt for this), or set OHMYBUG_SECRET_SCAN=0 to skip the scan." ;;
       *'__challenge_finding"'*) echo "Dispute again, or judge the finding without a dispute." ;;
-      *) echo "Resend it, or set OHMYBUG_SECRET_SCAN=0 to skip the scan. meta must be an object; its text is scanned on every submit, one with no payload included." ;;
+      *) echo "Resend it, or set OHMYBUG_SECRET_SCAN=0 to skip the scan. (When meta is sent it must be an object; its text is scanned on every submit, one with no payload included.)" ;;
     esac
   } >&2
   exit 2

@@ -820,14 +820,14 @@ itself. The `meta` object is REQUIRED plumbing, not garnish – fill it every ti
 **The task (`ticket`).** The text the change was written from, verbatim, up to 8000 characters. The
 reviewers read it as the author's stated task, framed as untrusted data: behaviour it asks for is not
 reported as a bug for being asked, but data or money loss, a security hole or a crash still is.
-- A PR of yours or the user's: the issues it closes **in the hunted repository** (`meta.repo`), and only
-  those. With `R` set to `meta.repo`:
+- A PR of yours or the user's, hunted as a pushed commit the server reads (rung 1): the issues it closes
+  **in the hunted repository** (`meta.repo`), and only those. With `R` set to `meta.repo`:
   ```
   R=<meta.repo> gh pr view --json closingIssuesReferences -q '.closingIssuesReferences[] | select(("\(.repository.owner.login)/\(.repository.name)" | ascii_downcase) == (env.R | ascii_downcase)) | .number'
   ```
   then, for each number, `gh issue view <number> -R <meta.repo> --json number,title,body -q '"#\(.number) \(.title)\n\n\(.body)"'`,
-  joined with a `---` line. The server can already read these issues wherever it can read the commit, so
-  they need no question.
+  joined with a `---` line. On rung 1 the server reads this repository itself, so these issues need no
+  question. On a payload hunt it does not, and they follow the next rule.
 - Anything else goes in only after the user says yes to that text: an issue of another repository the PR
   closes (the command above leaves it out; name it and ask once), another tracker, a local document. With
   no answer, or in a headless run, leave it out. A spec the user handed you for this work and told you to

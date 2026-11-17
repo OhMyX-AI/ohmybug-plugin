@@ -67,7 +67,7 @@ row "a key in a meta list is refused"            2 "$(j "{'meta':{'repo':'a/b','
 row "a key in a nested meta object is refused"   2 "$(j "{'meta':{'repo':'a/b','x':{'y':[{'z':'T=$AWS'}]}}}")" "meta.x.y[0].z:1 AWS access key"
 row "a key as a meta key name is refused"        2 "$(j "{'meta':{'repo':'a/b','$AWS':1}}")" "meta key:1 AWS access key"
 row "meta that is not an object refuses"         2 "$(j "{'meta':'T=$AWS'}")" "could not scan"
-row "a meta list refuses"                        2 "$(j "{'meta':['a']}")" "meta must be an object"
+row "a meta list refuses"                        2 "$(j "{'meta':['a']}")" "could not scan"
 row "meta numbers, booleans and null pass"       0 "$(j "{'meta':{'repo':'a/b','pr':58,'draft':False,'ticket':None}}")"
 row "a meta hit says how to go on"               2 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")" "leave that file or meta field out"
 got=$(hook "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")")

@@ -190,7 +190,7 @@ repository per week, and is not a merge gate.
   the final diff was hunted (skip once with `SKIP_BUGHUNT=1`; review fixes
   change the diff and re-arm the gate).
 - `/bughunter:review` (or just ask to "hunt bugs") hunts the pushed commit
-  with no code uploaded (only the hunt's labels: the PR title and description, the task), or sends the diff with a snapshot of the working
+  with no code uploaded (only the hunt's labels: the PR title and description, the briefing, the task), or sends the diff with a snapshot of the working
   copy; one line says what leaves the machine and what is left out.
 - An orchestrated fleet of adversarial reviewers hunts on OhMyBug's models.
   Only findings that survive triage come back.
