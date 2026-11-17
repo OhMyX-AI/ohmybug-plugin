@@ -60,13 +60,27 @@ done
 row "a key pasted into the task text (meta.ticket) on a repo+ref submit" 2 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'Fix login.\\nlog: token=$GHP'}}")" "meta.ticket:2 GitHub token"
 row "a key in the PR description (meta.pr_body)" 2 "$(j "{'meta':{'repo':'a/b','pr_body':'T=$AWS'}}")" "meta.pr_body:1 AWS access key"
 row "a clean task text passes"                   0 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'Refunds keep the fee.'}}")"
+for k in ticket pr_title pr_body repo_hint language some_new_label; do
+  row "a key in meta.$k is refused" 2 "$(j "{'meta':{'repo':'a/b','ref':'x','$k':'T=$AWS'}}")" "meta.$k:1 AWS access key"
+done
+row "a key in a meta list is refused"            2 "$(j "{'meta':{'repo':'a/b','ticket':['ok','T=$AWS']}}")" "meta.ticket[1]:1 AWS access key"
+row "a key in a nested meta object is refused"   2 "$(j "{'meta':{'repo':'a/b','x':{'y':[{'z':'T=$AWS'}]}}}")" "meta.x.y[0].z:1 AWS access key"
+row "a key as a meta key name is refused"        2 "$(j "{'meta':{'repo':'a/b','$AWS':1}}")" "meta key:1 AWS access key"
+row "meta that is not an object refuses"         2 "$(j "{'meta':'T=$AWS'}")" "could not scan"
+row "a meta list refuses"                        2 "$(j "{'meta':['a']}")" "meta must be an object"
+row "meta numbers, booleans and null pass"       0 "$(j "{'meta':{'repo':'a/b','pr':58,'draft':False,'ticket':None}}")"
+row "a meta hit says how to go on"               2 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")" "leave that file or meta field out"
+got=$(hook "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")")
+case "$got" in *"nothing leaves"*|*"Drop those files"*) check "a meta hit is not told that repo+ref sends nothing" bad good ;; *) check "a meta hit is not told that repo+ref sends nothing" good good ;; esac
+hook "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")" >/dev/null; check "a refused meta records nothing" "$(stamped)" no
+OHMYBUG_SECRET_SCAN=0 row "the scan off lets a key in meta through" 0 "$(j "{'meta':{'repo':'a/b','ticket':'T=$AWS'}}")"
 row "a secret in a deleted file names that file" 2 "$(j "{'diff':'--- a/old.py\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-k = \"$AWS\"\n'}")" "old.py (a removed line) AWS access key"
 row "a diff deleting a key file is refused"      2 "$(j "{'diff':'--- a/certs/old.pem\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-abc\n'}")" "diff changes certs/old.pem"
 row "AWS documentation placeholder passes"      0 "$(j "{'diff':'+k=\"AKIAIOSFODNN7EXAMPLE\"'}")"
 row ".env.example attached passes"              0 "$(j "{'files':[{'path':'.env.example','content':'PORT=3000'}]}")"
 row "a diff touching .env with no secret passes" 0 "$(j "{'diff':'+++ b/.env\n+PORT=3000\n'}")"
 row "clean diff passes"                          0 "$(j "{'diff':'+++ b/a.py\n+print(1)\n'}")"
-row "repo+ref submit has nothing to scan"       0 "$(j "{'meta':{'repo':'o/r','ref':'abc','base_branch':'main'}}")"
+row "a clean repo+ref submit passes"            0 "$(j "{'meta':{'repo':'o/r','ref':'abc','base_branch':'main'}}")"
 row "a removed '-- ' line inside a hunk is scanned" 2 "$(j "{'diff':'--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,1 @@\n--- key $AWS\n x\n'}")" "q.sql (a removed line) AWS access key"
 row "upload=true still reads an inline payload" 2 "$(j "{'upload':True,'diff':'+k=\"$AWS\"'}")" "AWS access key"
 row "upload=true with no payload passes"        0 "$(j "{'upload':True}")"

@@ -83,6 +83,20 @@ def stop(rc, msg):
     sys.stdout.flush()
     sys.exit(rc)
 
+# Every string under a value, with a label that says where it sits. Scanned by content only (scan, not
+# scan_payload): a label is not a file name, so it never meets the key-file check. A dict key is a string too.
+def collect(v, where):
+    if isinstance(v, str):
+        dstrings.append((where, v))
+    elif isinstance(v, dict):
+        for k, x in v.items():
+            dstrings.append((where + " key", k))
+            collect(x, where if k in ("note", "claim") else "%s.%s" % (where, k))
+    elif isinstance(v, list):
+        for i, x in enumerate(v):
+            collect(x, "%s[%d]" % (where, i))
+
+
 # The selection rules of the files_url recipe the server hands out: the git top level of
 # the session directory, a regular file whose path git lists as tracked or
 # untracked-not-ignored, with no symlink in any part of that path. Missing,
@@ -188,17 +202,6 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
             bad.append("%s (line %d is past its end)" % (e["path"], e["line"]))
     if bad:
         stop(6, "\n".join("  - " + p for p in bad))
-    # Scanned by content only (scan, not scan_payload): a label is not a file name, so it never meets the key-file check.
-    def collect(v, where):
-        if isinstance(v, str):
-            dstrings.append((where, v))
-        elif isinstance(v, dict):
-            for k, x in v.items():
-                collect(x, where if k in ("note", "claim") else "%s.%s" % (where, k))
-        elif isinstance(v, list):
-            for i, x in enumerate(v):
-                collect(x, "%s[%d]" % (where, i))
-
     for k, v in ti.items():
         if k != "evidence":
             collect(v, k)
@@ -210,13 +213,13 @@ if os.environ.get("OHMYBUG_SECRET_SCAN", "1") == "0":
 
 hits = []
 scan_payload(hits, ti)
-# The prose labels of a submit leave the machine on every rung, a repo+ref hunt included: the task (meta.ticket, an
-# issue or a spec), the PR title and description, the briefing. Scanned by content like the rest.
-meta = ti.get("meta") if isinstance(ti, dict) else None
-if isinstance(meta, dict):
-    for k in ("ticket", "pr_title", "pr_body", "repo_hint"):
-        if isinstance(meta.get(k), str):
-            scan(hits, "meta." + k, meta[k])
+# meta leaves the machine on every submit, a repo+ref one included, so every string under it is read, whatever
+# its key and however deep: no list of known keys to fall behind the server. meta that is not an object is the
+# unexpected shape of the rule above.
+meta = ti.get("meta")
+if meta is not None and not isinstance(meta, dict):
+    raise TypeError("meta")
+collect(meta, "meta")
 for where, text in dstrings:
     scan(hits, where, text)
 
@@ -264,7 +267,7 @@ if [ "$rc" != 3 ] || [ -z "$OUT" ]; then
     case "$INPUT" in
       *'__provide_files"'*) echo "Call provide_files again for the same review (do not start a new hunt for this), or set OHMYBUG_SECRET_SCAN=0 to skip the scan." ;;
       *'__challenge_finding"'*) echo "Dispute again, or judge the finding without a dispute." ;;
-      *) echo "Resend it, or set OHMYBUG_SECRET_SCAN=0 to skip the scan. A submit with meta.repo + meta.ref and no payload has nothing to scan." ;;
+      *) echo "Resend it, or set OHMYBUG_SECRET_SCAN=0 to skip the scan. meta must be an object; its text is scanned on every submit, one with no payload included." ;;
     esac
   } >&2
   exit 2
@@ -275,7 +278,7 @@ fi
   case "$INPUT" in
     *'__provide_files"'*) echo "Call provide_files again for the same review without those files (or with each value replaced by [REDACTED]); an empty list is a valid answer. Do not start a new hunt for this." ;;
     *'__challenge_finding"'*) echo "Dispute again with each value named instead of quoted, or judge the finding without a dispute." ;;
-    *) echo "Drop those files or replace each value with [REDACTED], then submit again. Or submit with meta.repo + meta.ref and no payload: the server reads the pushed commit and nothing leaves this machine." ;;
+    *) echo "Replace each value with [REDACTED] where it is named above, or leave that file or meta field out, then submit again. The text in meta (the task, the PR title and description, the briefing) is sent on every submit: a submit with meta.repo + meta.ref and no payload drops the diff and files only." ;;
   esac
 } >&2
 exit 2
