@@ -70,6 +70,7 @@ row "meta sent as a string is scanned as text"   2 "$(j "{'meta':'T=$AWS'}")" "m
 row "a clean meta list passes"                   0 "$(j "{'meta':['a']}")"
 row "a key in another top-level field is refused" 2 "$(j "{'meta':{'repo':'a/b'},'repo_hint':'T=$AWS'}")" "repo_hint:1 AWS access key"
 row "a key in an extra field of a file entry is refused" 2 "$(j "{'files':[{'path':'a.txt','content':'ok','note':'T=$AWS'}]}")" "files[0].note:1 AWS access key"
+row "a key in a file entry's path is refused"       2 "$(j "{'files':[{'path':'logs/T=$AWS.txt','content':'ok'}]}")" "files[0].path:1 AWS access key"
 row "a key as a top-level field name is refused" 2 "$(j "{'meta':{'repo':'a/b'},'$AWS':1}")" "field name:1 AWS access key"
 row "a meta field named note keeps its name in the label" 2 "$(j "{'meta':{'note':'T=$AWS'}}")" "meta.note:1 AWS access key"
 got=$(hook "$(j "{'meta':{'$AWS':{'t':'T=$AWS'}}}")")

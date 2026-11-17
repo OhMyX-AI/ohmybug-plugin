@@ -227,10 +227,10 @@ for k, v in ti.items():
     dstrings.append(("field name", k))
     if k not in ("diff", "files"):
         collect(v, named(k))
-# scan_payload reads the path and content of a file entry; any other field of it is read here.
+# scan_payload reads the content of a file entry and checks its path against key-file names; every other field, the path text included, is read here.
 for i, f in enumerate(ti.get("files") or []):
     if isinstance(f, dict):
-        collect({k: v for k, v in f.items() if k not in ("path", "content")}, "files[%d]" % i)
+        collect({k: v for k, v in f.items() if k != "content"}, "files[%d]" % i)
 for where, text in dstrings:
     scan(hits, where, text)
 

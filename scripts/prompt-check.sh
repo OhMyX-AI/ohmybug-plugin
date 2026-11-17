@@ -213,9 +213,11 @@ if [ -n "$self_test" ]; then
   for i in $(seq 50); do [ -s "$work/u/port" ] && break; sleep 0.1; done
   node -e '
     const b = Buffer.from(JSON.stringify({messages: [{role: "user", content: "refuse – and carrying"}]})), cut = b.indexOf(Buffer.from("–")) + 1;
-    const r = require("http").request({port: +process.argv[1], method: "POST", path: "/v1/messages"}, res => { res.resume(); res.on("end", () => process.exit(0)); });
+    const r = require("http").request({host: "127.0.0.1", port: +process.argv[1], method: "POST", path: "/v1/messages"}, res => { res.resume(); res.on("end", () => process.exit(0)); });
+    r.on("error", e => { console.log("prompt-check self-test: the split request failed: " + e.message); process.exit(0); });
+    setTimeout(() => { console.log("prompt-check self-test: the split request timed out"); process.exit(0); }, 10000).unref();
     r.write(b.subarray(0, cut)); setTimeout(() => r.end(b.subarray(cut)), 50);
-  ' -- "$(cat "$work/u/port")"
+  ' -- "$(cat "$work/u/port" 2>/dev/null)"
   kill "$pid" 2>/dev/null || true
   grep -qF 'refuse – and carrying' "$work/u/texts" || { echo "prompt-check self-test ($v): FAILED, the stub broke a character split across chunks"; exit 1; }
   grep -q 'warning on this command' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, the brace warning passed"; exit 1; }
