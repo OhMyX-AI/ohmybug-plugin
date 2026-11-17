@@ -313,7 +313,7 @@ an interactive tty.)
 
 ## First-run setup
 
-Four questions that set the account's defaults, asked once per machine. In
+Five questions that set the account's defaults, asked once per machine. In
 Claude Code the session-start hook asks for it in your first reply, at most
 three times per machine; `/bughunter:setup` runs it any time. In Codex it
 starts only on the user's word ("set up OhMyBug"). In Claude Code it needs
@@ -328,12 +328,13 @@ nothing and say nothing about it. Then answer what the user asked.
    not `/bughunter:setup`, run `bash '<skill_dir>/../../hooks/intro.sh' done`,
    say nothing and stop: the setup ran on another machine.
 2. Say, as plain text: "OhMyBug hunts bugs in your changes in the cloud. You
-   pay only when a real bug is found: a clean change costs nothing. Four quick
+   pay only when a real bug is found: a clean change costs nothing. Five quick
    questions set your defaults; change them any time with /bughunter:setup or
    on ohmybug.ai/me/policy." Add "Your first hunt that finds a bug costs
    nothing." only when `get_balance` shows one still free.
-3. Ask the four questions in ONE question-tool call (in Codex: in chat,
-   numbered, a free-text answer accepted). The option equal to the saved
+3. Ask the first four questions in ONE question-tool call, then the fifth
+   (Docs findings) in a second call right after: a question tool takes at most
+   four (in Codex: all five in chat, numbered, a free-text answer accepted). The option equal to the saved
    value in `get_balance` `policy` is marked "(current)".
    - **Upload.** "When OhMyBug cannot read your code on GitHub, a copy goes
      to the hunt sandbox. Which copy?" Git-ignored and secret-named files
@@ -408,6 +409,18 @@ nothing and say nothing about it. Then answer what the user asked.
        other findings. They do not block the merge and are not charged,
        unless your agent finds the code itself failing." Sends
        `test_gaps: "not_block"`.
+     - "Skip (keep the current setting)".
+   - **Docs findings.** Not asked when `get_balance` `policy` has no
+     `docs_findings` (an older server): send nothing for it, and make no second
+     call. The question: "Some findings are only about documentation or code
+     comments, while the code itself works. Should they block the merge?"
+     - "Block the merge (recommended)": "Like any other finding: your agent
+       fixes them before the merge, and a confirmed one is charged." Sends
+       `docs_findings: "block"`.
+     - "Show them, but don't block": "Listed in their own section after the
+       other findings. They do not block the merge and are not charged.
+       Wrong text that your product shows its users is never one of them."
+       Sends `docs_findings: "not_block"`.
      - "Skip (keep the current setting)".
 4. A skipped question, or a dismissed dialog, sends nothing for its fields.
 5. Run `bash '<skill_dir>/../../hooks/intro.sh' done`: it writes this
@@ -1381,6 +1394,12 @@ carries `reported_severity` was delivered as `low` by the user's setting
 unless your verdict raises it (step 4). Say so once for the section, and put
 each one's reported severity beside it.
 
+**Docs findings.** A finding marked `kind: "docs"` is only about documentation
+or code comments (the code itself does what it should). Show those in their
+own section after the test gaps, under "Docs findings", and say how many there
+are. One that also carries `reported_severity` was delivered as `low` by the
+user's setting (`docs_findings: "not_block"`), with the same rule as a test gap.
+
 ### 4. Verify each finding honestly
 
 For every finding: open the referenced files, trace the failure scenario the
@@ -1403,7 +1422,9 @@ the user's setting wins over that rule: a finding delivered `low` with
 `reported_severity` (the user chose `test_gaps: "not_block"`) stays `low`, even
 when the missing test guards a sensitive path, unless your trace shows the
 production code itself failing today. Then it is not a test gap, and the
-severity you set is what blocks and bills. Anything a
+severity you set is what blocks and bills. The same holds for a docs finding
+delivered `low` under `docs_findings: "not_block"`: it stays `low` unless your
+trace shows the code itself wrong. Anything a
 reviewer would block a merge over (`critical`/`high`/`medium`) makes the
 review billable unless it is a `medium` marked `known` (below), `low` is free – so this decision is the bill, and the user
 sees the table before you send it.
