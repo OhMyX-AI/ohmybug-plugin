@@ -96,6 +96,8 @@ for want in \
   'Sends `hunt_mode: "fast"`' \
   'Sends `hunt_mode: "auto"`' \
   'Not asked when `get_balance` `policy` has no `test_gaps`' \
+  '`docs_findings` (an older server): send nothing for it, and make no second' \
+  '(Docs findings) in a second call right after: a question tool takes at most' \
   'finds ~<found_pct>% of known bugs (our benchmark)' \
   'with a `get_balance` `route`' \
   'This question has no Skip' \
@@ -107,6 +109,8 @@ for want in \
 done
 # The test-gaps options with their own values: blocking first, recommended, then not_block (a swap would stop billing).
 printf '%s' "$SEC" | grep -q 'Block the merge (recommended)[^-]*Sends `test_gaps: "block"`.*Show them, but don.t block.*Sends `test_gaps: "not_block"`' && ok "S test gaps options: block first and recommended, each sends its own value" || fail "S test gaps option values"
+# The docs options with their own values, blocking first and recommended.
+printf '%s' "$SEC" | tr '\n' ' ' | grep -q 'Block the merge (recommended)[^-]*Sends `docs_findings: "block"`.*Show them, but don.t block.*Sends `docs_findings: "not_block"`' && ok "S docs options: block first and recommended, each sends its own value" || fail "S docs option values"
 # The stories options in this order, private first.
 printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publish them, signed with my GitHub name.*Publish them unsigned.*Don.t write them' && ok "S stories options: private first and recommended, then signed, unsigned, off" || fail "S stories option order"
 # Plugin text never names the reward itself.
