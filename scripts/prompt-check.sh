@@ -122,6 +122,23 @@ session() {
   wait "$pid" 2>/dev/null || true
 }
 
+# delivered <line> <texts>: a window of what the agent got (#62), 80 characters up to the end of the line's longest
+# delivered prefix and 160 after it. JSON-quoted with every non-ASCII character as \uXXXX, so an invisible change
+# (a no-break or zero-width space) shows. A prefix under 12 characters is too short to anchor and is not shown.
+# The window sits at the prefix's FIRST occurrence in the texts, which repeat the skill per request, so a common
+# prefix can show an earlier copy of the passage. Best effort: it never fails the check.
+delivered() {
+  node -e '
+    const [line, t] = [process.argv[1], require("fs").readFileSync(process.argv[2], "utf8")];
+    const q = s => JSON.stringify(s).replace(/[^\x20-\x7e]/g, c => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+    let n = line.length;
+    while (n > 0 && !t.includes(line.slice(0, n))) n--;
+    if (n < 12) { console.log("  delivered: only the first " + n + " character(s) matched; the change is within the first " + (n + 1)); process.exit(0); }
+    const at = t.indexOf(line.slice(0, n)) + n;
+    console.log("  delivered: " + q(t.slice(Math.max(0, at - 80), at)) + " <then> " + q(t.slice(at, at + 160)));
+  ' -- "$1" "$2" || true
+}
+
 # check <checkout>: prints what fails; 0 when both checks pass.
 check() {
   local src=$1 skill=$1/plugins/bughunter/skills/bughunter/SKILL.md dir=$work/c$RANDOM bad=0 f
@@ -138,7 +155,7 @@ check() {
   fi
   while IFS= read -r line; do
     [ -n "${line// }" ] || continue
-    grep -qF -- "$line" "$dir/s/texts" || { echo "prompt-check: the agent got this skill line altered: $line"; bad=1; }
+    grep -qF -- "$line" "$dir/s/texts" || { echo "prompt-check: the agent got this skill line altered: $line"; delivered "$line" "$dir/s/texts"; bad=1; }
   done < <(awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { fm = 0; next } !fm' "$skill")
 
   # 2. Every bash block as one Bash call, plus the control the client must refuse.
@@ -181,6 +198,13 @@ if [ -n "$self_test" ]; then
   printf '\n```bash\ncanary() { echo "$1"; }\n```\n' >>"$copy/plugins/bughunter/skills/bughunter/SKILL.md"
   out=$(check "$copy" || true)
   grep -q 'altered: canary' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, the argument substitution passed"; exit 1; }
+  grep -qF 'canary() { echo \"" <then> ' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, an altered line did not show what was delivered"; exit 1; }
+  # The window's two branches without a client: a no-break space shows escaped, a short prefix is not anchored.
+  printf 'intro. - a bullet line where\302\240one space changed\n' >"$work/t"
+  got=$(delivered '- a bullet line where one space changed' "$work/t")
+  [ "$got" = '  delivered: "intro. - a bullet line where" <then> "\u00a0one space changed\n"' ] || { echo "$got"; echo "prompt-check self-test ($v): FAILED, the window did not escape a no-break space"; exit 1; }
+  got=$(delivered '- a bullet nowhere' "$work/t")
+  [ "$got" = '  delivered: only the first 11 character(s) matched; the change is within the first 12' ] || { echo "$got"; echo "prompt-check self-test ($v): FAILED, a short prefix was anchored"; exit 1; }
   grep -q 'warning on this command' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, the brace warning passed"; exit 1; }
   echo "prompt-check self-test ($v): ok"
 else
