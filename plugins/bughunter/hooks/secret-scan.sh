@@ -210,8 +210,9 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
     if bad:
         stop(6, "\n".join("  - " + p for p in bad))
     for k, v in ti.items():
+        dstrings.append(("field name", k))
         if k != "evidence":
-            collect(v, k, True)
+            collect(v, named(k), True)
     for i, e in enumerate(ev):
         collect({k: v for k, v in e.items() if k != "path"}, "evidence[%d] note (%s)" % (i, e["path"]), True)
     ti = {}

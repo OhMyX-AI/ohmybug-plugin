@@ -112,6 +112,8 @@ drow() { # name, want exit, tool_input JSON, [text the message must hold]
   echo "ok   $1"
 }
 drow "a dispute with a token in a note is refused" 2 "$(j "{'finding_id':'f','claim':'guarded','evidence':[{'path':'ci.sh','line':1,'note':'T=$GHP'}]}")" "evidence[0] note (ci.sh):1 GitHub token"
+drow "a dispute with a token as a field name is refused" 2 "$(j "{'finding_id':'f','claim':'c','$GHP':1}")" "field name:1 GitHub token"
+drow "a dispute value under a flagged field name never shows the name" 2 "$(j "{'finding_id':'f','claim':'c','$GHP':'T=$GHP'}")" "<flagged key>:1 GitHub token"
 drow "a dispute with a token in its finding_id is refused" 2 "$(j "{'finding_id':'$GHP','claim':'c'}")" "GitHub token"
 drow "a finding_id that is not a string names the field" 2 "$(j "{'finding_id':5,'claim':'c'}")" "finding_id must be"
 drow "an evidence item that is not an object names the field" 2 "$(j "{'finding_id':'f','claim':'c','evidence':['src/a.py']}")" "needs a string path"
