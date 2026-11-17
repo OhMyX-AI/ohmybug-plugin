@@ -57,13 +57,41 @@ done
 for name in id_rsa id_dsa id_ecdsa id_ed25519 k.pem k.p12 k.pfx k.key .env; do
   row "$name attached as context is refused" 2 "$(j "{'files':[{'path':'keys/$name','content':'x'}]}")" "keys/$name is a file that holds keys"
 done
+row "a key pasted into the task text (meta.ticket) on a repo+ref submit" 2 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'Fix login.\\nlog: token=$GHP'}}")" "meta.ticket:2 GitHub token"
+row "a key in the PR description (meta.pr_body)" 2 "$(j "{'meta':{'repo':'a/b','pr_body':'T=$AWS'}}")" "meta.pr_body:1 AWS access key"
+row "a clean task text passes"                   0 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'Refunds keep the fee.'}}")"
+for k in ticket pr_title pr_body repo_hint language some_new_label; do
+  row "a key in meta.$k is refused" 2 "$(j "{'meta':{'repo':'a/b','ref':'x','$k':'T=$AWS'}}")" "meta.$k:1 AWS access key"
+done
+row "a key in a meta list is refused"            2 "$(j "{'meta':{'repo':'a/b','ticket':['ok','T=$AWS']}}")" "meta.ticket[1]:1 AWS access key"
+row "a key in a nested meta object is refused"   2 "$(j "{'meta':{'repo':'a/b','x':{'y':[{'z':'T=$AWS'}]}}}")" "meta.x.y[0].z:1 AWS access key"
+row "a key as a meta key name is refused"        2 "$(j "{'meta':{'repo':'a/b','$AWS':1}}")" "meta key:1 AWS access key"
+row "meta sent as a string is scanned as text"   2 "$(j "{'meta':'T=$AWS'}")" "meta:1 AWS access key"
+row "a clean meta list passes"                   0 "$(j "{'meta':['a']}")"
+row "a key in another top-level field is refused" 2 "$(j "{'meta':{'repo':'a/b'},'repo_hint':'T=$AWS'}")" "repo_hint:1 AWS access key"
+row "a key in an extra field of a file entry is refused" 2 "$(j "{'files':[{'path':'a.txt','content':'ok','note':'T=$AWS'}]}")" "files[0].note:1 AWS access key"
+row "a key in a file entry's path is refused"       2 "$(j "{'files':[{'path':'logs/T=$AWS.txt','content':'ok'}]}")" "files[0].path:1 AWS access key"
+row "a key as a top-level field name is refused" 2 "$(j "{'meta':{'repo':'a/b'},'$AWS':1}")" "field name:1 AWS access key"
+row "a meta field named note keeps its name in the label" 2 "$(j "{'meta':{'note':'T=$AWS'}}")" "meta.note:1 AWS access key"
+got=$(hook "$(j "{'meta':{'$AWS':{'t':'T=$AWS'}}}")")
+case "$got" in *"$AWS"*) check "a flagged key never reaches a label in full" leaked masked ;; *) check "a flagged key never reaches a label in full" masked masked ;; esac
+row "a content hit under a flagged path is labelled <flagged path>" 2 "$(j "{'diff':'+ok','files':[{'path':'logs/T=$AWS.txt','content':'k=$AWS'}]}")" "<flagged path>:1 AWS access key"
+got=$(hook "$(j "{'diff':'+ok','files':[{'path':'logs/T=$AWS.txt','content':'k=$AWS'}]}")")
+case "$got" in *"$AWS"*) check "a flagged path never reaches a label in full" leaked masked ;; *) check "a flagged path never reaches a label in full" masked masked ;; esac
+row "a key in meta beside a clean diff is refused" 2 "$(j "{'diff':'+ok','meta':{'ticket':'T=$AWS'}}")" "meta.ticket:1 AWS access key"
+row "meta numbers, booleans and null pass"       0 "$(j "{'meta':{'repo':'a/b','pr':58,'draft':False,'ticket':None}}")"
+row "a meta hit says how to go on"               2 "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")" "leave that file or meta field out"
+got=$(hook "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")")
+case "$got" in *"nothing leaves"*|*"Drop those files"*) check "a meta hit is not told that repo+ref sends nothing" bad good ;; *"drops the diff and files only"*) check "a meta hit is not told that repo+ref sends nothing" good good ;; *) check "a meta hit is not told that repo+ref sends nothing" missing good ;; esac
+hook "$(j "{'meta':{'repo':'a/b','ref':'x','ticket':'T=$AWS'}}")" >/dev/null; check "a refused meta records nothing" "$(stamped)" no
+OHMYBUG_SECRET_SCAN=0 row "the scan off lets a key in meta through" 0 "$(j "{'meta':{'repo':'a/b','ticket':'T=$AWS'}}")"
 row "a secret in a deleted file names that file" 2 "$(j "{'diff':'--- a/old.py\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-k = \"$AWS\"\n'}")" "old.py (a removed line) AWS access key"
 row "a diff deleting a key file is refused"      2 "$(j "{'diff':'--- a/certs/old.pem\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-abc\n'}")" "diff changes certs/old.pem"
 row "AWS documentation placeholder passes"      0 "$(j "{'diff':'+k=\"AKIAIOSFODNN7EXAMPLE\"'}")"
 row ".env.example attached passes"              0 "$(j "{'files':[{'path':'.env.example','content':'PORT=3000'}]}")"
 row "a diff touching .env with no secret passes" 0 "$(j "{'diff':'+++ b/.env\n+PORT=3000\n'}")"
 row "clean diff passes"                          0 "$(j "{'diff':'+++ b/a.py\n+print(1)\n'}")"
-row "repo+ref submit has nothing to scan"       0 "$(j "{'meta':{'repo':'o/r','ref':'abc','base_branch':'main'}}")"
+row "a clean repo+ref submit passes"            0 "$(j "{'meta':{'repo':'o/r','ref':'abc','base_branch':'main'}}")"
 row "a removed '-- ' line inside a hunk is scanned" 2 "$(j "{'diff':'--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,1 @@\n--- key $AWS\n x\n'}")" "q.sql (a removed line) AWS access key"
 row "upload=true still reads an inline payload" 2 "$(j "{'upload':True,'diff':'+k=\"$AWS\"'}")" "AWS access key"
 row "upload=true with no payload passes"        0 "$(j "{'upload':True}")"
@@ -88,6 +116,8 @@ drow() { # name, want exit, tool_input JSON, [text the message must hold]
   echo "ok   $1"
 }
 drow "a dispute with a token in a note is refused" 2 "$(j "{'finding_id':'f','claim':'guarded','evidence':[{'path':'ci.sh','line':1,'note':'T=$GHP'}]}")" "evidence[0] note (ci.sh):1 GitHub token"
+drow "a dispute with a token as a field name is refused" 2 "$(j "{'finding_id':'f','claim':'c','$GHP':1}")" "field name:1 GitHub token"
+drow "a dispute value under a flagged field name never shows the name" 2 "$(j "{'finding_id':'f','claim':'c','$GHP':'T=$GHP'}")" "<flagged key>:1 GitHub token"
 drow "a dispute with a token in its finding_id is refused" 2 "$(j "{'finding_id':'$GHP','claim':'c'}")" "GitHub token"
 drow "a finding_id that is not a string names the field" 2 "$(j "{'finding_id':5,'claim':'c'}")" "finding_id must be"
 drow "an evidence item that is not an object names the field" 2 "$(j "{'finding_id':'f','claim':'c','evidence':['src/a.py']}")" "needs a string path"
@@ -317,11 +347,15 @@ PY2
 }
 j "{'diff':'+++ b/app.py\n@@ -1,1 +1,2 @@\n x\n+k = \"$AWS\"\n','files':[]}" > "$FM/hit.json"
 j "{'diff':'+++ b/app.py\n+print(1)\n','files':[{'path':'c.py','content':'x = 1'}]}" > "$FM/clean.json"
+j "{'diff':'','files':[{'path':'logs/T=$AWS.txt','content':'ok'}]}" > "$FM/pathkey.json"
+j "{'diff':'+++ b/logs/T=$AWS.txt\n@@ -0,0 +1,1 @@\n+ok\n','files':[]}" > "$FM/diffname.json"
 j "{'diff':'+print(1)\n','files':[{'path':'c.py','content':'T=$GHP'}]}" > "$FM/ctx.json"
 printf 'not json' > "$FM/bad.json"
 fm "--payload: a key in the diff"              3 payload "$FM/hit.json"   "" "app.py:2 AWS access key"
 fm "--payload: a key in a context file"        3 payload "$FM/ctx.json"   "" "c.py:1 GitHub token"
 fm "--payload: clean"                          0 payload "$FM/clean.json"
+fm "--payload: a key in a file path"           3 payload "$FM/pathkey.json"  "" "file path:1 AWS access key"
+fm "--payload: a key in a diff file name"      3 payload "$FM/diffname.json" "" "diff file name:1 AWS access key"
 fm "--payload: unreadable refuses"             2 payload "$FM/bad.json"
 fm "--payload: a missing file refuses"         2 payload "$FM/none.json"
 err=$(python3 -I "$CORE" --payload "$FM/hit.json" 2>&1)

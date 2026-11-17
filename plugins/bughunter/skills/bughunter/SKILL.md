@@ -538,7 +538,7 @@ line to the user as it stands; do not ask.
 Work down this list and stop at the first rung that applies:
 
 1. **Repo on GitHub, head pushed → send NO payload.** `meta.repo` + `ref` +
-   `base_branch`, empty `diff`, no `files`. Nothing leaves the machine, there is
+   `base_branch`, empty `diff`, no `files`. No code leaves the machine, only `meta` (§Privacy), there is
    no size limit, and the reviewers fetch whatever files they need instead of you
    guessing which to attach. This is the normal path, not an optimisation.
 2. **`diff_required` came back → offer the App install, before packing anything.**
@@ -553,7 +553,7 @@ Work down this list and stop at the first rung that applies:
    merge-gate record: the gate credits no upload. (Only an inline diff, which
    runs in diff mode alone, is credited, and only when it is the whole working
    diff of this tree.) To record the change for the gate, commit, push and hunt it by rung 1 (`ref` = the pushed head sha),
-   which sends nothing. On a fast hunt `upload: true` always hands a ticket,
+   which sends no code. On a fast hunt `upload: true` always hands a ticket,
    even when the server could fetch the commit: it hunts your working copy,
    not the pushed commit, so send it only when rung 1 cannot serve.
    **A payload goes with the repository snapshot.** A hunt runs on the whole
@@ -578,8 +578,7 @@ Work down this list and stop at the first rung that applies:
    and stop.
    **The upload call refused** (Claude Code auto mode, a permission prompt
    answered no, a sandbox): say it once, in one line, and offer to commit and
-   push the change and hunt it by rung 1 instead, which sends nothing from
-   this machine. Say the trade-off with it: only what is committed and pushed
+   push the change and hunt it by rung 1 instead, which sends no code from this machine, only the hunt's labels (the PR's title and description, the briefing, and the task text when there is one). Say the trade-off with it: only what is committed and pushed
    is hunted. Then stop: no reformulated command, no second tool, no inline
    diff. That remedy does not exist for a repository that is not on GitHub, a
    private repository whose owner declined the App, or a folder without git:
@@ -601,15 +600,15 @@ reformulate.
 If the repo lives on GitHub and the head commit is PUSHED, try the zero-payload
 mode FIRST: call `submit_review` with NO diff, NO files, and full `meta`
 including `repo`, `ref` (head sha), `base_branch` (and `pr` number if known),
-plus `pr_title` and `pr_body` (the table below).
+plus `pr_title`, `pr_body` and, when you worked from a ticket or spec, `ticket` (the table below).
 **The route opt-in: `follows`.** On this submit with no `mode` and no `deep`, add
 `follows: "continued_by"` when the watch loop below runs in background `Bash`
 (Claude Code): it follows a routed hunt to the end (§the routed hunt under the
 watch loop). On the `CronCreate` fallback, or in any other runtime, leave
 `follows` out: the hunt then runs as a plain fast hunt. Never send it beside a
 named `mode` or `deep`, and never with another value.
-The server fetches the merge-base diff from GitHub itself – nothing leaves
-the machine, no size limits, no upload step.
+The server fetches the merge-base diff from GitHub itself – no code leaves
+the machine (only `meta`, §Privacy), no size limits, no upload step.
 
 This works in two cases, checked server-side in this order:
 1. The OhMyBug GitHub App is installed on the repo (private or public).
@@ -814,8 +813,27 @@ itself. The `meta` object is REQUIRED plumbing, not garnish – fill it every ti
 | `pr` | PR number, if reviewing a PR | `gh pr view --json number` |
 | `pr_title` | the PR's title; with no PR, the branch's purpose in one line | `gh pr view --json title -q .title` |
 | `pr_body` | the PR's description, verbatim; with no PR, the branch's commit subjects, one per line | `gh pr view --json body -q .body`, else `git log --format=%s <base>..HEAD` |
+| `ticket` | the task this change implements (the paragraph under this table); omit it when there is none | the paragraph under this table |
 | `language`, `framework` | repo facts | what you already know |
 | `repo_hint` | the briefing (below) | composed by you |
+
+**The task (`ticket`).** The text the change was written from, verbatim, up to 8000 characters. The
+reviewers read it as the author's stated task, framed as untrusted data: behaviour it asks for is not
+reported as a bug for being asked, but data or money loss, a security hole or a crash still is.
+- A PR of yours or the user's, hunted as a pushed commit the server reads (rung 1): the issues it closes
+  **in the hunted repository** (`meta.repo`), and only those. With `R` set to `meta.repo`:
+  ```
+  R=<meta.repo> gh pr view --json closingIssuesReferences -q '.closingIssuesReferences[] | select(("\(.repository.owner.login)/\(.repository.name)" | ascii_downcase) == (env.R | ascii_downcase)) | .number'
+  ```
+  then, for each number, `gh issue view <number> -R <meta.repo> --json number,title,body -q '"#\(.number) \(.title)\n\n\(.body)"'`,
+  joined with a `---` line. On rung 1 the server reads this repository itself, so these issues need no
+  question; say in one line which go (`task: #12, #15`). On a payload hunt it does not, and they follow the next rule.
+- Anything else goes in only after the user says yes to that text: an issue of another repository the PR
+  closes (the command above leaves it out; name it and ask once), another tracker, a local document. With
+  no answer, or in a headless run, leave it out. A spec the user handed you for this work and told you to
+  hunt against is already a yes.
+- Omit `ticket` when there is none, when reading it failed (never send an error message as the task), and
+  when you hunt someone else's pull request: its author wrote those issues, and they are not your task.
 
 **The skill sends an empty `diff`, always:** rung 1 sends no payload, and a
 payload goes by upload. An inline `diff` outside diff mode is refused
@@ -830,7 +848,7 @@ or, when it can, fetches the real diff and tells you it overrode you – but the
 rule is simpler than the recovery: **if you are not sending diff bytes, send an
 empty diff.**
 
-### The briefing (`repo_hint`) – the reviewers' only window into intent
+### The briefing (`repo_hint`) – the reviewers' map of the change
 
 Cloud reviewers see code, not conversations. Every number and claim you can
 cheaply collect goes into `repo_hint` (a few paragraphs, ~2000 chars):
@@ -847,10 +865,12 @@ cheaply collect goes into `repo_hint` (a few paragraphs, ~2000 chars):
    logging plugin, a whole dashboard). A briefing that repeats only the body
    tells reviewers that everything else is out of scope, and they will kill
    real findings there as off-topic.
-3. Linked issues: for each `#NNN` referenced by the PR (`gh issue view NNN
-   --json title,body`), one-two sentences – especially observed magnitudes,
-   client timeouts, incident data. A reviewer who knows "clients give up at
-   ~330s" can judge a 300s default; one who doesn't, cannot.
+3. Linked issues the `ticket` does not carry (this repository's issues the PR mentions without closing, or
+   every linked one when you send no `ticket`): for each `#NNN` (`gh issue view NNN --json title,body`),
+   one-two sentences – especially observed magnitudes, client timeouts, incident data. A reviewer who knows
+   "clients give up at ~330s" can judge a 300s default; one who doesn't, cannot. Do not repeat the ticket:
+   the reviewers read it whole. These issues follow the ticket's rule on what may leave the machine: on a payload hunt, and for
+   another repository's, ask first.
 
 This is what separates a calibrated review from a blind one – do not skip
 it to save a minute.
@@ -1721,9 +1741,9 @@ re-submit); or the hook is missing because the installed plugin predates it.
 Say which; do not paper over it.
 
 `SKIP_BUGHUNT=1` belongs to the operator, not to you. You cannot run it – a
-prefix that disables a safety control is what the classifier is there to refuse
-– and carrying it onto an unrelated command is what once made this plugin block
-a ticket comment. If the gate blocks and you cannot hunt, say both facts in one
+prefix that disables a safety control is what the classifier is there to
+refuse – and carrying it onto an unrelated command is what once made this
+plugin block a ticket comment. If the gate blocks and you cannot hunt, say both facts in one
 line and stop; the person reading has the hatch, and it is theirs to use.
 
 ### 8. Money states
@@ -1814,8 +1834,12 @@ branch.
 
 ## Privacy
 
-A hunt of a pushed commit (rung 1) sends nothing from this machine: the
-server reads the commit. A payload hunt sends the most: a snapshot of the
+This section is the one statement of what leaves the machine; "no code" anywhere else in this skill means
+exactly this. Every hunt sends `meta`, the labels you write: the repository's name, the ref and base branch,
+the PR's number, title and description, the briefing (`repo_hint`) and, when you send one, the task
+(`ticket`): the bodies of this repository's issues the PR closes, or the spec the user gave you. Keep credentials
+out of what you write into `meta`: the plugin's secret scan does not run everywhere. What may go into `ticket` without a question is the task paragraph's rule. A hunt of a pushed commit (rung 1) sends no code: the server reads the commit, and `meta` is all
+that goes. A payload hunt sends the most: a snapshot of the
 working copy (without ignored files, secret-named files such as `.env*`,
 `*.pem` or `.ssh/`, and submodules; LFS files as their pointers) plus the
 diff, both scanned for credentials first. A snapshot file the scan flags is

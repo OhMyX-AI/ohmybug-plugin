@@ -190,7 +190,7 @@ repository per week, and is not a merge gate.
   the final diff was hunted (skip once with `SKIP_BUGHUNT=1`; review fixes
   change the diff and re-arm the gate).
 - `/bughunter:review` (or just ask to "hunt bugs") hunts the pushed commit
-  with nothing uploaded, or sends the diff with a snapshot of the working
+  with no code uploaded (only the hunt's labels: the PR title and description, the briefing, the task), or sends the diff with a snapshot of the working
   copy; one line says what leaves the machine and what is left out.
 - An orchestrated fleet of adversarial reviewers hunts on OhMyBug's models.
   Only findings that survive triage come back.
@@ -214,13 +214,14 @@ repository per week, and is not a merge gate.
   secret-named files are left out of the diff too. A payload it cannot read is
   refused too, and without `python3` nothing is uploaded. The same scan refuses
   a `submit_review` or `provide_files` that carries a credential; there,
-  without `python3`, it cannot run and lets the call through unscanned (an
-  inline diff-mode submit, a `provide_files` answer), saying so in a system
+  without `python3`, it cannot run and lets the call through unscanned (any
+  submit, the text in its `meta` included, and a `provide_files` answer), saying so in a system
   message. A `challenge_finding` (a dispute, offered to some keys only) is
   held to tracked files of this repository and lines that exist in them, and
   every string it carries is scanned; without `python3` it is refused, and its
-  path checks run even with the scan turned off. Not scanned: submits that send no payload (repo + ref) have
-  nothing to scan; it does not run on Windows; and a key the patterns miss,
+  path checks run even with the scan turned off. Every string in a submit's `meta` (the task, the PR title and
+  description, the briefing) is scanned too, on a repo + ref submit as well. What the scan misses: it does not
+  run on Windows, and a key the patterns miss,
   under a name off the list, is sent. The account's diff mode on
   `/me/policy` sends the diff without the snapshot. When a fast hunt's
   ticket asks for a partial copy, the snapshot holds only the changed files,
@@ -299,7 +300,7 @@ Turn the mod off with
 
 | Tool | In | Out |
 |---|---|---|
-| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?}`, `upload?` (send the payload out of band), `mode?` (`lite`, `snap` or `fast`; absent: fast, or a routed first step that may go on to fast, see above) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}`; with `upload: true`, also `upload_url`, `snapshot` and, on a fast hunt, maybe `pack: "partial"` (`required`: POST the repository snapshot to `<upload_url>/repo` first, then `{diff, files}` to `upload_url`; with `pack: "partial"` the upload script posts a partial copy to `<upload_url>/repo?pack=partial`; `off`: diff mode, the payload alone) |
+| `submit_review` | `diff`, `files[{path, content}]`, `meta{language?, base_branch?, repo?, ref?, pr_title?, pr_body?, ticket?}` (`ticket`: the task the change implements, read as the author's stated intent), `upload?` (send the payload out of band), `mode?` (`lite`, `snap` or `fast`; absent: fast, or a routed first step that may go on to fast, see above) | `{review_id, status, mode, hunt_mode, pending_verdicts[]}`; with `upload: true`, also `upload_url`, `snapshot` and, on a fast hunt, maybe `pack: "partial"` (`required`: POST the repository snapshot to `<upload_url>/repo` first, then `{diff, files}` to `upload_url`; with `pack: "partial"` the upload script posts a partial copy to `<upload_url>/repo?pack=partial`; `off`: diff mode, the payload alone) |
 | `get_findings` | `review_id` | `{status: running\|needs_files\|done\|failed, findings[{finding_id, severity, file, line?, title, failure_scenario, suggested_fix?}]}` |
 | `provide_files` | `review_id`, `paths[]` (Claude Code: the plugin's hook reads them from disk) or `files[{path, content}]` | `{status, delivered}` |
 | `challenge_finding` (some keys only) | `finding_id`, `claim`, `evidence[{path, line?, note?}]` (at most 5) | `{outcome: WITHDRAWN\|DOWNGRADED_LOW\|HELD\|null, message, check?}` |

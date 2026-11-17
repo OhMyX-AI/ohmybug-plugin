@@ -1,5 +1,5 @@
 #!/bin/bash
-# Refuse a submit_review whose inline payload carries a credential, and a challenge_finding (a dispute) that quotes
+# Refuse a submit_review whose payload or any other text it carries (meta on every submit) holds a credential, and a challenge_finding (a dispute) that quotes
 # one or cites a path git does not list in this repository.
 #
 # Why a shell hook and not the Claude Code mod: a check that only some clients
@@ -11,7 +11,8 @@
 # shapes: high-signal ones only, every value masked. This hook reads the call.
 #
 # It reads whatever payload the call carries: submit_review's diff and files,
-# provide_files' files, every string of a challenge_finding. A repo+ref submit carries none, so nothing is read.
+# provide_files' files, every string of a challenge_finding, and every other field of a call (a submit's meta, sent on
+# every submit, a repo+ref one included).
 #
 # It also FILLS provide_files' `paths`: the agent names the requested files,
 # and this hook reads them from disk and hands the call on with their contents
@@ -82,6 +83,26 @@ def stop(rc, msg):
     sys.stdout.buffer.write((msg + "\n").encode("utf-8"))
     sys.stdout.flush()
     sys.exit(rc)
+
+# Every string under a value, with a label that says where it sits. Scanned by content only (scan, not
+# scan_payload): a label is not a file name, so it never meets the key-file check. A dict key is a string too.
+# A key that itself looks like a credential never goes into a label in full: the label is printed.
+def named(k):
+    kh = []
+    scan(kh, "", str(k))
+    return "<flagged key>" if kh else str(k)
+
+def collect(v, where, flat=False):
+    if isinstance(v, str):
+        dstrings.append((where, v))
+    elif isinstance(v, dict):
+        for k, x in v.items():
+            dstrings.append((where + " key", k))
+            collect(x, where if flat and k in ("note", "claim") else "%s.%s" % (where, named(k)), flat)
+    elif isinstance(v, list):
+        for i, x in enumerate(v):
+            collect(x, "%s[%d]" % (where, i), flat)
+
 
 # The selection rules of the files_url recipe the server hands out: the git top level of
 # the session directory, a regular file whose path git lists as tracked or
@@ -188,28 +209,28 @@ if str(d.get("tool_name") or "").endswith("__challenge_finding"):
             bad.append("%s (line %d is past its end)" % (e["path"], e["line"]))
     if bad:
         stop(6, "\n".join("  - " + p for p in bad))
-    # Scanned by content only (scan, not scan_payload): a label is not a file name, so it never meets the key-file check.
-    def collect(v, where):
-        if isinstance(v, str):
-            dstrings.append((where, v))
-        elif isinstance(v, dict):
-            for k, x in v.items():
-                collect(x, where if k in ("note", "claim") else "%s.%s" % (where, k))
-        elif isinstance(v, list):
-            for i, x in enumerate(v):
-                collect(x, "%s[%d]" % (where, i))
-
     for k, v in ti.items():
+        dstrings.append(("field name", k))
         if k != "evidence":
-            collect(v, k)
+            collect(v, named(k), True)
     for i, e in enumerate(ev):
-        collect({k: v for k, v in e.items() if k != "path"}, "evidence[%d] note (%s)" % (i, e["path"]))
+        collect({k: v for k, v in e.items() if k != "path"}, "evidence[%d] note (%s)" % (i, e["path"]), True)
     ti = {}
 if os.environ.get("OHMYBUG_SECRET_SCAN", "1") == "0":
     ti, dstrings = {}, []
 
 hits = []
 scan_payload(hits, ti)
+# Every other string the call carries leaves the machine too (meta on every submit, a repo+ref one included), so
+# each is read whatever its key, shape and depth: no list of known keys to fall behind the server.
+for k, v in ti.items():
+    dstrings.append(("field name", k))
+    if k not in ("diff", "files"):
+        collect(v, named(k))
+# scan_payload reads the content of a file entry and checks its path against key-file names; every other field, the path text included, is read here.
+for i, f in enumerate(ti.get("files") or []):
+    if isinstance(f, dict):
+        collect({k: v for k, v in f.items() if k != "content"}, "files[%d]" % i)
 for where, text in dstrings:
     scan(hits, where, text)
 
@@ -257,7 +278,7 @@ if [ "$rc" != 3 ] || [ -z "$OUT" ]; then
     case "$INPUT" in
       *'__provide_files"'*) echo "Call provide_files again for the same review (do not start a new hunt for this), or set OHMYBUG_SECRET_SCAN=0 to skip the scan." ;;
       *'__challenge_finding"'*) echo "Dispute again, or judge the finding without a dispute." ;;
-      *) echo "Resend it, or set OHMYBUG_SECRET_SCAN=0 to skip the scan. A submit with meta.repo + meta.ref and no payload has nothing to scan." ;;
+      *) echo "Resend it, or set OHMYBUG_SECRET_SCAN=0 to skip the scan." ;;
     esac
   } >&2
   exit 2
@@ -268,7 +289,7 @@ fi
   case "$INPUT" in
     *'__provide_files"'*) echo "Call provide_files again for the same review without those files (or with each value replaced by [REDACTED]); an empty list is a valid answer. Do not start a new hunt for this." ;;
     *'__challenge_finding"'*) echo "Dispute again with each value named instead of quoted, or judge the finding without a dispute." ;;
-    *) echo "Drop those files or replace each value with [REDACTED], then submit again. Or submit with meta.repo + meta.ref and no payload: the server reads the pushed commit and nothing leaves this machine." ;;
+    *) echo "Replace each value with [REDACTED] where it is named above, or leave that file or meta field out, then submit again. The text in meta (the task, the PR title and description, the briefing) is sent on every submit: a submit with meta.repo + meta.ref and no payload drops the diff and files only." ;;
   esac
 } >&2
 exit 2
