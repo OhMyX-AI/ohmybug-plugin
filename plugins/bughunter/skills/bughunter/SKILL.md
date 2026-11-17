@@ -1741,9 +1741,9 @@ re-submit); or the hook is missing because the installed plugin predates it.
 Say which; do not paper over it.
 
 `SKIP_BUGHUNT=1` belongs to the operator, not to you. You cannot run it – a
-prefix that disables a safety control is what the classifier is there to refuse
-– and carrying it onto an unrelated command is what once made this plugin block
-a ticket comment. If the gate blocks and you cannot hunt, say both facts in one
+prefix that disables a safety control is what the classifier is there to
+refuse – and carrying it onto an unrelated command is what once made this
+plugin block a ticket comment. If the gate blocks and you cannot hunt, say both facts in one
 line and stop; the person reading has the hatch, and it is theirs to use.
 
 ### 8. Money states
