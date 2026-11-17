@@ -17,7 +17,7 @@ holds), $12 for a deep hunt you choose ($24 on a wide change), minor findings
 free, first review free.
 
 - **Lite review** and **snap review**: the price `get_balance` lists, where the service runs them
-- **Fast review** · $4 · finds 72.4% of known bugs on our [OMBench](https://ohmybug.ai/bench/) benchmark · up to 15 minutes
+- **Fast review** · $4 · finds 76.5% of known bugs on our [OMBench](https://ohmybug.ai/bench/) benchmark · up to 15 minutes
 - **Deep review** · $12 ($24 on a wide change) · finds 86.1% of known bugs on our [OMBench](https://ohmybug.ai/bench/) benchmark · up to 2 hours
 
 Pick a mode for one hunt with `/bughunter:review lite` (or `snap`, `fast`); without one, on a pushed commit the service may start with a first step (snap, or lite on accounts set to lite), and a fast review follows when that step finds no medium or worse bug ([how it works](https://ohmybug.ai/modes/#route)); uncommitted work, a payload hunt (diff + snapshot by upload) and a change the first step cannot take get the fast review. Lite and snap read the repository, so they need a pushed GitHub commit the service can read, and snap a diff under 1 MB. `/bughunter:stats` lists the modes the service runs for your key.
