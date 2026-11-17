@@ -70,6 +70,14 @@ chmod +x "$HOME/ghshim/gh"
 export PATH="$HOME/ghshim:$PATH"
 printf 'gate-test scratch %s\n' "$$" > "$SCRATCH"
 git add -N "$SCRATCH" 2>/dev/null || true
+# Every block row needs an origin base: without one the gate stands down by
+# design ("no origin base here"), and all of them read as a pass-through. A
+# clone whose origin shares no history with HEAD (a stale remote after a repo
+# move, #59) failed all 82 rows with no word of why. Say it once instead.
+if ! (. "$G/diff-id.sh" && ohmybug_base >/dev/null); then
+  printf 'gate-test: this checkout has no origin base (origin/HEAD, origin/main and origin/master share no history with HEAD), so the gate stands down on every row. Run it in a fresh clone, or point origin at the live repository.\n' >&2
+  exit 1
+fi
 
 mk() { python3 -c "import json,sys;print(json.dumps({'tool_input':{'command':sys.argv[1]},'cwd':sys.argv[2]}))" "$1" "$2"; }
 t() {
