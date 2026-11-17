@@ -122,17 +122,20 @@ session() {
   wait "$pid" 2>/dev/null || true
 }
 
-# delivered <line> <texts>: what the agent got instead (#62), the text around the line's longest delivered prefix,
-# JSON-quoted so an invisible change shows.
+# delivered <line> <texts>: a window of what the agent got (#62), 80 characters up to the end of the line's longest
+# delivered prefix and 160 after it. JSON-quoted with every non-ASCII character as \uXXXX, so an invisible change
+# (a no-break or zero-width space) shows. A prefix under 12 characters is too short to anchor and is not shown.
+# Best effort: it never fails the check.
 delivered() {
   node -e '
     const [line, t] = [process.argv[1], require("fs").readFileSync(process.argv[2], "utf8")];
+    const q = s => JSON.stringify(s).replace(/[^\x20-\x7e]/g, c => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
     let n = line.length;
     while (n > 0 && !t.includes(line.slice(0, n))) n--;
-    if (n === 0) { console.log("  delivered: no prefix of it reached the agent"); process.exit(0); }
+    if (n < 12) { console.log("  delivered: only " + n + " leading characters matched; the change is at the line start"); process.exit(0); }
     const at = t.indexOf(line.slice(0, n)) + n;
-    console.log("  delivered: " + JSON.stringify(t.slice(Math.max(0, at - 80), at)) + " <then> " + JSON.stringify(t.slice(at, at + 160)));
-  ' "$1" "$2"
+    console.log("  delivered: " + q(t.slice(Math.max(0, at - 80), at)) + " <then> " + q(t.slice(at, at + 160)));
+  ' -- "$1" "$2" || true
 }
 
 # check <checkout>: prints what fails; 0 when both checks pass.
@@ -194,7 +197,7 @@ if [ -n "$self_test" ]; then
   printf '\n```bash\ncanary() { echo "$1"; }\n```\n' >>"$copy/plugins/bughunter/skills/bughunter/SKILL.md"
   out=$(check "$copy" || true)
   grep -q 'altered: canary' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, the argument substitution passed"; exit 1; }
-  grep -q '  delivered: .*<then>' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, an altered line did not show what was delivered"; exit 1; }
+  grep -qF 'canary() { echo \"" <then> ' <<<"$out" ||{ echo "$out"; echo "prompt-check self-test ($v): FAILED, an altered line did not show what was delivered"; exit 1; }
   grep -q 'warning on this command' <<<"$out" || { echo "$out"; echo "prompt-check self-test ($v): FAILED, the brace warning passed"; exit 1; }
   echo "prompt-check self-test ($v): ok"
 else
