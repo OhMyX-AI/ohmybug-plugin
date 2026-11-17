@@ -95,6 +95,7 @@ for want in \
   'Sends `hunt_mode: "snap"`' \
   'Sends `hunt_mode: "fast"`' \
   'Sends `hunt_mode: "auto"`' \
+  'Not asked when `get_balance` `policy` has no `test_gaps`' \
   'finds ~<found_pct>% of known bugs (our benchmark)' \
   'with a `get_balance` `route`' \
   'This question has no Skip' \
@@ -104,6 +105,8 @@ for want in \
   'The marker stays written.'; do
   case $SEC in *"$want"*) ;; *) fail "S skill setup text lost: $want" ;; esac
 done
+# The test-gaps options with their own values: blocking first, recommended, then not_block (a swap would stop billing).
+printf '%s' "$SEC" | grep -q 'Block the merge (recommended)[^-]*Sends `test_gaps: "block"`.*Show them, but don.t block.*Sends `test_gaps: "not_block"`' && ok "S test gaps options: block first and recommended, each sends its own value" || fail "S test gaps option values"
 # The stories options in this order, private first.
 printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publish them, signed with my GitHub name.*Publish them unsigned.*Don.t write them' && ok "S stories options: private first and recommended, then signed, unsigned, off" || fail "S stories option order"
 # Plugin text never names the reward itself.

@@ -405,8 +405,9 @@ nothing and say nothing about it. Then answer what the user asked.
        fixes them before the merge, and a confirmed one is charged." Sends
        `test_gaps: "block"`.
      - "Show them, but don't block": "Listed in their own section after the
-       other findings. They do not block the merge and are not charged."
-       Sends `test_gaps: "not_block"`.
+       other findings. They do not block the merge and are not charged,
+       unless your agent finds the code itself failing." Sends
+       `test_gaps: "not_block"`.
      - "Skip (keep the current setting)".
 4. A skipped question, or a dismissed dialog, sends nothing for its fields.
 5. Run `bash '<skill_dir>/../../hooks/intro.sh' done`: it writes this
@@ -1356,8 +1357,9 @@ only evidence the hunt was real. Never paraphrase it into "all good".
 or weak test; the code itself does what it should). Show those after the
 other findings, under "Test gaps", and say how many there are. One that also
 carries `reported_severity` was delivered as `low` by the user's setting
-(`test_gaps: "not_block"`): it does not block the merge and is not charged.
-Say so once, with its reported severity beside it.
+(`test_gaps: "not_block"`): it does not block the merge and is not charged,
+unless your verdict raises it (step 4). Say so once for the section, and put
+each one's reported severity beside it.
 
 ### 4. Verify each finding honestly
 
@@ -1376,11 +1378,12 @@ consequence, and say why in `reason` – the finder's original is kept
 alongside. Severity describes the CONSEQUENCE, not the finding's category: a
 missing test whose mutation reopens a security hole, loses data or misbills
 is `critical`/`high`, never "just a test gap". Correct downward just as
-readily when the failure turns out to need an unreachable state. A finding
-delivered `low` with `reported_severity` (a test gap under the user's
-`test_gaps: "not_block"`) stays `low` unless your trace shows the production
-code failing today: then it is not a test gap, and the severity you set is
-what blocks and bills. Anything a
+readily when the failure turns out to need an unreachable state. For a test gap
+the user's setting wins over that rule: a finding delivered `low` with
+`reported_severity` (the user chose `test_gaps: "not_block"`) stays `low`, even
+when the missing test guards a sensitive path, unless your trace shows the
+production code itself failing today. Then it is not a test gap, and the
+severity you set is what blocks and bills. Anything a
 reviewer would block a merge over (`critical`/`high`/`medium`) makes the
 review billable unless it is a `medium` marked `known` (below), `low` is free – so this decision is the bill, and the user
 sees the table before you send it.
