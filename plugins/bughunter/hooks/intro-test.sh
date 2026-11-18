@@ -111,6 +111,8 @@ done
 printf '%s' "$SEC" | grep -q 'Block the merge (recommended)[^-]*Sends `test_gaps: "block"`.*Show them, but don.t block.*Sends `test_gaps: "not_block"`' && ok "S test gaps options: block first and recommended, each sends its own value" || fail "S test gaps option values"
 # The docs options with their own values, blocking first and recommended.
 printf '%s' "$SEC" | tr '\n' ' ' | grep -q 'Block the merge (recommended)[^-]*Sends `docs_findings: "block"`.*Show them, but don.t block.*Sends `docs_findings: "not_block"`' && ok "S docs options: block first and recommended, each sends its own value" || fail "S docs option values"
+# The Notes section of the result: last, counted, never blocking or charged, a raising verdict makes it regular.
+tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -q 'A finding marked `kind: "note"` is a `low` that names no input or state that goes wrong on the code as it is.*Show those last, in their own section under "Notes".*They never block the merge and are not charged.*a verdict that raises one to `medium` or worse makes it a regular finding' && ok "R notes: last, own section, not blocking, not charged, raised = regular" || fail "R notes section"
 # The stories options in this order, private first.
 printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publish them, signed with my GitHub name.*Publish them unsigned.*Don.t write them' && ok "S stories options: private first and recommended, then signed, unsigned, off" || fail "S stories option order"
 # Plugin text never names the reward itself.
