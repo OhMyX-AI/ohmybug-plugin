@@ -1401,6 +1401,14 @@ own section after the test gaps, under "Docs findings", and say how many there
 are. One that also carries `reported_severity` was delivered as `low` by the
 user's setting (`docs_findings: "not_block"`), with the same rule as a test gap.
 
+**Notes.** A finding marked `kind: "note"` is a `low` that names no input or
+state that goes wrong on the code as it is: hardening against something no
+caller does today, a latent risk, style, a suggestion. Show those last, in
+their own section under "Notes", and say how many there are. A note does not
+block the merge and is not charged. Judge it like any `low` (step 4); a verdict
+that raises one to `medium` or worse makes it a regular finding, shown with
+the others.
+
 ### 4. Verify each finding honestly
 
 For every finding: open the referenced files, trace the failure scenario the
@@ -1427,7 +1435,10 @@ severity you set is what blocks and bills. The same holds for a docs finding
 delivered `low` under `docs_findings: "not_block"`: it stays `low` unless your
 trace shows the code itself wrong, or the text is one your product shows or
 sends its users (a screen, a message, an email, a generated file). Then it is
-not a docs finding, and the severity you set is what blocks and bills. Anything a
+not a docs finding, and the severity you set is what blocks and bills.
+A note is graded like any other finding: when your trace finds an input or
+state that goes wrong today, it is no longer a note, and it gets the severity
+its consequence earns, which may still be `low`. Anything a
 reviewer would block a merge over (`critical`/`high`/`medium`) makes the
 review billable unless it is a `medium` marked `known` (below), `low` is free – so this decision is the bill, and the user
 sees the table before you send it.

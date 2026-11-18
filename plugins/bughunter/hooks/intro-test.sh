@@ -111,6 +111,18 @@ done
 printf '%s' "$SEC" | grep -q 'Block the merge (recommended)[^-]*Sends `test_gaps: "block"`.*Show them, but don.t block.*Sends `test_gaps: "not_block"`' && ok "S test gaps options: block first and recommended, each sends its own value" || fail "S test gaps option values"
 # The docs options with their own values, blocking first and recommended.
 printf '%s' "$SEC" | tr '\n' ' ' | grep -q 'Block the merge (recommended)[^-]*Sends `docs_findings: "block"`.*Show them, but don.t block.*Sends `docs_findings: "not_block"`' && ok "S docs options: block first and recommended, each sends its own value" || fail "S docs option values"
+# The Notes paragraph of the result (bounded to it): last, counted, not blocking or charged, judged, raised = regular.
+NOTES=$(awk '/^\*\*Notes\.\*\*/,/^$/' "$G/../skills/bughunter/SKILL.md" | tr '\n' ' ' | tr -s ' ')
+for want in \
+  'A finding marked `kind: "note"` is a `low` that names no input or state that goes wrong on the code as it is' \
+  'Show those last, in their own section under "Notes", and say how many there are.' \
+  'A note does not block the merge and is not charged.' \
+  'Judge it like any `low` (step 4)' \
+  'a verdict that raises one to `medium` or worse makes it a regular finding'; do
+  case "$NOTES" in *"$want"*) ok "R notes: $want" ;; *) fail "R notes paragraph lacks: $want" ;; esac
+done
+# Step 4: a note is graded by its consequence, never raised just because a failing input exists.
+tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'A note is graded like any other finding: when your trace finds an input or state that goes wrong today, it is no longer a note, and it gets the severity its consequence earns, which may still be `low`.' && ok "R notes: step 4 grades a note by its consequence" || fail "R notes step 4 rule"
 # The stories options in this order, private first.
 printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publish them, signed with my GitHub name.*Publish them unsigned.*Don.t write them' && ok "S stories options: private first and recommended, then signed, unsigned, off" || fail "S stories option order"
 # Plugin text never names the reward itself.
