@@ -1401,6 +1401,13 @@ own section after the test gaps, under "Docs findings", and say how many there
 are. One that also carries `reported_severity` was delivered as `low` by the
 user's setting (`docs_findings: "not_block"`), with the same rule as a test gap.
 
+**Findings delivered as low.** A finding that carries `reported_severity` but
+neither `kind` nor `second_read` was delivered as `low`; the field is the
+severity it was first reported with. It does not block the merge and is not
+charged unless your verdict raises its severity. Show it with the other
+findings, its reported severity beside it, and judge it like any other finding
+(step 4).
+
 **Notes.** A finding marked `kind: "note"` is a `low` that names no input or
 state that goes wrong on the code as it is: hardening against something no
 caller does today, a latent risk, style, a suggestion. Show those last, in
@@ -1436,6 +1443,9 @@ delivered `low` under `docs_findings: "not_block"`: it stays `low` unless your
 trace shows the code itself wrong, or the text is one your product shows or
 sends its users (a screen, a message, an email, a generated file). Then it is
 not a docs finding, and the severity you set is what blocks and bills.
+A finding delivered `low` with `reported_severity` and neither `kind` nor
+`second_read` is the other way round: judge it like any other finding, and if it
+is real at the severity it was first reported with, raise it to that severity.
 A note is graded like any other finding: when your trace finds an input or
 state that goes wrong today, it is no longer a note, and it gets the severity
 its consequence earns, which may still be `low`. Anything a
