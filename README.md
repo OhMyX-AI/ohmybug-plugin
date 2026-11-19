@@ -197,9 +197,10 @@ repository per week, and is not a merge gate.
 - Your own agent verifies each finding against your codebase and reports
   REAL / NOT_REAL / UNCLEAR. You see and approve the verdicts.
 - Billing: one flat price per review with confirmed real bugs — one or ten,
-  same price: $4 fast (a lite or snap hunt: the price `get_balance` `modes` lists), $12 deep, $24 deep on a wide change (11+ folder chunks). Minor findings, review runs and false positives — $0; an unclear medium or worse is free at confirm but, like one nobody judged, is charged at the hunt's deadline;
+  same price: $4 fast (a lite or snap hunt: the price `get_balance` `modes` lists), $12 deep, $24 deep on a wide change (11+ folder chunks). Minor findings, review runs and false positives — $0,
   and so is a real medium you already deferred or accepted in your own ticket, once your agent marks it known
-  (a hunt billed on CI, or one already billed at its deadline, stays charged).
+  (a hunt billed on CI, or one already billed at its deadline, stays charged). An unclear medium or worse is
+  free at confirm but, like one nobody judged, is charged at the hunt's deadline.
 - `/bughunter:stats` shows your record: bugs found, reviews run, balance.
 - Before a diff or file contents leave your machine, a secret scan looks for
   credentials (vendor-prefixed tokens, private keys, key files) and names the

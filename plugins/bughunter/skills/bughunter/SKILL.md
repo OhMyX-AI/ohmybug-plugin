@@ -1434,7 +1434,10 @@ finding describes, and decide:
   stays unmergeable whatever the finding's severity, a `low` or a note
   included. Where this skill says a finding does not block the merge, that
   holds for `REAL` and `NOT_REAL`. Trace further or ask the user before you
-  send one.
+  send one. When you do send one, say before the user approves the table that
+  it keeps the hunt unmergeable until a new hunt of the head and, on a hunt
+  whose `get_findings` showed `silent_bill`, that a `medium` or worse one is
+  charged at the hunt's deadline (honesty rules below).
 
 **Severity is yours to correct.** The cloud reviewer priced each finding
 without ever seeing the real codebase; you just traced it. `severity` goes
