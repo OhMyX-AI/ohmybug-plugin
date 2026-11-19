@@ -123,6 +123,19 @@ for want in \
 done
 # Step 4: a note is graded by its consequence, never raised just because a failing input exists.
 tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'A note is graded like any other finding: when your trace finds an input or state that goes wrong today, it is no longer a note, and it gets the severity its consequence earns, which may still be `low`.' && ok "R notes: step 4 grades a note by its consequence" || fail "R notes step 4 rule"
+# The Second read paragraph (bounded to it): the why beside it, its own section, the result's severity decides.
+SR=$(awk '/^\*\*Second read\.\*\*/,/^$/' "$G/../skills/bughunter/SKILL.md" | tr '\n' ' ' | tr -s ' ')
+for want in \
+  'A finding that carries `second_read` was read a second time against the code: show its `why` beside it.' \
+  'was lowered to `low` by the second read, whatever else it carries' \
+  'in its own section, "Likely not a defect", after the docs findings and before the notes, whatever its `kind`, with its `reported_severity` when it carries one.' \
+  'Its `severity` in the result already says whether it blocks and is charged, so judge it like any finding (step 4).'; do
+  case "$SR" in *"$want"*) ok "R second read: $want" ;; *) fail "R second read paragraph lacks: $want" ;; esac
+done
+# The paragraph restates no account setting, and the skill names second_read nowhere else (a restatement invents rules).
+case "$SR" in *not_block*|*test_gaps*|*docs_findings*) fail "R second read paragraph restates a setting" ;; *) ok "R second read: no setting restated" ;; esac
+n=$(grep -o 'second_read' "$G/../skills/bughunter/SKILL.md" | wc -l | tr -d ' ')
+[ "$n" = 1 ] && ok "R second read: named once in the skill" || fail "R second read named $n times in the skill"
 # The stories options in this order, private first.
 printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publish them, signed with my GitHub name.*Publish them unsigned.*Don.t write them' && ok "S stories options: private first and recommended, then signed, unsigned, off" || fail "S stories option order"
 # Plugin text never names the reward itself.

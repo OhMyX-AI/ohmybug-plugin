@@ -1401,6 +1401,14 @@ own section after the test gaps, under "Docs findings", and say how many there
 are. One that also carries `reported_severity` was delivered as `low` by the
 user's setting (`docs_findings: "not_block"`), with the same rule as a test gap.
 
+**Second read.** A finding that carries `second_read` was read a second time
+against the code: show its `why` beside it. One with
+`says: "likely_not_a_defect"` was lowered to `low` by the second read, whatever
+else it carries: show it in its own section, "Likely not a defect", after the
+docs findings and before the notes, whatever its `kind`, with its
+`reported_severity` when it carries one. Its `severity` in the result already
+says whether it blocks and is charged, so judge it like any finding (step 4).
+
 **Notes.** A finding marked `kind: "note"` is a `low` that names no input or
 state that goes wrong on the code as it is: hardening against something no
 caller does today, a latent risk, style, a suggestion. Show those last, in
