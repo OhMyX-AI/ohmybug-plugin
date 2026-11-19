@@ -1407,7 +1407,8 @@ severity it was first reported with. It does not block the merge and is not
 charged unless your verdict raises its severity. Show it with the other
 findings, its reported severity beside it; say once that these do not block and
 are not charged unless your verdict raises them. Judge it like any other
-finding (step 4).
+finding (step 4). A finding that carries `second_read` was read a second time
+against the code; the tool's own description says how to show it.
 
 **Notes.** A finding marked `kind: "note"` is a `low` that names no input or
 state that goes wrong on the code as it is: hardening against something no
@@ -1448,7 +1449,9 @@ A finding delivered `low` with `reported_severity` and neither `kind` nor
 `second_read` is the other way round: judge it like any other finding and set
 the severity its consequence earns, starting from the one it was first reported
 with. A finding first reported `high` that is really a `medium` is raised to
-`medium`; one that is really a `low` stays `low`.
+`medium`; one that is really a `low` stays `low`. Always pass that `severity`
+in its verdict, even when it equals the first-reported one: a `REAL` sent
+without it leaves the finding `low`.
 A note is graded like any other finding: when your trace finds an input or
 state that goes wrong today, it is no longer a note, and it gets the severity
 its consequence earns, which may still be `low`. Anything a
