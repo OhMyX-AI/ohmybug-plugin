@@ -1390,7 +1390,7 @@ only evidence the hunt was real. Never paraphrase it into "all good".
 **Test gaps.** A finding marked `kind: "test"` is only about tests (a missing
 or weak test; the code itself does what it should). Show those after the
 other findings, under "Test gaps", and say how many there are. One that also
-carries `reported_severity`, and no `second_read`, was delivered as `low` by the user's setting
+carries `reported_severity` was delivered as `low` by the user's setting
 (`test_gaps: "not_block"`): it does not block the merge and is not charged,
 unless your verdict raises it (step 4). Say so once for the section, and put
 each one's reported severity beside it.
@@ -1398,29 +1398,16 @@ each one's reported severity beside it.
 **Docs findings.** A finding marked `kind: "docs"` is only about documentation
 or code comments (the code itself does what it should). Show those in their
 own section after the test gaps, under "Docs findings", and say how many there
-are. One that also carries `reported_severity`, and no `second_read`, was
-delivered as `low` by the user's setting (`docs_findings: "not_block"`), with the same rule as a test gap.
+are. One that also carries `reported_severity` was delivered as `low` by the
+user's setting (`docs_findings: "not_block"`), with the same rule as a test gap.
 
 **Second read.** A finding that carries `second_read` was read a second time
-against the code. `why` is the reason, and it names the place; `at` is that
-place, a file of the change, with a line when the change shows the file has
-that line, or null.
-- `says: "likely_not_a_defect"`: the finding arrives as `low`. Show those in
-  their own section, under "Likely not a defect", after the docs findings and
-  before the notes. Such a finding goes there whatever its `kind`, not under
-  "Test gaps", "Docs findings" or "Notes", and its `reported_severity` comes
-  from the second read, not from a setting. Say how many there are, and put
-  each one's `why` beside it, with its `reported_severity` when it carries one
-  (it was reported as `medium` or worse). Say once for the section that these
-  do not block the merge and are not charged. A verdict that raises one to
-  `medium` or worse makes it a regular finding, shown with the others.
-- `says: "doubted"`: the finding keeps its severity and blocks and is charged
-  exactly as it would without the doubt. Show it where it would be without the
-  doubt, with its `why` ("A second read doubts this: ...") beside it.
-- Any other `says`: show the finding as it stands, with its `why` beside it.
-
-Judge every one like any finding (step 4). A finding with no `second_read` is
-shown as before.
+against the code: show its `why` beside it. One with
+`says: "likely_not_a_defect"` was lowered to `low` by the second read, whatever
+else it carries: show it in its own section, "Likely not a defect", after the
+docs findings and before the notes, whatever its `kind`, with its
+`reported_severity` when it carries one. Its `severity` in the result already
+says whether it blocks and is charged, so judge it like any finding (step 4).
 
 **Notes.** A finding marked `kind: "note"` is a `low` that names no input or
 state that goes wrong on the code as it is: hardening against something no
@@ -1449,19 +1436,14 @@ missing test whose mutation reopens a security hole, loses data or misbills
 is `critical`/`high`, never "just a test gap". Correct downward just as
 readily when the failure turns out to need an unreachable state. For a test gap
 the user's setting wins over that rule: a finding delivered `low` with
-`reported_severity` and no `second_read` (the user chose `test_gaps: "not_block"`) stays `low`, even
+`reported_severity` (the user chose `test_gaps: "not_block"`) stays `low`, even
 when the missing test guards a sensitive path, unless your trace shows the
 production code itself failing today. Then it is not a test gap, and the
 severity you set is what blocks and bills. The same holds for a docs finding
-delivered `low` under `docs_findings: "not_block"` (no `second_read`): it stays `low` unless your
+delivered `low` under `docs_findings: "not_block"`: it stays `low` unless your
 trace shows the code itself wrong, or the text is one your product shows or
 sends its users (a screen, a message, an email, a generated file). Then it is
 not a docs finding, and the severity you set is what blocks and bills.
-A finding the second read moved (`second_read.says: "likely_not_a_defect"`) is
-judged like any other: when your trace does not show the failure it describes,
-it is `NOT_REAL` or `UNCLEAR`. When it does, send `REAL` with the severity its
-consequence earns: your verdict overrules the second read, and that severity
-is what blocks and bills.
 A note is graded like any other finding: when your trace finds an input or
 state that goes wrong today, it is no longer a note, and it gets the severity
 its consequence earns, which may still be `low`. Anything a

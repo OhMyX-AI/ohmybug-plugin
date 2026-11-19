@@ -123,25 +123,19 @@ for want in \
 done
 # Step 4: a note is graded by its consequence, never raised just because a failing input exists.
 tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'A note is graded like any other finding: when your trace finds an input or state that goes wrong today, it is no longer a note, and it gets the severity its consequence earns, which may still be `low`.' && ok "R notes: step 4 grades a note by its consequence" || fail "R notes step 4 rule"
-# The Second read paragraph (bounded to it): its own section, not blocking or charged, doubted keeps severity.
+# The Second read paragraph (bounded to it): the why beside it, its own section, the result's severity decides.
 SR=$(awk '/^\*\*Second read\.\*\*/,/^$/' "$G/../skills/bughunter/SKILL.md" | tr '\n' ' ' | tr -s ' ')
 for want in \
-  '`says: "likely_not_a_defect"`: the finding arrives as `low`.' \
-  'under "Likely not a defect", after the docs findings and before the notes.' \
-  'Such a finding goes there whatever its `kind`, not under "Test gaps", "Docs findings" or "Notes"' \
-  'Say how many there are, and put each one'"'"'s `why` beside it, with its `reported_severity` when it carries one' \
-  'Say once for the section that these do not block the merge and are not charged.' \
-  'A verdict that raises one to `medium` or worse makes it a regular finding, shown with the others.' \
-  '`says: "doubted"`: the finding keeps its severity and blocks and is charged exactly as it would without the doubt.' \
-  'Show it where it would be without the doubt, with its `why` ("A second read doubts this: ...") beside it.' \
-  'Any other `says`: show the finding as it stands, with its `why` beside it.'; do
+  'A finding that carries `second_read` was read a second time against the code: show its `why` beside it.' \
+  'was lowered to `low` by the second read, whatever else it carries' \
+  'in its own section, "Likely not a defect", after the docs findings and before the notes, whatever its `kind`, with its `reported_severity` when it carries one.' \
+  'Its `severity` in the result already says whether it blocks and is charged, so judge it like any finding (step 4).'; do
   case "$SR" in *"$want"*) ok "R second read: $want" ;; *) fail "R second read paragraph lacks: $want" ;; esac
 done
-# Step 4: a moved finding is judged like any other; a REAL verdict overrules and its severity blocks and bills.
-tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'A finding the second read moved (`second_read.says: "likely_not_a_defect"`) is judged like any other: when your trace does not show the failure it describes, it is `NOT_REAL` or `UNCLEAR`. When it does, send `REAL` with the severity its consequence earns: your verdict overrules the second read, and that severity is what blocks and bills.' && ok "R second read: step 4 rule" || fail "R second read step 4 rule"
-# Test gaps and docs findings: reported_severity is the user's setting only without second_read.
-tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'One that also carries `reported_severity`, and no `second_read`, was delivered as `low` by the user'"'"'s setting (`docs_findings: "not_block"`)' && ok "R second read: docs setting excludes second_read" || fail "R second read docs exception"
-tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'One that also carries `reported_severity`, and no `second_read`, was delivered as `low` by the user'"'"'s setting (`test_gaps: "not_block"`)' && ok "R second read: test setting excludes second_read" || fail "R second read test exception"
+# The paragraph restates no account setting, and the skill names second_read nowhere else (a restatement invents rules).
+case "$SR" in *not_block*|*test_gaps*|*docs_findings*) fail "R second read paragraph restates a setting" ;; *) ok "R second read: no setting restated" ;; esac
+n=$(grep -o 'second_read' "$G/../skills/bughunter/SKILL.md" | wc -l | tr -d ' ')
+[ "$n" = 1 ] && ok "R second read: named once in the skill" || fail "R second read named $n times in the skill"
 # The stories options in this order, private first.
 printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publish them, signed with my GitHub name.*Publish them unsigned.*Don.t write them' && ok "S stories options: private first and recommended, then signed, unsigned, off" || fail "S stories option order"
 # Plugin text never names the reward itself.
