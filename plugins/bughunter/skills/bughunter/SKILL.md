@@ -1432,7 +1432,8 @@ finding describes, and decide:
 without ever seeing the real codebase; you just traced it. Pass `severity`
 in the verdict (either direction) whenever the trace changes the
 consequence, and say why in `reason` – the finder's original is kept
-alongside. Severity describes the CONSEQUENCE, not the finding's category: a
+alongside. A finding delivered `low` with a bare `reported_severity` always
+takes `severity` (below). Severity describes the CONSEQUENCE, not the finding's category: a
 missing test whose mutation reopens a security hole, loses data or misbills
 is `critical`/`high`, never "just a test gap". Correct downward just as
 readily when the failure turns out to need an unreachable state. For a test gap
@@ -1565,7 +1566,8 @@ Honesty rules (non-negotiable):
 Call `confirm_findings(review_id, verdicts)` with ALL verdicts in one call
 (a finding a dispute withdrew takes none),
 each as `{finding_id, verdict, reason}` (one-sentence reason), plus `severity`
-when you corrected it and `known` when step 4 marked it. Do this before
+when you corrected it or the finding was delivered `low` with a bare
+`reported_severity` (always, step 4), and `known` when step 4 marked it. Do this before
 starting fixes. Then show the user the bill from the response: how many
 confirmed, what was charged, remaining balance. The verdicts also make the
 review history the project's bug register, with what was real and why, at no
