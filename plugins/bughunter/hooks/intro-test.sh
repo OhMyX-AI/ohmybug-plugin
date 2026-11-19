@@ -123,6 +123,8 @@ for want in \
 done
 # Step 4: a note is graded by its consequence, never raised just because a failing input exists.
 tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'A note is graded like any other finding: when your trace finds an input or state that goes wrong today, it is no longer a note, and it gets the severity its consequence earns, which may still be `low`.' && ok "R notes: step 4 grades a note by its consequence" || fail "R notes step 4 rule"
+tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF '**Findings delivered as low.** A finding that carries `reported_severity` but neither `kind` nor `second_read` was delivered as `low`' && ok "R bare reported_severity: step 3 section" || fail "R bare reported_severity step 3"
+tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'judge it like any other finding and set the severity its consequence earns, starting from the one it was first reported with. A finding first reported `high` that is really a `medium` is raised to `medium`; one that is really a `low` stays `low`.' && ok "R bare reported_severity: step 4 raise by consequence" || fail "R bare reported_severity step 4"
 # The stories options in this order, private first.
 printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publish them, signed with my GitHub name.*Publish them unsigned.*Don.t write them' && ok "S stories options: private first and recommended, then signed, unsigned, off" || fail "S stories option order"
 # Plugin text never names the reward itself.
