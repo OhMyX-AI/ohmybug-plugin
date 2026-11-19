@@ -127,14 +127,21 @@ tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'A note i
 SR=$(awk '/^\*\*Second read\.\*\*/,/^$/' "$G/../skills/bughunter/SKILL.md" | tr '\n' ' ' | tr -s ' ')
 for want in \
   '`says: "likely_not_a_defect"`: the finding arrives as `low`.' \
-  'under "Likely not a defect", after the docs findings and before the notes' \
-  'goes there and in no other section, whatever its `kind`' \
-  'Say once for the section that these do not block the merge and are not charged, unless your verdict raises one (step 4).' \
-  '`says: "doubted"`: the finding keeps its severity and blocks and is charged exactly as it would without the doubt.'; do
+  'under "Likely not a defect", after the docs findings and before the notes.' \
+  'Such a finding goes there whatever its `kind`, not under "Test gaps", "Docs findings" or "Notes"' \
+  'Say how many there are, and put each one'"'"'s `why` beside it, with its `reported_severity` when it carries one' \
+  'Say once for the section that these do not block the merge and are not charged.' \
+  'A verdict that raises one to `medium` or worse makes it a regular finding, shown with the others.' \
+  '`says: "doubted"`: the finding keeps its severity and blocks and is charged exactly as it would without the doubt.' \
+  'Show it where it would be without the doubt, with its `why` ("A second read doubts this: ...") beside it.' \
+  'Any other `says`: show the finding as it stands, with its `why` beside it.'; do
   case "$SR" in *"$want"*) ok "R second read: $want" ;; *) fail "R second read paragraph lacks: $want" ;; esac
 done
-# Step 4: a moved finding stays low unless the trace shows the failure; a REAL verdict overrules.
-tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'stays `low` unless your trace shows the failure it describes happening in the code as it is. Then send `REAL` with the severity that failure earns: your verdict overrules the second read, and that severity is what blocks and bills.' && ok "R second read: step 4 rule" || fail "R second read step 4 rule"
+# Step 4: a moved finding is judged like any other; a REAL verdict overrules and its severity blocks and bills.
+tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'A finding the second read moved (`second_read.says: "likely_not_a_defect"`) is judged like any other: when your trace does not show the failure it describes, it is `NOT_REAL` or `UNCLEAR`. When it does, send `REAL` with the severity its consequence earns: your verdict overrules the second read, and that severity is what blocks and bills.' && ok "R second read: step 4 rule" || fail "R second read step 4 rule"
+# Test gaps and docs findings: reported_severity is the user's setting only without second_read.
+tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'One that also carries `reported_severity`, and no `second_read`, was delivered as `low` by the user'"'"'s setting (`docs_findings: "not_block"`)' && ok "R second read: docs setting excludes second_read" || fail "R second read docs exception"
+tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'One that also carries `reported_severity`, and no `second_read`, was delivered as `low` by the user'"'"'s setting (`test_gaps: "not_block"`)' && ok "R second read: test setting excludes second_read" || fail "R second read test exception"
 # The stories options in this order, private first.
 printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publish them, signed with my GitHub name.*Publish them unsigned.*Don.t write them' && ok "S stories options: private first and recommended, then signed, unsigned, off" || fail "S stories option order"
 # Plugin text never names the reward itself.
