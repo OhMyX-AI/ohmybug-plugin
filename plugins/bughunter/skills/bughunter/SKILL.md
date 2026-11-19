@@ -1401,6 +1401,23 @@ own section after the test gaps, under "Docs findings", and say how many there
 are. One that also carries `reported_severity` was delivered as `low` by the
 user's setting (`docs_findings: "not_block"`), with the same rule as a test gap.
 
+**Second read.** A finding that carries `second_read` was read a second time
+against the code: `why` is the reason, with the place in it, and `at` is that
+place (a file of the change, with a line when the change shows that line), or
+null.
+- `says: "likely_not_a_defect"`: the finding arrives as `low`. Show those in
+  their own section after the other findings, under "Likely not a defect", say
+  how many there are, and put each one's `why` beside it. One that was reported
+  as `medium` or worse also carries `reported_severity` (put it beside it). Such
+  a finding does not block the merge and is not charged, unless your verdict
+  raises it (step 4).
+- `says: "doubted"`: the finding keeps its severity and blocks and is charged
+  exactly as it would without the doubt. Show it with the others, with its
+  `why` ("A second read doubts this: ...") beside it.
+
+Judge both like any finding (step 4). A finding with no `second_read` is shown
+as before.
+
 **Notes.** A finding marked `kind: "note"` is a `low` that names no input or
 state that goes wrong on the code as it is: hardening against something no
 caller does today, a latent risk, style, a suggestion. Show those last, in
@@ -1436,6 +1453,10 @@ delivered `low` under `docs_findings: "not_block"`: it stays `low` unless your
 trace shows the code itself wrong, or the text is one your product shows or
 sends its users (a screen, a message, an email, a generated file). Then it is
 not a docs finding, and the severity you set is what blocks and bills.
+A finding the second read moved (`second_read.says: "likely_not_a_defect"`)
+follows the same rule as a test gap: it stays `low` unless your trace shows the
+failure happening. Then send `REAL` with the severity it really has: your
+verdict overrules the second read, and that severity is what blocks and bills.
 A note is graded like any other finding: when your trace finds an input or
 state that goes wrong today, it is no longer a note, and it gets the severity
 its consequence earns, which may still be `low`. Anything a
