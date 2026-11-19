@@ -123,6 +123,18 @@ for want in \
 done
 # Step 4: a note is graded by its consequence, never raised just because a failing input exists.
 tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'A note is graded like any other finding: when your trace finds an input or state that goes wrong today, it is no longer a note, and it gets the severity its consequence earns, which may still be `low`.' && ok "R notes: step 4 grades a note by its consequence" || fail "R notes step 4 rule"
+# The Second read paragraph (bounded to it): its own section, not blocking or charged, doubted keeps severity.
+SR=$(awk '/^\*\*Second read\.\*\*/,/^$/' "$G/../skills/bughunter/SKILL.md" | tr '\n' ' ' | tr -s ' ')
+for want in \
+  '`says: "likely_not_a_defect"`: the finding arrives as `low`.' \
+  'under "Likely not a defect", after the docs findings and before the notes' \
+  'goes there and in no other section, whatever its `kind`' \
+  'Say once for the section that these do not block the merge and are not charged, unless your verdict raises one (step 4).' \
+  '`says: "doubted"`: the finding keeps its severity and blocks and is charged exactly as it would without the doubt.'; do
+  case "$SR" in *"$want"*) ok "R second read: $want" ;; *) fail "R second read paragraph lacks: $want" ;; esac
+done
+# Step 4: a moved finding stays low unless the trace shows the failure; a REAL verdict overrules.
+tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | tr -s ' ' | grep -qF 'stays `low` unless your trace shows the failure it describes happening in the code as it is. Then send `REAL` with the severity that failure earns: your verdict overrules the second read, and that severity is what blocks and bills.' && ok "R second read: step 4 rule" || fail "R second read step 4 rule"
 # The stories options in this order, private first.
 printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publish them, signed with my GitHub name.*Publish them unsigned.*Don.t write them' && ok "S stories options: private first and recommended, then signed, unsigned, off" || fail "S stories option order"
 # Plugin text never names the reward itself.
