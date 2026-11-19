@@ -1410,8 +1410,8 @@ findings, its reported severity beside it; say once that these do not block and
 are not charged unless your verdict raises them. Step 4 says how to judge it
 and which severity its verdict carries. A finding that carries `second_read`
 was read a second time against the code; the tool's own description says how
-to show it, and one that also carries `reported_severity` is judged by the same
-step 4 rule.
+to show it, and one that also carries `reported_severity` and no `kind` is
+judged by the same step 4 rule.
 
 **Notes.** A finding marked `kind: "note"` is a `low` that names no input or
 state that goes wrong on the code as it is: hardening against something no
