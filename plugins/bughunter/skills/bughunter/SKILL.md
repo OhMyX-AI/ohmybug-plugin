@@ -26,7 +26,8 @@ is a billable major when a reviewer would refuse the merge over it
 never billed, and neither is a real `medium` the user already deferred or
 accepted in a ticket of theirs, which your verdict marks `known` (step 4; a
 hunt billed on CI, or one that already billed on its own, stays charged).
-Reviews, false positives and unclear findings cost nothing. The first
+Reviews and false positives cost nothing; an unclear finding costs nothing at
+confirm (step 4 says when it is charged later). The first
 bug-finding review is free; a promo code (`redeem_code`) can raise that
 allowance.
 
@@ -1406,9 +1407,11 @@ neither `kind` nor `second_read` was delivered as `low`; the field is the
 severity it was first reported with. It does not block the merge and is not
 charged unless your verdict raises its severity. Show it with the other
 findings, its reported severity beside it; say once that these do not block and
-are not charged unless your verdict raises them. Judge it like any other
-finding (step 4). A finding that carries `second_read` was read a second time
-against the code; the tool's own description says how to show it.
+are not charged unless your verdict raises them. Step 4 says how to judge it
+and which severity its verdict carries. A finding that carries `second_read`
+was read a second time against the code; the tool's own description says how
+to show it, and one that also carries `reported_severity` is judged by the same
+step 4 rule.
 
 **Notes.** A finding marked `kind: "note"` is a `low` that names no input or
 state that goes wrong on the code as it is: hardening against something no
@@ -1426,14 +1429,22 @@ finding describes, and decide:
 - `REAL` – the failure scenario is reproducible in this codebase as described.
 - `NOT_REAL` – the scenario cannot happen; give the concrete reason (e.g. a
   guard upstream, an invariant that prevents the state).
-- `UNCLEAR` – cannot be established either way; say what is missing.
+- `UNCLEAR` – cannot be established either way; say what is missing. It is
+  final: the service takes no later verdict on that finding, and the hunt
+  stays unmergeable whatever the finding's severity, a `low` or a note
+  included. Where this skill says a finding does not block the merge, that
+  holds for `REAL` and `NOT_REAL`. Trace further or ask the user before you
+  send one.
 
 **Severity is yours to correct.** The cloud reviewer priced each finding
-without ever seeing the real codebase; you just traced it. Pass `severity`
-in the verdict (either direction) whenever the trace changes the
+without ever seeing the real codebase; you just traced it. `severity` goes
+only with a `REAL` verdict. Never send it with `NOT_REAL` or `UNCLEAR`,
+whatever the finding carries: the service stores a severity sent with any
+verdict, and an `UNCLEAR` at `medium` or worse can be charged. On a `REAL`,
+pass `severity` (either direction) whenever the trace changes the
 consequence, and say why in `reason` – the finder's original is kept
-alongside. A finding delivered `low` with a bare `reported_severity` always
-takes `severity` (below). Severity describes the CONSEQUENCE, not the finding's category: a
+alongside. One finding takes it on every `REAL`: the one delivered `low` with
+`reported_severity` and no `kind` (below). Severity describes the CONSEQUENCE, not the finding's category: a
 missing test whose mutation reopens a security hole, loses data or misbills
 is `critical`/`high`, never "just a test gap". Correct downward just as
 readily when the failure turns out to need an unreachable state. For a test gap
@@ -1446,13 +1457,15 @@ delivered `low` under `docs_findings: "not_block"`: it stays `low` unless your
 trace shows the code itself wrong, or the text is one your product shows or
 sends its users (a screen, a message, an email, a generated file). Then it is
 not a docs finding, and the severity you set is what blocks and bills.
-A finding delivered `low` with `reported_severity` and neither `kind` nor
-`second_read` is the other way round: judge it like any other finding and set
-the severity its consequence earns, starting from the one it was first reported
-with. A finding first reported `high` that is really a `medium` is raised to
-`medium`; one that is really a `low` stays `low`. Always pass that `severity`
-in its verdict, even when it equals the first-reported one: a `REAL` sent
-without it leaves the finding `low`.
+A finding delivered `low` with `reported_severity` and no `kind` is the other
+way round: judge it like any other finding. When it is `REAL`, set the
+severity its consequence earns, starting from the one it was first reported
+with: a finding first reported `high` that is really a `medium` is raised to
+`medium`; one that is really a `low` stays `low`. Pass that `severity` in every
+`REAL` verdict on it, even when it equals the first-reported one or is `low`:
+a `REAL` sent without it leaves the finding `low`, not charged and not
+blocking. A `NOT_REAL` or `UNCLEAR` on it carries no `severity` (the rule
+above) and leaves it `low`.
 A note is graded like any other finding: when your trace finds an input or
 state that goes wrong today, it is no longer a note, and it gets the severity
 its consequence earns, which may still be `low`. Anything a
@@ -1551,8 +1564,11 @@ Honesty rules (non-negotiable):
   (`critical`/`high`/`medium`) not marked `known` costs the user its flat price
   (a CI-billed or already self-billed hunt stays charged) – 4 USD fast (lite and snap: the price
   `get_balance` `modes` lists), 12 or
-  24 USD deep (extra REALs and `low` nits are free); `NOT_REAL`
-  and `UNCLEAR` cost nothing and count against OhMyBug's quality stats.
+  24 USD deep (extra REALs and `low` nits are free). `NOT_REAL` costs
+  nothing. `UNCLEAR` costs nothing at confirm, but on a hunt whose
+  `get_findings` showed `silent_bill` an `UNCLEAR` `medium` or worse is
+  charged at the deadline like a finding nobody judged. Both count against
+  OhMyBug's quality stats.
 - Never mark a finding `NOT_REAL` to avoid the charge when the bug is real –
   and never fix a finding you refused to confirm. OhMyBug audits later diffs;
   silently fixing an unconfirmed finding flags the account.
@@ -1566,8 +1582,7 @@ Honesty rules (non-negotiable):
 Call `confirm_findings(review_id, verdicts)` with ALL verdicts in one call
 (a finding a dispute withdrew takes none),
 each as `{finding_id, verdict, reason}` (one-sentence reason), plus `severity`
-when you corrected it or the finding was delivered `low` with a bare
-`reported_severity` (always, step 4), and `known` when step 4 marked it. Do this before
+only on a `REAL` verdict, as step 4 says, and `known` when step 4 marked it. Do this before
 starting fixes. Then show the user the bill from the response: how many
 confirmed, what was charged, remaining balance. The verdicts also make the
 review history the project's bug register, with what was real and why, at no
