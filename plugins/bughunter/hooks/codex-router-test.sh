@@ -77,7 +77,7 @@ session_text = session["hookSpecificOutput"]["additionalContext"]
 # timed_out:true — and that answer is the wake's reading, not a reason to loop:
 # a wake that loops holds the thread when the next one fires, measured as a
 # client polling once a minute against a four-minute contract.
-for phrase in ("submit_review", "wait_review", "automation_update", "destination=thread", "heartbeat at the response's monitor.interval_s", "The automation is the cadence and a wake is one read", "make ONE read and end", "timed_out:true", "never loop either call inside the wake", "stop on done, failed or needs_files", "answer needs_files first", "review_report", "get_attestation", "never run fast and deep in parallel"):
+for phrase in ("submit_review", "wait_review", "automation_update", "destination=thread", "monitor.logical_key", "atomic upsert", "awaiting_verdicts", "judged: true", "heartbeat at the response's monitor.interval_s", "The automation is the cadence and a wake is one read", "make ONE read and end", "timed_out:true", "never loop either call inside the wake", "stop on done, failed or needs_files", "answer needs_files first", "review_report", "get_attestation", "never run fast and deep in parallel"):
     assert phrase in session_text, phrase
 assert "local code-review" in session_text
 # The proof and its hand-off are two steps, and a Codex session has no hook
@@ -204,6 +204,9 @@ assert '''  printf '%s %s\\n' "$st" "$every" > "$watch" # the Stop hook reads th
   esac
 ''' in monitor_code, "terminal branch lost its shape"
 assert '&& st=needs-files\n' in monitor_code
+# A finished hunt whose findings still need verdicts is an active hand-off,
+# not a terminal watcher. The status door carries this field on both clients.
+assert '&& [ "$st" = done ] && st=verdicts\n' in monitor_code
 # Every printf inside the loop is either terminal (break follows) or gated.
 loop = monitor_code.split("while :; do", 1)[1]
 for line in loop.splitlines():
@@ -885,6 +888,17 @@ for prompt in ("review this PR before merge", "hunt bugs in the diff", "review t
                "review this PR and give me a full report", "we need full reporting on this PR before merge"):
     text = run("prompt", {"prompt": prompt})["hookSpecificOutput"]["additionalContext"]
     assert "Route this request now" in text and DEEP_MARK not in text, prompt
+# The Codex hook must route the language the user actually uses. The old
+# English-only matcher silently skipped these review requests.
+for prompt in ("прошёл наш багхантер? вливай если нет medium+",
+               "сделай ревью этого PR",
+               "проверь изменения багхантером",
+               "влить после чистого багханта"):
+    text = run("prompt", {"prompt": prompt})["hookSpecificOutput"]["additionalContext"]
+    assert "Route this request now" in text, prompt
+# Nearby Russian words must remain ordinary prompts.
+for prompt in ("проверь температуру на сервере", "влей воду в чайник", "посмотри фильм вечером"):
+    assert run("prompt", {"prompt": prompt}) == {}, prompt
 # ...and "full report" alone is no review request at all.
 assert run("prompt", {"prompt": "give me a full report on the sales numbers"}) == {}
 assert "Route this request now" in run("prompt", {"prompt": "review this PR before merge"})["hookSpecificOutput"]["additionalContext"]

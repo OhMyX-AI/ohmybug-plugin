@@ -83,6 +83,14 @@ This is a required client action, not a reminder to do later:
   the hunt was done, and the merge waited on it. Update an existing heartbeat for the same review instead of
   creating a duplicate, and retire/replace any heartbeat pointing at an older
   review. **The automation is the cadence; a wake is one read.** The heartbeat
+  uses the monitor's `logical_key` as its one watcher identity. If
+  `automation_update` exposes atomic upsert, pass that key with
+  `destination=thread`; otherwise inspect `~/.codex/automations/*/automation.toml`,
+  update the existing automation id, and delete duplicates before creating
+  anything. A `done` read with `awaiting_verdicts: true` or `judged: false` is
+  `awaiting-verdicts`, not terminal. Keep the same watcher, call
+  `confirm_findings`, and read again. Only `done` with `judged: true` or
+  `failed` is terminal. A foreground `get_findings` is a hand-off after a wake, never a second poll beside a live watcher.
   fires once per `interval_s`, and inside a wake the prompt makes ONE read and
   ends: `get_findings(review_id)`, or one `wait_review(review_id)` with its
   default hold — the server caps the hold whatever `timeout_s` you ask for and
@@ -1013,6 +1021,7 @@ while :; do
   [ -n "$n" ] && [ "$n" -gt 0 ] && every=$n; back=$every
   n=$(num heartbeat_s); [ -n "$n" ] && [ "$n" -gt 0 ] && beat=$n
   printf '%s' "$s" | grep -qE '"awaiting_client_files"[[:space:]]*:[[:space:]]*true|"files_requested"[[:space:]]*:[[:space:]]*true' && st=needs-files
+  printf '%s' "$s" | grep -qE '"awaiting_verdicts"[[:space:]]*:[[:space:]]*true' && [ "$st" = done ] && st=verdicts
   rs=$(printf '%s' "$s" | sed -n 's/.*"route_state"[[:space:]]*:[[:space:]]*"\([^"\]*\)".*/\1/p' | head -n 1) # a routed hunt: done is not the end until final
   case "$rs" in ''|final) ;; *) : > "$watch.routed" ;; esac # remembered across runs: this review is routed
   [ "$rs" = final ] && rm -f "$watch.routed"
