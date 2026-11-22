@@ -71,6 +71,13 @@ if (event !== 'prompt' && event !== 'session') process.exit(0);
 
 let input = '';
 let finished = false;
+const RU_BOUNDARY_START = String.raw`(?<![\p{L}\p{N}_])`
+const RU_BOUNDARY_END = String.raw`(?![\p{L}\p{N}_])`
+const RU_REVIEW = String.raw`(?:\u0431\u0430\u0433[\s-]?\u0445\u0430\u043d\u0442(?:\u0435\u0440(?:\u043e\u043c|\u0430|\u0443)?|\u0430|\u043e\u043c|\u043e\u0432|\u0435|\u0443|\u044b)?|\u0440\u0435\u0432\u044c\u044e|\u043f\u0440\u043e\u0432\u0435\u0440(?:\u044c|\u044c\u0442\u0435)\s+(?:\u043a\u043e\u0434(?:\u0430|\u0443|\u043e\u043c)?|\u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f|\u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u0439|\u0432\u0435\u0442\u043a\u0443|\u0432\u0435\u0442\u043a\u0438|\u0432\u0435\u0442\u043a\u0435|\u043a\u043e\u043c\u043c\u0438\u0442(?:\u044b|\u0430|\u043e\u0432)?|pr))`
+const RU_DEEP = String.raw`(?:\u0433\u043b\u0443\u0431\u043e\u043a(?:\u043e\u0435|\u0438\u0439)\s+(?:\u0440\u0435\u0432\u044c\u044e|\u0430\u0443\u0434\u0438\u0442|\u0445\u0430\u043d\u0442)|\u043f\u043e\u043b\u043d(?:\u044b\u0439|\u043e\u0433\u043e|\u043e\u0439)\s+\u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440(?:\u0438\u0439|\u0438\u044f|\u0438\u044e|\u0438\u0438|\u0438\u0435\u043c))`
+const REVIEW_REQUEST = new RegExp(`(?:\\b(?:review|reviewing|bug.?hunt|hunt\\s+bugs?|deep\\s+(?:review|hunt)|(?:lite|snap)\\s+hunt|full[- ]repo(?:sitory)?\\b|pull\\s+request|pr|merge)\\b|${RU_BOUNDARY_START}(?:${RU_REVIEW}|${RU_DEEP})${RU_BOUNDARY_END})`, 'iu')
+const RU_DEEP_NEGATION = /\u043d\u0435\s+\u0433\u043b\u0443\u0431\u043e\u043a(?:\u043e\u0435|\u0438\u0439)\s+(?:\u0440\u0435\u0432\u044c\u044e|\u0430\u0443\u0434\u0438\u0442|\u0445\u0430\u043d\u0442)/iu
+const DEEP_REQUEST = new RegExp(`(?:\\bdeep\\s+(?:hunt|review|scan|pass|mode)\\b|\\bfull[- ]repo(?:sitory)?\\b|--deep\\b|\\bbughunter:review\\s+(?:--)?deep\\b|${RU_BOUNDARY_START}${RU_DEEP}${RU_BOUNDARY_END})`, 'iu')
 function finish() {
   if (finished) return;
   finished = true;
@@ -80,7 +87,7 @@ function finish() {
   const setup = /\bset\s*up\s+ohmybug\b|\bohmybug\s+setup\b/i.test(prompt)
     ? 'The user asks for the OhMyBug setup: run the First-run setup of the bughunter skill now, in chat, numbered, free text accepted.'
     : '';
-  if (/\b(?:review|reviewing|bug.?hunt|hunt\s+bugs?|deep\s+(?:review|hunt)|(?:lite|snap)\s+hunt|full[- ]repo(?:sitory)?\b|pull\s+request|\bpr\b|merge)\b/i.test(prompt)) {
+  if (REVIEW_REQUEST.test(prompt)) {
     // The user's own words are the only thing that puts deep first (the server
     // takes deep: true from nobody else); the sentence says so only when the
     // prompt names the hunt, so a plain "review this" never reads as a deep
@@ -88,7 +95,7 @@ function finish() {
     // BOTH sides: a hyphen is a word boundary, so \bdeep\b took "deep-dive
     // review" for the paid hour, and an open-ended full[- ]repo took "full
     // report". The slash command's own argument counts, bare or dashed.
-    const deep = /\bdeep\s+(?:hunt|review|scan|pass|mode)\b|\bfull[- ]repo(?:sitory)?\b|--deep\b|\bbughunter:review\s+(?:--)?deep\b/i.test(prompt)
+    const deep = DEEP_REQUEST.test(prompt) && !RU_DEEP_NEGATION.test(prompt)
       ? ' The prompt names the deep hunt: if the user is asking for it, submit_review with deep: true is the first and only review – no fast stage first, no second question.'
       : '';
     emit(`${ROUTING} Route this request now; do not launch local review agents.${deep}${setup ? ` ${setup}` : ''}`, 'UserPromptSubmit');
