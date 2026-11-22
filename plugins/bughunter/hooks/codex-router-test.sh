@@ -885,6 +885,19 @@ for prompt in ("review this PR before merge", "hunt bugs in the diff", "review t
                "review this PR and give me a full report", "we need full reporting on this PR before merge"):
     text = run("prompt", {"prompt": prompt})["hookSpecificOutput"]["additionalContext"]
     assert "Route this request now" in text and DEEP_MARK not in text, prompt
+# Russian review requests route through the same hook, including the exact lifecycle wording users use.
+for prompt in ("\u043f\u0440\u043e\u0448\u0451\u043b \u043d\u0430\u0448 \u0431\u0430\u0433\u0445\u0430\u043d\u0442\u0435\u0440? \u0432\u043b\u0438\u043b \u0435\u0441\u043b\u0438 \u043d\u0435 \u0431\u044b\u043b\u043e medium+ \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u043d\u044b\u0445? \u043e\u0431\u043d\u043e\u0432\u0438\u043b \u0432\u0435\u0440\u0441\u0438\u0438?",
+               "\u0441\u0434\u0435\u043b\u0430\u0439 \u0440\u0435\u0432\u044c\u044e \u044d\u0442\u043e\u0433\u043e \u043f\u0440",
+               "\u043f\u0440\u043e\u0432\u0435\u0440\u044c \u043a\u043e\u0434", "\u043f\u0440\u043e\u0432\u0435\u0440\u044c \u0432\u0435\u0442\u043a\u0443", "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043a\u043e\u043c\u043c\u0438\u0442\u044b",
+               "\u043f\u0440\u043e\u0448\u0451\u043b \u0431\u0430\u0433\u0445\u0430\u043d\u0442\u0435\u0440\u043e\u043c", "merge this PR", "\u0431\u0430\u0433\u0445\u0430\u043d\u0442\u0435\u0440\u044b", "\u0433\u043b\u0443\u0431\u043e\u043a\u0438\u0439 \u0432\u0437\u0433\u043b\u044f\u0434 \u043d\u0430 PR", "\u043d\u0435 \u0433\u043b\u0443\u0431\u043e\u043a\u043e\u0435 \u0440\u0435\u0432\u044c\u044e"):
+    text = run("prompt", {"prompt": prompt})["hookSpecificOutput"]["additionalContext"]
+    assert "Route this request now" in text and DEEP_MARK not in text, prompt
+for prompt in ("\u0431\u0430\u0433\u0430\u0436", "\u0431\u0430\u0433\u0435\u0442", "\u0441\u0443\u043f\u0435\u0440\u0440\u0435\u0432\u044c\u044e", "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043a\u043e\u0434\u0438\u0440\u043e\u0432\u043a\u0443"):
+    assert run("prompt", {"prompt": prompt}) == {}, prompt
+for prompt in ("\u0433\u043b\u0443\u0431\u043e\u043a\u043e\u0435 \u0440\u0435\u0432\u044c\u044e", "\u0433\u043b\u0443\u0431\u043e\u043a\u0438\u0439 \u0430\u0443\u0434\u0438\u0442", "\u043f\u043e\u043b\u043d\u044b\u0439 \u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u0439", "\u0440\u0435\u0432\u044c\u044e \u043f\u043e\u043b\u043d\u043e\u0433\u043e \u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u044f", "\u043c\u043d\u0435 \u0433\u043b\u0443\u0431\u043e\u043a\u043e\u0435 \u0440\u0435\u0432\u044c\u044e"):
+    text = run("prompt", {"prompt": prompt})["hookSpecificOutput"]["additionalContext"]
+    assert "Route this request now" in text and DEEP_MARK in text, prompt
+
 # ...and "full report" alone is no review request at all.
 assert run("prompt", {"prompt": "give me a full report on the sales numbers"}) == {}
 assert "Route this request now" in run("prompt", {"prompt": "review this PR before merge"})["hookSpecificOutput"]["additionalContext"]
