@@ -16,12 +16,13 @@ run() {
 }
 out=$(run)
 echo "$out" | grep -q '0.81.0 is available'
-echo "$out" | grep -q 'Review changed hook definitions in /hooks'
 echo "$out" | grep -q 'Claude Code' # default client instruction
+[ "$(printf '%s' "$out" | grep -c '/hooks')" -eq 0 ]
 [ "$(cat "$TMP/state/version-notice-v1-claude")" = 'claude:0.80.0->0.81.0' ]
 printf '{"version":"0.82.0"}\n' > "$TMP/latest.json"
 out=$(PLUGIN_DATA=1 run)
 echo "$out" | grep -q 'codex plugin marketplace upgrade ohmybug'
+echo "$out" | grep -q 'Review changed hook definitions in /hooks'
 # Equal and malformed versions stay silent.
 printf '{"version":"0.82.0"}\n' > "$TMP/plugin/.codex-plugin/plugin.json"
 printf '{"version":"not-semver"}\n' > "$TMP/latest.json"
