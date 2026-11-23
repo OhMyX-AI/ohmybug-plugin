@@ -16,6 +16,7 @@ run() {
 }
 out=$(run)
 echo "$out" | grep -q '0.81.0 is available'
+echo "$out" | grep -q 'Review changed hook definitions in /hooks'
 echo "$out" | grep -q 'Claude Code' # default client instruction
 [ "$(cat "$TMP/state/version-notice-v1-claude")" = 'claude:0.80.0->0.81.0' ]
 printf '{"version":"0.82.0"}\n' > "$TMP/latest.json"
