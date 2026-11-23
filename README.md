@@ -121,15 +121,15 @@ cannot tell how it was installed (for example, bundled inside another app) it
 exits with an error, and by then the plugin, the MCP server and the sign-in are
 already in place. Update that Codex the way it was installed.
 
-Open `/hooks` once after installation, review and trust the OhMyBug hook
-definition, then start a new Codex thread. Codex skips non-managed plugin hooks
+After installation or an update that changes a hook definition, open
+`/hooks`, review the OhMyBug hooks and trust the ones you want to run.
+Then start a new Codex thread. Codex skips non-managed plugin hooks
 until you trust their current definition; without that step the skill and MCP
 still install, but automatic review routing is not active. Then ask Codex to
 run the OhMyBug cloud hunt (or use the plugin's starter prompt). A local
 `APPROVE` from a code-review agent is not merge evidence.
 
-The plugin cannot grant this trust to itself. Codex keeps hook approval under
-your control because trusted hooks can run commands on the machine. After an update that changes a hook definition, open `/hooks` and review that definition again.
+Hook approval stays under your control because trusted hooks can execute commands.
 
 ### Existing skill-only installs
 

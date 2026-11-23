@@ -45,7 +45,7 @@ KEY="$CLIENT:$installed->$latest"
 [ "$(cat "$MARK" 2>/dev/null || true)" != "$KEY" ] || exit 0
 printf '%s' "$KEY" > "$MARK" 2>/dev/null || exit 0
 if [ "$CLIENT" = codex ]; then
-  NOTE="OhMyBug: bughunter $latest is available (you have $installed). Update Codex with: codex plugin marketplace upgrade ohmybug && codex plugin add bughunter@ohmybug. Then start a new Codex thread."
+  NOTE="OhMyBug: bughunter $latest is available (you have $installed). Update Codex with: codex plugin marketplace upgrade ohmybug && codex plugin add bughunter@ohmybug. Review changed hook definitions in /hooks, then start a new Codex thread."
 else
   NOTE="OhMyBug: bughunter $latest is available (you have $installed). Update Claude Code with: /plugin update bughunter. Then restart the session."
 fi

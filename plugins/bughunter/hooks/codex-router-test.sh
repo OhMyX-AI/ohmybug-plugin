@@ -982,15 +982,25 @@ assert plugin["mcpServers"] == "./.codex-mcp.json"
 # hooks/hooks.json, so naming only the router left Codex with no merge gate,
 # no hunt recorder and no stop nudge. Order matters to nobody; presence does.
 assert sorted(plugin["hooks"]) == sorted(["./hooks/hooks.json", "./hooks/claude-codex-hooks.json"]), plugin["hooks"]
+from xml.etree import ElementTree
+import shlex
+
+plugin_root = Path(manifest).resolve().parent.parent
 interface = plugin["interface"]
 for field in ("logo", "composerIcon"):
-    path = Path(manifest).parent.parent / interface[field]
-    assert path.is_file(), (field, path)
+    path = (plugin_root / interface[field]).resolve()
+    assert plugin_root in path.parents, (field, path)
+    svg = ElementTree.parse(path).getroot()
+    assert svg.tag == "{http://www.w3.org/2000/svg}svg", path
+    fills = {el.get("fill") for el in svg if el.tag == "{http://www.w3.org/2000/svg}path"}
+    assert len(fills) > 1 and all(fill and fill.startswith("#") for fill in fills), (path, fills)
 codex_hook_commands = []
 for hook_file in plugin["hooks"]:
     data = json.load(open(Path(manifest).parent.parent / hook_file, encoding="utf-8"))
-    codex_hook_commands.extend(k["command"] for groups in data["hooks"].values() for group in groups for k in group.get("hooks", []))
-assert sum(command.endswith("/version-check.sh") for command in codex_hook_commands) == 1
+    codex_hook_commands.extend(h["command"] for group in data["hooks"].get("SessionStart", [])
+                               for h in group["hooks"] if h["type"] == "command")
+assert sum(any(Path(arg).name == "version-check.sh" for arg in shlex.split(command))
+           for command in codex_hook_commands) == 1, codex_hook_commands
 codex_mcp = json.load(open(mcp, encoding="utf-8"))
 # The Codex router and skill text follow a routed hunt's continued_by, so Codex opts into the route the way
 # mcp-headers.sh does for Claude Code. A static header: Codex keys the saved sign-in on name and url, not headers.
