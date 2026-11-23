@@ -72,26 +72,16 @@ if os.geteuid() != 0:
     os.environ["OMB_STATE_DIR"] = state
 assert session["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 session_text = session["hookSpecificOutput"]["additionalContext"]
-# One cadence (#67): the automation fires once per interval_s and a wake is ONE
-# read. The hold cap is the server's — a longer timeout_s comes back with
-# timed_out:true — and that answer is the wake's reading, not a reason to loop:
-# a wake that loops holds the thread when the next one fires, measured as a
-# client polling once a minute against a four-minute contract.
-for phrase in ("submit_review", "wait_review", "automation_update", "destination=thread", "monitor.logical_key", "atomic upsert", "awaiting_verdicts: true", "verdict hand-off", "never edit Codex automation files by hand", "heartbeat at the response's monitor.interval_s", "The automation is the cadence and a wake is one read", "make ONE read and end", "timed_out:true", "never loop either call inside the wake", "stop on done, failed or needs_files", "answer needs_files first", "review_report", "get_attestation", "never run fast and deep in parallel"):
+for phrase in ("submit_review", "review_report", "get_attestation", "never run fast and deep in parallel"):
     assert phrase in session_text, phrase
 assert "local code-review" in session_text
 # The proof and its hand-off are two steps, and a Codex session has no hook
 # that writes the local record: a clean hunt met a gate that said "not
 # hunted", and the agent asked for a plugin update that would have changed
 # nothing. The routing text names the step, next to the proof it hands over.
-for phrase in ("get_attestation is the proof", "./scripts/ticket.sh attest <review_id> hands it to the gate", "Codex has no hook that records a hunt locally"):
+for phrase in ("get_attestation is the proof", "./scripts/ticket.sh attest <review_id> hands it to the gate"):
     assert phrase in session_text, phrase
 assert "set targetThreadId" not in session_text
-# The service route: a routed hunt's done is not the end. Without this clause a
-# Codex session reports step 1 and takes its attestation, while the header
-# tells the server this client follows continued_by.
-for phrase in ("A routed hunt carries route_state", "done on it is not the end until final: true", "replace the heartbeat with one on <id>", "its own retire_at, from now", "take get_attestation from <id>, never from the first review", "and neither is failed", "except that a file request still comes first", "it stays routed until final: true", "the rules above that stop on, or delete the heartbeat on, done or failed do not apply"):
-    assert phrase in session_text, phrase
 
 skill = open(str(Path(router).parent.parent / "skills/bughunter/SKILL.md"), encoding="utf-8").read()
 monitor_section = skill.split("start this compact, unbounded loop immediately with the", 1)[1]
@@ -589,46 +579,11 @@ assert "review is still running or waiting for files AND the retirement came fro
 # request off the flags too: keyed to the status word it sits through the window.
 assert "on `awaiting_client_files`/`files_requested` in the status\n  body (which flags a request there, not in its status word)" in claude_bullet
 codex_bullet = skill.split("- **Codex:**", 1)[1].split("- **Claude Code:**", 1)[0]
-# #1003: a heartbeat printed `running` on three wakes after the hunt was done,
-# with no tool call in the thread — the cadence fields say when to wake, and
-# nothing said what a wake IS. The server ships that sentence as `wake_rule`;
-# the bullet must carry it verbatim, or the prompt the agent writes into
-# automation_update is free to omit it.
-WAKE_RULE = ("every wake reports the status it just read — from `wait_review`\n  or `get_findings` on a fast hunt, from the `status_url` read on a deep one —\n  and a wake with no answer prints `bughunt · <mode> · poll-failed`, never the\n  previous status")
-assert WAKE_RULE in codex_bullet, "the heartbeat prompt must carry the server's wake_rule word for word"
-# The war story that justifies the rule carries the magnitude the record supports:
-# three wakes at the four-minute cadence is twelve minutes, not more.
-assert "on three wakes — twelve minutes — after" in codex_bullet
-assert "copy `wake_rule` into the prompt word for word" in codex_bullet
-# ...and the hand-wait path prints on the same terms: it is the path with no
-# heartbeat, i.e. the one where nothing else would catch a remembered status.
+for surface in (session_text, codex_bullet):
+    for rule in ("Do not create a scheduled automation for a hunt", "On ordinary done, stop polling", "On move, switch to the named child", "On judge, verify and confirm", "ask before escalation"):
+        assert rule in surface, rule
+    assert "automation_update" not in surface
 assert "a status you\nprint is a status a tool just answered" in skill
-# One read per wake (#67), on this surface too: the loop of short holds that
-# filled the cadence is what made a client poll once a minute.
-for phrase in ("**The automation is the cadence; a wake is one read.**", "makes ONE read and\n  ends", "one `wait_review(review_id)` with its\n  default hold", "`timed_out: true`\n  answer IS this wake's reading: `running`", "Do not loop either call inside the\n  wake", "needs_files", "older than 180 minutes", "watch-retired`, then delete it"):
-    assert phrase in codex_bullet, phrase
-for literal in ("up to 3 times", "3 x 60 s", "180 + 60", "poll_after_s=30", "timeout_s=45", "every 45 seconds", "for at most\n  180 seconds", "loop instead", "Loop instead"):
-    assert literal not in codex_bullet, literal
-# ...with the one carve-out the other two surfaces keep (found in review): a
-# payload submit is the one path where the server cannot serve the reviewers'
-# file requests itself, the request is held open for minutes, and one read per
-# interval_s misses it — there the wake's back-to-back wait_review IS the
-# watcher, bounded so it ends before the next wake fires.
-# The bound is the iteration's cost against heartbeat_s, not one hold against
-# interval_s: a hold costs the server's cap plus a round trip, and subtracting
-# the hold alone let a fourth one start at 180 s and return at 240 s — as the
-# next wake fired, with nothing left for the line or the file answer (found in
-# review). heartbeat_s is the contract's own "the line must land by then", so
-# the handover before interval_s is derived, not typed.
-# ...and the handover is priced in round trips, not left to the
-# heartbeat_s–interval_s gap: at a 10 s round trip that gap-derived handover
-# was 20 s for calls that are themselves round trips (found in review).
-for phrase in ("a PAYLOAD submit\n  (§2, rung 3) while a file request can still arrive", "call `wait_review` back to back", "start another hold only if\n  it, its round trip, and one more round trip for the handover's own calls\n  would end inside `heartbeat_s` from this wake's start", "a bound that subtracts the hold alone lets the last one return\n  exactly as the next wake fires", "shrinks it on exactly the slow links whose\n  calls need it", "A repo or deep submit never needs this"):
-    assert phrase in codex_bullet, phrase
-assert "less one hold" not in skill and "less one hold" not in session_text
-assert "it and its round trip would end inside" not in skill and "it and its round trip would end inside" not in session_text
-for phrase in ("the one exception is a payload submit", "inside that wake call wait_review back to back", "start another hold only if it, its round trip, and one more round trip for the handover's own calls would end inside heartbeat_s from this wake's start", "a bound that subtracts the hold alone lets the last one return as the next wake fires", "shrinks it on the slow links that need it", "a repo or deep submit never needs this"):
-    assert phrase in session_text, phrase
 # The Monitor surface reads on a failed poll like the other two (found in
 # review): a fresh poll-failed file keeps the Stop hook quiet while the loop fails,
 # so without this read a review sat done and unread behind that silence.
@@ -660,67 +615,10 @@ for text in (skill, session_text):
 # source: a clause parked in the file but dropped from the emitted array would
 # otherwise ship green, and every Codex session would be routed without it.
 router_text = session_text
-# The ROUTING text is the other Codex surface and restates the whole heartbeat
-# contract on its own, so a rule stated only in the skill still ships an agent
-# that arms a heartbeat allowed to answer from memory.
-ROUTER_WAKE_RULE = ("copy wake_rule into the prompt word for word: every wake reports the status it just read "
-                    "(from wait_review or get_findings on a fast hunt, from the status_url read on a deep one), "
-                    "and a wake with no answer prints bughunt · <mode> · poll-failed, never the previous status")
-assert ROUTER_WAKE_RULE in router_text, "ROUTING must carry the whole wake rule, not a fragment of it"
-# ...and the retirement counter must count wakes that read nothing, whatever the
-# wake reads: a deep wake reads status_url, so a counter keyed to wait_review
-# alone can never fire there and only the 180-minute cap is left.
-assert "3 consecutive wakes that could not read\n  a status at all" in codex_bullet, "the skill must retire on wakes that read nothing, not on failed wait_review calls"
-assert "3 consecutive wakes that could not read a status at all" in router_text, "ROUTING must carry the same retirement counter"
-# ...and the age cap beside it: a cap shorter than the deep budget drops a live
-# hunt, and the counter alone lets a heartbeat nothing can satisfy run forever.
-assert "Retire a heartbeat older than 180 minutes" in router_text, "ROUTING must carry the 180-minute age cap"
-# The finished hunt's offer (found live: a Codex wake allowed one status line
-# was the only read of a finished hunt, so the pitch was never shown). One
-# quoted sentence, the same on both surfaces right after the one-line rule,
-# written into the heartbeat prompt and carried into any replacement
-# heartbeat. Its only route wording guards on the read's own fields; strength
-# and price are the pitch's own text.
-COPY_RULE = "Write the next sentence into the heartbeat prompt word for word, because a wake is often the only read of a finished hunt: "
-OFFER_WAKE = ("\"Besides its one bughunt status line, when this wake's read carries deep_offer (and, if it carries route_state, also final: true), print deep_offer.pitch word for word after that line, "
-              "ask whether to start the deep hunt, and call no submit_review in this wake: the answer is the user's; copy this sentence into any heartbeat that replaces this one.\"")
-flat_bullet = " ".join(codex_bullet.split())
-assert "print only one compact bughunt status line, and delete itself on failed or done without awaiting_verdicts; keep it for the verdict hand-off. " + COPY_RULE + OFFER_WAKE in router_text, "ROUTING must carry the wake's offer sentence after the one-line rule"
-assert "watch-retired`). " + COPY_RULE + OFFER_WAKE in flat_bullet, "the skill's Codex bullet must carry the same sentence after its one-line rule"
 # Said at the start of every session: a session that began without the tools
 # never gets them, and the merge gate is too late to learn it.
 assert "confirm the ohmybug MCP tools are present" in router_text, "ROUTING must ask for the tools-present check at session start"
 assert "tell the user once" in router_text and "go on with what they asked" in router_text, "the tools check is one notice and the user's decision, never a refusal of their task"
-# The deep wake reads status_url, so the agent must be told to copy the URL into
-# the heartbeat and to poll it once per wake — or the rule names a read it was
-# never handed, on the longest hunt there is.
-# heartbeat_s travels in the prompt too (found in review): the carve-out is
-# measured against it, and a wake holds nothing but its prompt.
-assert "status_url, interval_s, heartbeat_s, wake_on, stop_on, and wake_rule" in router_text
-assert "every number the wake will measure against goes into the prompt" in router_text
-assert "for a deep hunt the wake polls status_url once and reports that" in router_text
-# ...and that poll sees a file request only in the body's flags, never in the
-# status word, so the deep wake is told to read them; a failed poll falls back to
-# one get_findings before it counts against retirement, and a retired watch calls
-# once and re-arms — a deep wake is a single plain-HTTPS poll, so three blocked
-# ones would otherwise drop the watch of a hunt budgeted at 150 min at minute 12.
-assert "so a wake seeing either flag prints bughunt · <mode> · needs-files and serves the files first" in router_text
-assert "on retiring, print bughunt · <mode> · watch-retired, then call get_findings once" in router_text
-assert "`awaiting_client_files`/`files_requested`, not off its\n  status word" in codex_bullet
-assert "needs-files` and serves the files first" in codex_bullet
-assert "before it counts as a wake that read nothing" in codex_bullet
-assert "before it counts as a wake that read nothing" in router_text
-# Every surface re-arms on the same predicate: needs_files is not terminal, so a
-# watch retired while the reviewers wait for files must come back.
-assert "call `get_findings` once: if the review is\n  still running or waiting for files, tell the user and — if the retirement came\n  from unreadable wakes, not from the age cap — arm a fresh heartbeat" in codex_bullet
-# The age cap is the one retirement nothing re-arms: it is the only bound on a
-# heartbeat whose review never reaches a terminal state.
-assert "the age cap is the one that ends it for good" in codex_bullet
-assert "then call get_findings once and arm a fresh heartbeat if the review is still running or waiting for files and the retirement came from unreadable wakes rather than the age cap" in router_text
-# ...and the routing text names the flags itself: the consequent alone leaves a
-# dangling "either flag" if the names are deleted.
-assert "that body flags a file request as awaiting_client_files/files_requested rather than in its status word" in router_text
-assert "`review_id`, `status_url`, `interval_s`,\n  `heartbeat_s`, `wake_on`, `stop_on` and `wake_rule`" in codex_bullet
 # The person's live page (found in review): the ROUTING text is the only
 # Codex-side rule about a capability link that reads the findings for 6 hours,
 # and the skill restates it for the agent that reads that instead. Pinned like
@@ -738,72 +636,30 @@ assert "No live_url on the body (an older server) means no page: say nothing abo
 assert "**The person's own window: `live_url`.**" in skill, "the skill must have the live_url section"
 assert "Never paste it into a PR, an issue, a commit message, a comment\nor anything shared, and never poll it yourself" in skill, "the skill must carry the never-paste, never-poll rule"
 assert "**the link stops working 6 hours after the result**" in skill, "the skill must state the link's lifetime"
-assert "its wake polls `status_url` once and reports\n  that, which is the read `wake_rule` names for a deep hunt" in codex_bullet
-assert "`status_url` read,\n  whichever that wake uses" in codex_bullet
-# A prompt rule did not hold (a heartbeat carrying wake_rule word for word still
-# answered `running` from memory for forty minutes after done): the prompt must
-# carry FACTS — an ISO retire_at the model compares to the clock — and the stop
-# must be mechanical: same turn as the read, and on the server's own
-# "first read after done" next_step. Dropping any one of the four leaves a
-# heartbeat that can outlive its hunt again.
-for phrase in (
-    # Anchored at SUBMIT and carried into every replacement: a per-job cap plus
-    # the re-arm rule is a watch that never ends.
-    "`retire_at` = submit time + 180 min", "the SAME instant into every replacement heartbeat",
-    # A retirement with a clock in it, not a verdict: 180 min is budget plus
-    # queue, so a queued deep hunt can still be live there (the wake must say so).
-    # Delete BEFORE the read: a delete behind a tool call is lost when it fails.
-    "watch-retired`, delete this\n    automation, then call `get_findings` once and report what it answered —\n    `still running` when it is",
-    "Delete BEFORE the read",
-    "retired at wake regardless of what the wake\n    believes",
-    # findings=N on the TERMINAL line only; the enumeration carries that form.
-    # Keyed on the wake's READ, not a tool call: a deep wake polls status_url.
-    "read from that wake's read — `wait_review`, `get_findings`\n    or the `status_url` body", "Non-terminal wakes keep the enumerated lines",
-    "no answer from this wake's\n    read → the only line allowed is `bughunt · <mode> · poll-failed`",
-    "done for more than ten minutes",
-    "On `failed`, or on `done` without\n    `awaiting_verdicts`, `automation_update` deletes this heartbeat",
-    "If the automation still exists at the next wake after a terminal",
-    "begins \"this is the first read after done\"", "delete it in that same turn",
-):
-    assert phrase in codex_bullet, phrase
-assert "terminal by construction" not in skill, "the age cap is a retirement, not a verdict about the review"
-assert "`bughunt · fast · done · findings=N`" in codex_bullet, "the enumerated lines must carry the terminal form"
-for phrase in (
-    "retire_at = submit time + 180 min", "the same instant into every replacement heartbeat", "print bughunt · <mode> · watch-retired, delete this automation, then call get_findings once and report what it answered (still running when it is",
-    "delete before the read",
-    "whatever the wake believes",
-    "on done print findings=N from that wake's read (wait_review, get_findings or the status_url body", "non-terminal wakes keep the enumerated lines",
-    "no answer from a wake's read means the only line allowed is bughunt · <mode> · poll-failed", "done for over ten minutes",
-    "delete the heartbeat in the same turn as the read",
-    'next_step begins "this is the first read after done"', "delete it in that same turn",
-):
-    assert phrase in router_text, phrase
-assert "terminal by construction" not in router_text
 # The CronCreate fallback is the other model-driven wake: a fresh cron turn has
 # no creation time, so the same ISO instant and the same first-read clause
 # travel in its prompt (rev: the remedy had landed on the Codex heartbeat only).
-assert "past `<retire_at>`" in claude_bullet
+assert "past `<retire_at>` (an\n  ISO timestamp you substitute at creation: the SUBMIT time + 180 minutes,\n  carried unchanged into every replacement job" in claude_bullet
+assert "now + 180" not in skill and "tool result" not in codex_bullet
+assert "begins \"this is the first read after done\", say so" in claude_bullet
 assert "print `findings=N` from that answer" in claude_bullet
-assert "status_url" in router_text
+# The count is `done`'s alone on this surface too: the Codex rule scopes it to
+# done and the enumerated failed line is bare, but the cron prompt read
+# "on done/failed … print findings=N" (rev: a failed hunt has no count to quote).
+# ...but the READ stays on both branches: this surface polls with curl, so
+# its get_findings is the only tool call that clears the pending record on a
+# failed hunt (rev: the first cut dropped the call with the count, and the
+# gate then said "a hunt is RUNNING" until the record aged out).
+assert "on `done` or `failed` call `get_findings`" in claude_bullet
+assert "on `done`\n  print `findings=N` from that answer, on `failed` the bare `bughunt ·\n  <mode> · failed`" in claude_bullet
+assert "on done/failed call `get_findings`" not in claude_bullet
+assert "on `failed` print the bare" not in claude_bullet, "a bare print on failed with no read leaves the pending record"
+# The age-cap retirement is honest on this surface too: a bare watch-retired on
+# a live hunt reads as "the hunt is over" (the queued deep hunt past 180 min).
+assert "either\n  way print what that `get_findings` answered — `still running` when it is" in claude_bullet
 for text in (skill, router_text):
     assert "timeout_s=225" not in text, "a 225 s hold is capped by the server to 45 s"
     assert "client MCP timeout" not in text and "client-side timeout" not in text, "the clamp answers; it does not kill the socket"
-assert "never a wake to\n  count towards the retirement rule" in skill
-assert "never a wake to count towards retirement" in router_text
-# The stop rule, in its own words on each surface: every bare needs_files
-# token in the tuples above is satisfied by a neighbouring sentence, so deleting
-# this clause used to ship green — and a wake that keeps waiting through a
-# needs_files answer burns a file request that is held open for minutes.
-assert "On `needs_files`, send files first." in skill
-assert "A done answer with `awaiting_verdicts: true` is a verdict hand-off: keep this heartbeat" in router_text
-# The wake's shape is one read, on both surfaces, in the same words: a wake that
-# loops is still holding the thread when the next one fires. The budget
-# arithmetic that used to size the loop (holds plus round trips against the
-# cadence) is gone with it — there is nothing left to size.
-for text in (skill, router_text):
-    assert "a wake that\n  loops is still holding the thread when the next one fires" in text or "a wake that loops is still holding the thread when the next one fires" in text
-    assert "225s" not in text and "225 seconds" not in text
-assert "15-second gap" not in skill and "handover slack" not in skill
 # The no-monitor fallback is the one place with no heartbeat to hand the wait
 # to, so it must keep waiting for a DEEP hunt as well: one call there ends the
 # turn on an hour-long review nobody reads. It waits at the server's cadence —
@@ -847,7 +703,7 @@ for phrase in ("unless the user asked for the deep hunt in their own words (deep
                "On your own initiative start deep only after the server returns deep_offer",
                "A refusal of a deep-first request (repo_required, repo_too_big, commit_required, fast_running, deep_at_capacity) is shown to the user verbatim",
                "never a silent downgrade to fast",
-               "its compact line reads bughunt · deep · running"):
+               "A deep-first hunt follows the same foreground wait procedure"):
     assert phrase in session_text, phrase
 assert "Only start deep after the server returns deep_offer" not in session_text
 assert DEEP_MARK not in session_text
@@ -934,7 +790,7 @@ assert "`deep` / `--deep` is the user asking for the deep hunt up front" in revi
 # The Codex sentence is what Codex sessions get: pinned in the emitted text, and mode asks are routed.
 for phrase in ("goes as submit_review's top-level mode; with none named send no mode", "never mode: fast",
                "(mode_unavailable, mode_needs_repo, mode_too_large, mode_with_deep)", "never a silent switch", "Never send mode with deep",
-               "The heartbeat's <mode> is the submit answer's hunt_mode", "with none named send no mode: on a pushed commit the service may start with a first step"):
+               "The status line's <mode> is the submit answer's hunt_mode", "with none named send no mode: on a pushed commit the service may start with a first step"):
     assert phrase in router_text, phrase
 assert "and the hunt is fast" not in router_text and "follow the routed hunt rules" in router_text and "get the fast hunt" in router_text
 assert "Before the submit of a named mode say the mode and its price from get_balance modes in one line." in router_text and "none named say the fast hunt and its price" not in router_text
@@ -968,12 +824,11 @@ assert plugin["mcpServers"] == "./.codex-mcp.json"
 assert sorted(plugin["hooks"]) == sorted(["./hooks/hooks.json", "./hooks/claude-codex-hooks.json"]), plugin["hooks"]
 interface = plugin["interface"]
 for field in ("logo", "composerIcon"):
-    path = Path(manifest).parent.parent / interface[field].removeprefix("./")
+    path = Path(manifest).parent.parent / interface[field]
     assert path.is_file(), (field, path)
-assert interface["screenshots"] == []
 codex_hook_commands = []
 for hook_file in plugin["hooks"]:
-    data = json.load(open(Path(manifest).parent.parent / hook_file.removeprefix("./"), encoding="utf-8"))
+    data = json.load(open(Path(manifest).parent.parent / hook_file, encoding="utf-8"))
     codex_hook_commands.extend(k["command"] for groups in data["hooks"].values() for group in groups for k in group.get("hooks", []))
 assert sum(command.endswith("/version-check.sh") for command in codex_hook_commands) == 1
 codex_mcp = json.load(open(mcp, encoding="utf-8"))

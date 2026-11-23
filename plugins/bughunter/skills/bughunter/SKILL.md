@@ -65,128 +65,11 @@ the deep hunt outright (§3b: their words, never your judgement); then it is one
 `get_findings`/`wait_review` result before doing anything else. On your own
 initiative deep is strictly sequential: call it only when the server returned
 `deep_offer` and the user explicitly agreed. Never report a clean merge or
-finish the turn while a review is running; keep the wait active or arm a
-monitor and resume on its event.
+finish the turn while a Codex review is running.
 
-**Arm the monitor immediately after every successful submit (fast and deep).**
-This is a required client action, not a reminder to do later:
+**After the submit (fast or deep)**
 
-- **Codex:** immediately read the submit response's `monitor` object, then call
-  `automation_update` with `destination=thread` (not `targetThreadId`; destination
-  binds the current thread), using that exact `review_id`, `status_url`, `interval_s`,
-  `heartbeat_s`, `wake_on`, `stop_on` and `wake_rule` — every number the wake
-  will measure against goes into the prompt, because a wake fires in a fresh
-  context holding nothing but that prompt; copy `wake_rule` into the prompt word for word,
-  because it is the sentence that makes a wake a reading rather than a
-  recollection: every wake reports the status it just read — from `wait_review`
-  or `get_findings` on a fast hunt, from the `status_url` read on a deep one —
-  and a wake with no answer prints `bughunt · <mode> · poll-failed`, never the
-  previous status. A heartbeat that
-  answers from memory reported `running` on three wakes — twelve minutes — after
-  the hunt was done, and the merge waited on it. A done answer carrying
-  `awaiting_verdicts: true` is a verdict hand-off. Keep this watcher, judge the
-  findings, and let the next wake read the result. A done answer without that
-  field follows the server's terminal contract. A foreground `get_findings` is
-  a hand-off after a wake, never a second poll beside a live watcher. Update an
-  existing heartbeat for the same review instead of creating a duplicate, and
-  retire or replace any heartbeat pointing at an older review. The heartbeat
-  uses the monitor's `logical_key` as its watcher identity. If
-  `automation_update` exposes atomic upsert, pass that key with
-  `destination=thread`. Otherwise use the automation id supplied by the
-  current heartbeat and never edit Codex automation files by hand.
-  **The automation is the cadence; a wake is one read.** The heartbeat
-  fires once per `interval_s`, and inside a wake the prompt makes ONE read and
-  ends: `get_findings(review_id)`, or one `wait_review(review_id)` with its
-  default hold — the server caps the hold whatever `timeout_s` you ask for and
-  answers the ordinary body plus `timed_out: true` and a `next_step` when it
-  expires, so a bigger `timeout_s` buys no extra waiting, and a `timed_out: true`
-  answer IS this wake's reading: `running`, from a healthy server, never a wake to
-  count towards the retirement rule below. Do not loop either call inside the
-  wake to "cover the cadence": the cadence is the automation's, and a wake that
-  loops is still holding the thread when the next one fires — measured as a
-  client polling once a minute against a contract that says once per four. The
-  one exception is the one the hand-wait fallback below has: a PAYLOAD submit
-  (§2, rung 3) while a file request can still arrive. There nothing else is
-  watching for `needs_files` — the server serves files itself only when it can
-  read the repo — and the request is held open for minutes, so inside that wake
-  call `wait_review` back to back (each answer is a reading; it returns the
-  moment `needs_files` shows) and stop when the answer is `done`, `failed` or
-  `needs_files` — or before the next wake is due: start another hold only if
-  it, its round trip, and one more round trip for the handover's own calls
-  would end inside `heartbeat_s` from this wake's start. The line must land by
-  then, and what is left before `interval_s` is the handover — the status line,
-  the delete — so the next wake finds the thread free. A hold costs the
-  server's cap plus the call's round trip, and the handover's calls are round
-  trips too: a bound that subtracts the hold alone lets the last one return
-  exactly as the next wake fires, and one that leaves the handover to the
-  `heartbeat_s`–`interval_s` gap shrinks it on exactly the slow links whose
-  calls need it. A repo or deep submit never needs this. A
-  deep hunt runs up to 2 hours: its wake polls `status_url` once and reports
-  that, which is the read `wake_rule` names for a deep hunt. That body
-  keys a file request off `awaiting_client_files`/`files_requested`, not off its
-  status word, so a wake that sees either flag prints `bughunt · <mode> ·
-  needs-files` and serves the files first. If the poll itself fails, the wake
-  falls back to one `get_findings` before it counts as a wake that read nothing.
-  On `needs_files`, send files first. On `failed`, or on `done` without
-  `awaiting_verdicts`, process the result and delete the heartbeat. On
-  `done` with `awaiting_verdicts`, judge the findings and let the next wake
-  read the result. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Retire it too when
-  it is older than 180 minutes or after 3 consecutive wakes that could not read
-  a status at all — a failed `wait_review`, `get_findings` or `status_url` read,
-  whichever that wake uses: print `bughunt · <mode> ·
-  watch-retired`, then delete it, then call `get_findings` once: if the review is
-  still running or waiting for files, tell the user and — if the retirement came
-  from unreadable wakes, not from the age cap — arm a fresh heartbeat: a live
-  hunt must not lose its watch, and a heartbeat nothing can satisfy must not
-  wake the thread forever, so the age cap is the one that ends it for good.
-  Keep each wake-up to
-  one compact line (`bughunt · fast · running`, `bughunt · files-sent`,
-  `bughunt · fast · needs-files`, `bughunt · fast · done · findings=N`,
-  `bughunt · fast · failed`, `bughunt · fast · poll-failed`, or
-  `bughunt · fast · watch-retired`).
-  Write the next sentence into the heartbeat prompt word for word, because a
-  wake is often the only read of a finished hunt: "Besides its one bughunt
-  status line, when this wake's read carries deep_offer (and, if it carries
-  route_state, also final: true), print deep_offer.pitch word for word after
-  that line, ask whether to start the deep hunt, and call no submit_review in
-  this wake: the answer is the user's; copy this sentence into any heartbeat
-  that replaces this one."
-  A rule in the prompt did not hold: a heartbeat whose prompt carried the
-  wake_rule word for word still answered `running` from memory for forty
-  minutes after the hunt was done. So the prompt carries FACTS the model can
-  check, and the stop is mechanical, not a judgement:
-  - **The age cap is an instant, not a duration.** At the submit compute
-    `retire_at` = submit time + 180 min and write it into the prompt as an ISO
-    timestamp — the SAME instant into every replacement heartbeat, so the cap
-    bounds the review, not each job in turn: "If the current time is past
-    `<retire_at>`: print `bughunt · <mode> · watch-retired`, delete this
-    automation, then call `get_findings` once and report what it answered —
-    `still running` when it is, so the user knows the watch ended on a live
-    hunt." Delete BEFORE the read: a delete that waits on a tool call is lost
-    when that call fails, and the next wake fails the same way forever. That is the age-cap
-    retirement above with a clock in it, not a verdict: 180 min is the hunt's
-    budget plus queue time, so a queued deep hunt can still be live there. A
-    clock the model compares beats an instruction it can skip; any heartbeat
-    older than its `retire_at` is retired at wake regardless of what the wake
-    believes.
-  - **A terminal line quotes the answer it came from.** On `done`, print
-    `findings=N` read from that wake's read — `wait_review`, `get_findings`
-    or the `status_url` body, all of which carry a findings count (`bughunt ·
-    fast · done · findings=3`) — the bare word is what a memory produces.
-    Non-terminal wakes keep the enumerated lines; no answer from this wake's
-    read → the only line allowed is `bughunt · <mode> · poll-failed`.
-  - **Stop in the same turn as the read.** On `failed`, or on `done` without
-    `awaiting_verdicts`, `automation_update` deletes this heartbeat in the turn
-    that read the status. On a verdict hand-off, keep the heartbeat for the next
-    wake. If the automation still exists at the next wake after a terminal
-    read, delete it first, then report.
-  - **The server names an overrun.** When a `get_findings` answer's
-    `next_step` begins "this is the first read after done", this heartbeat
-    outlived the hunt: delete it in that same turn and say so — that sentence
-    is the server's record of the wake this rule exists to prevent. The server
-    sends it only when the hunt has been done for more than ten minutes and
-    nothing has read its findings since, so a wake that catches `done` within
-    one cadence never sees it.
+- **Codex:** Wait in the current turn for this review. Do not create a scheduled automation for a hunt. Resume the review_id returned by `submit_review` or already_running. Use the foreground wait procedure in the bughunter skill, including its payload file-request cadence. Reuse the current review on a status request. Follow `watch.do` before ordinary status handling. On move, switch to the named child and its cadence. On judge, verify and confirm the named findings once, then resume. Follow keep, done, resubmit and unavailable as specified in the server response. With an older server follow a nonfinal route_state before interpreting done or failed, and follow continued_by until final. On ordinary done, stop polling, use the findings already returned or fetch them with get_findings. Verify and confirm them in this turn, including an empty result. Take get_attestation on the final review. Show a final deep_offer.pitch verbatim and ask before escalation. If resuming a legacy scheduled wake, retire its own verified automation id before continuing here. When recovering a lost id, use the host automation inventory or read its definitions under `$CODEX_HOME/automations` (default `~/.codex/automations`). Match the thread and exact review id. Leave ambiguous matches alone.
 - **Claude Code:** immediately start the monitor described below with the
   **`Bash` tool, `run_in_background: true`** – not the `Monitor` tool, whose
   calls one client model breaks with an empty `ws` argument and then repeats
@@ -1112,7 +995,7 @@ what THAT answered.** `done` there is `done`: read the findings and do not
 re-arm; otherwise re-arm the same command. The loop keeps writing the watch file through an outage because the
 watcher is alive, so the Stop hook stays quiet for as long as the loop tolerates
 failures (15 minutes with no answer); this read is what keeps a review from sitting `done` and
-unread behind that silence — the Codex wake and the cron job already read on a
+unread behind that silence — the foreground wait and the cron job already read on a
 failed poll, and this surface must not be the one that only prints.
 
 The loop above keeps the five properties below, and each line of it is

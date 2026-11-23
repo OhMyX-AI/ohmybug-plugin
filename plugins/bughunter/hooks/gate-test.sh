@@ -2329,7 +2329,7 @@ esac
 # whose calls one client model breaks and then repeats for the rest of the
 # turn, and not a bare background shell that wakes the session once, at exit.
 case $said in
-  *'Bash run_in_background, re-armed on each'*'automation_update'*) ;;
+  *'Bash run_in_background, re-armed on each'*'wait in this turn with wait_review'*) ;;
   *) printf 'FAIL nudge no longer names the heartbeat monitor per client: %s\n' "$said"
      fails=$((fails + 1)) ;;
 esac

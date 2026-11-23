@@ -192,10 +192,10 @@ ALSO=''
 
 echo "ohmybug: $WHOSE: $IDS — do not end the turn waiting" \
      "to be prodded. Call get_findings on each now, unless you already know one is still" \
-     "running: for those, arm the heartbeat monitor on the status_url per the bughunter" \
+     "running: for those, follow the waiting procedure in the bughunter" \
      "skill (Claude Code: the skill's loop with Bash run_in_background, re-armed on each" \
-     "line it prints; Codex: automation_update + wait_review) so it" \
-     "wakes you, rather than polling in a loop or waiting for a background shell to exit." \
+     "line it prints; Codex: wait in this turn with wait_review). Continue when the review" \
+     "needs files or has a result." \
      "On Claude Code the skill's loop writes ~/.ohmybug/watch/<review_id> on every poll and" \
      "this hook is silent while that file is fresh — so a nag beside a loop" \
      "you armed there means it is dead OR it exited on a state to read now (done, failed," \
