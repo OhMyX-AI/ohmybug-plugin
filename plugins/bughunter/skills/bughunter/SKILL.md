@@ -92,8 +92,11 @@ This is a required client action, not a reminder to do later:
   creating a duplicate, and retire/replace any heartbeat pointing at an older
   review. The heartbeat uses the monitor's `logical_key` as its one watcher
   identity. If `automation_update` exposes atomic upsert, pass that key with
-  `destination=thread`. Otherwise use the automation id supplied by the
-  current heartbeat and do not edit automation files by hand.
+  `destination=thread`. If the automation id is missing and upsert is not
+  available, make one read-only lookup in `~/.codex/automations/*/automation.toml`
+  for the current thread and logical key, then use `automation_update` to update
+  the match and delete duplicates before creating anything. Never edit those
+  files by hand.
   **The automation is the cadence; a wake is one read.** The heartbeat
   fires once per `interval_s`, and inside a wake the prompt makes ONE read and
   ends: `get_findings(review_id)`, or one `wait_review(review_id)` with its
