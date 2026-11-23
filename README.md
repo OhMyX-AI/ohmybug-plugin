@@ -122,11 +122,11 @@ exits with an error, and by then the plugin, the MCP server and the sign-in are
 already in place. Update that Codex the way it was installed.
 
 After installation or an update that changes a hook definition, open
-`/hooks`, review the OhMyBug hooks and trust the ones you want to run.
-Then start a new Codex thread. Codex skips non-managed plugin hooks
-until you trust their current definition; without that step the skill and MCP
-still install, but automatic review routing is not active. Then ask Codex to
-run the OhMyBug cloud hunt (or use the plugin's starter prompt). A local
+`/hooks`, review the OhMyBug hooks and trust the complete set if you want
+routing, the merge gate and hunt recording. Then start a new Codex thread.
+Codex skips non-managed plugin hooks until you trust their current definition.
+Without that step the skill and MCP still install, but the automatic workflow
+is not active. Ask Codex to run the OhMyBug cloud hunt (or use the plugin's starter prompt). A local
 `APPROVE` from a code-review agent is not merge evidence.
 
 Hook approval stays under your control because trusted hooks can execute commands.

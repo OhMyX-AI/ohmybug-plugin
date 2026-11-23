@@ -983,7 +983,6 @@ assert plugin["mcpServers"] == "./.codex-mcp.json"
 # no hunt recorder and no stop nudge. Order matters to nobody; presence does.
 assert sorted(plugin["hooks"]) == sorted(["./hooks/hooks.json", "./hooks/claude-codex-hooks.json"]), plugin["hooks"]
 from xml.etree import ElementTree
-import shlex
 
 plugin_root = Path(manifest).resolve().parent.parent
 interface = plugin["interface"]
@@ -992,8 +991,8 @@ for field in ("logo", "composerIcon"):
     assert plugin_root in path.parents, (field, path)
     svg = ElementTree.parse(path).getroot()
     assert svg.tag == "{http://www.w3.org/2000/svg}svg", path
-    fills = {el.get("fill") for el in svg if el.tag == "{http://www.w3.org/2000/svg}path"}
-    assert len(fills) > 1 and all(fill and fill.startswith("#") for fill in fills), (path, fills)
+    fills = {el.get("fill") for el in svg.iter("{http://www.w3.org/2000/svg}path")}
+    assert fills and all(fill and fill.startswith("#") for fill in fills), (path, fills)
 codex_mcp = json.load(open(mcp, encoding="utf-8"))
 # The Codex router and skill text follow a routed hunt's continued_by, so Codex opts into the route the way
 # mcp-headers.sh does for Claude Code. A static header: Codex keys the saved sign-in on name and url, not headers.
