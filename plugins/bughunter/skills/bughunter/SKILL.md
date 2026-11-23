@@ -56,6 +56,8 @@ trusts the current definition in `/hooks`. Tell the user to do that after
 installing and before relying on automatic routing. The skill and MCP server
 remain usable without the hook, but a local advisory review is never a
 substitute for the cloud hunt.
+The plugin cannot grant this trust itself because Codex keeps command-running
+hooks under the user's control.
 
 The first cloud call is the fast `submit_review` – unless the user asked for
 the deep hunt outright (§3b: their words, never your judgement); then it is one
@@ -81,9 +83,18 @@ This is a required client action, not a reminder to do later:
   and a wake with no answer prints `bughunt · <mode> · poll-failed`, never the
   previous status. A heartbeat that
   answers from memory reported `running` on three wakes — twelve minutes — after
-  the hunt was done, and the merge waited on it. Update an existing heartbeat for the same review instead of
+  the hunt was done, and the merge waited on it. A `done` read carrying
+  `awaiting_verdicts: true` is the `verdicts` hand-off, not a terminal read.
+  Keep the same watcher, judge the findings, and read again. If that field is
+  absent, follow the response's `stop_on` contract. A foreground
+  `get_findings` is a hand-off after a wake, never a second poll beside a live
+  watcher. Update an existing heartbeat for the same review instead of
   creating a duplicate, and retire/replace any heartbeat pointing at an older
-  review. **The automation is the cadence; a wake is one read.** The heartbeat
+  review. The heartbeat uses the monitor's `logical_key` as its one watcher
+  identity. If `automation_update` exposes atomic upsert, pass that key with
+  `destination=thread`. Otherwise use the automation id supplied by the
+  current heartbeat and do not edit automation files by hand.
+  **The automation is the cadence; a wake is one read.** The heartbeat
   fires once per `interval_s`, and inside a wake the prompt makes ONE read and
   ends: `get_findings(review_id)`, or one `wait_review(review_id)` with its
   default hold — the server caps the hold whatever `timeout_s` you ask for and
@@ -116,7 +127,8 @@ This is a required client action, not a reminder to do later:
   status word, so a wake that sees either flag prints `bughunt · <mode> ·
   needs-files` and serves the files first. If the poll itself fails, the wake
   falls back to one `get_findings` before it counts as a wake that read nothing.
-  On `needs_files`, send files first; on `done` or
+  On `needs_files`, send files first; on `verdicts`, judge the findings and
+  re-arm the same watcher; on `done` without `awaiting_verdicts`, or on
   `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Retire it too when
   it is older than 180 minutes or after 3 consecutive wakes that could not read
   a status at all — a failed `wait_review`, `get_findings` or `status_url` read,
@@ -129,6 +141,7 @@ This is a required client action, not a reminder to do later:
   Keep each wake-up to
   one compact line (`bughunt · fast · running`, `bughunt · files-sent`,
   `bughunt · fast · needs-files`, `bughunt · fast · done · findings=N`,
+  `bughunt · fast · verdicts`,
   `bughunt · fast · failed`, `bughunt · fast · poll-failed`, or
   `bughunt · fast · watch-retired`).
   Write the next sentence into the heartbeat prompt word for word, because a

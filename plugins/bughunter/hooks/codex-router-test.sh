@@ -77,7 +77,7 @@ session_text = session["hookSpecificOutput"]["additionalContext"]
 # timed_out:true — and that answer is the wake's reading, not a reason to loop:
 # a wake that loops holds the thread when the next one fires, measured as a
 # client polling once a minute against a four-minute contract.
-for phrase in ("submit_review", "wait_review", "automation_update", "destination=thread", "heartbeat at the response's monitor.interval_s", "The automation is the cadence and a wake is one read", "make ONE read and end", "timed_out:true", "never loop either call inside the wake", "stop on done, failed or needs_files", "answer needs_files first", "review_report", "get_attestation", "never run fast and deep in parallel"):
+for phrase in ("submit_review", "wait_review", "automation_update", "destination=thread", "monitor.logical_key", "atomic upsert", "awaiting_verdicts", "heartbeat at the response's monitor.interval_s", "The automation is the cadence and a wake is one read", "make ONE read and end", "timed_out:true", "never loop either call inside the wake", "stop on done, failed or needs_files", "answer needs_files first", "review_report", "get_attestation", "never run fast and deep in parallel"):
     assert phrase in session_text, phrase
 assert "local code-review" in session_text
 # The proof and its hand-off are two steps, and a Codex session has no hook
@@ -810,7 +810,7 @@ assert "never a wake to count towards retirement" in router_text
 # token in the tuples above is satisfied by a neighbouring sentence, so deleting
 # this clause used to ship green — and a wake that keeps waiting through a
 # needs_files answer burns a file request that is held open for minutes.
-assert "On `needs_files`, send files first; on `done` or\n  `failed`, process the result and delete the heartbeat" in skill
+assert "On `needs_files`, send files first; on `verdicts`, judge the findings and\n  re-arm the same watcher; on `done` without `awaiting_verdicts`, or on\n  `failed`, process the result and delete the heartbeat" in skill
 assert "stop on done, failed or needs_files" in router_text
 # The wake's shape is one read, on both surfaces, in the same words: a wake that
 # loops is still holding the thread when the next one fires. The budget
@@ -982,6 +982,18 @@ assert plugin["mcpServers"] == "./.codex-mcp.json"
 # hooks/hooks.json, so naming only the router left Codex with no merge gate,
 # no hunt recorder and no stop nudge. Order matters to nobody; presence does.
 assert sorted(plugin["hooks"]) == sorted(["./hooks/hooks.json", "./hooks/claude-codex-hooks.json"]), plugin["hooks"]
+interface = plugin["interface"]
+for field in ("logo", "composerIcon"):
+    path = Path(manifest).parent.parent / interface[field].removeprefix("./")
+    assert path.is_file(), (field, path)
+assert interface["screenshots"] == []
+claude = json.load(open(str(Path(manifest).parent.parent / ".claude-plugin/plugin.json"), encoding="utf-8"))
+assert claude["icon"] == "./assets/logo.svg"
+codex_hook_commands = []
+for hook_file in plugin["hooks"]:
+    data = json.load(open(Path(manifest).parent.parent / hook_file.removeprefix("./"), encoding="utf-8"))
+    codex_hook_commands.extend(k["command"] for groups in data["hooks"].values() for group in groups for k in group.get("hooks", []))
+assert sum(command.endswith("/version-check.sh") for command in codex_hook_commands) == 1
 codex_mcp = json.load(open(mcp, encoding="utf-8"))
 # The Codex router and skill text follow a routed hunt's continued_by, so Codex opts into the route the way
 # mcp-headers.sh does for Claude Code. A static header: Codex keys the saved sign-in on name and url, not headers.

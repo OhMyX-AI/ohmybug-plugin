@@ -10,17 +10,30 @@
   "homepage": "https://ohmybug.ai",
   "repository": "https://github.com/OhMyX-AI/ohmybug-plugin",
   "license": "MIT",
-  "keywords": ["code-review", "bugs", "quality", "merge-gate", "mcp"],
+  "keywords": [
+    "code-review",
+    "bugs",
+    "quality",
+    "merge-gate",
+    "mcp"
+  ],
   "skills": "./skills/",
   "mcpServers": "./.codex-mcp.json",
-  "hooks": ["./hooks/hooks.json", "./hooks/claude-codex-hooks.json"],
+  "hooks": [
+    "./hooks/hooks.json",
+    "./hooks/claude-codex-hooks.json"
+  ],
   "interface": {
     "displayName": "OhMyBug Bughunter",
     "shortDescription": "Cloud bug hunt as your code review",
     "longDescription": "Run the OhMyBug cloud hunt through MCP, verify every finding locally, and use server attestation as the only merge authority.",
     "developerName": "OhMyBug",
     "category": "Developer Tools",
-    "capabilities": ["Interactive", "Read", "Write"],
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
     "websiteURL": "https://ohmybug.ai",
     "privacyPolicyURL": "https://ohmybug.ai/privacy",
     "termsOfServiceURL": "https://ohmybug.ai/terms",
@@ -30,6 +43,9 @@
       "Review my current changes for real bugs.",
       "Show the verified findings and merge gate evidence."
     ],
-    "brandColor": "#E5484D"
+    "brandColor": "#E5484D",
+    "logo": "./assets/logo.svg",
+    "composerIcon": "./assets/logo.svg",
+    "screenshots": []
   }
 }

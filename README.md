@@ -128,6 +128,10 @@ still install, but automatic review routing is not active. Then ask Codex to
 run the OhMyBug cloud hunt (or use the plugin's starter prompt). A local
 `APPROVE` from a code-review agent is not merge evidence.
 
+The plugin cannot grant this trust to itself. Codex keeps hook approval under
+your control because trusted hooks can run commands on the machine. The current
+definition is shown again when a plugin update changes it.
+
 ### Existing skill-only installs
 
 If the plugin was installed with `npx skills add`, keep the skill and add the
