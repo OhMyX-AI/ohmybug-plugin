@@ -987,8 +987,6 @@ for field in ("logo", "composerIcon"):
     path = Path(manifest).parent.parent / interface[field].removeprefix("./")
     assert path.is_file(), (field, path)
 assert interface["screenshots"] == []
-claude = json.load(open(str(Path(manifest).parent.parent / ".claude-plugin/plugin.json"), encoding="utf-8"))
-assert claude["icon"] == "./assets/logo.svg"
 codex_hook_commands = []
 for hook_file in plugin["hooks"]:
     data = json.load(open(Path(manifest).parent.parent / hook_file.removeprefix("./"), encoding="utf-8"))

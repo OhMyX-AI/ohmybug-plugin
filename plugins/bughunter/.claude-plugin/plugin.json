@@ -10,6 +10,5 @@
   "homepage": "https://ohmybug.ai",
   "hooks": [
     "./hooks/mods.json"
-  ],
-  "icon": "./assets/logo.svg"
+  ]
 }
