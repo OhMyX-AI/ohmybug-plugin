@@ -83,20 +83,17 @@ This is a required client action, not a reminder to do later:
   and a wake with no answer prints `bughunt · <mode> · poll-failed`, never the
   previous status. A heartbeat that
   answers from memory reported `running` on three wakes — twelve minutes — after
-  the hunt was done, and the merge waited on it. A `done` read carrying
-  `awaiting_verdicts: true` is the `verdicts` hand-off, not a terminal read.
-  Keep the same watcher, judge the findings, and read again. If that field is
-  absent, follow the response's `stop_on` contract. A foreground
-  `get_findings` is a hand-off after a wake, never a second poll beside a live
-  watcher. Update an existing heartbeat for the same review instead of
-  creating a duplicate, and retire/replace any heartbeat pointing at an older
-  review. The heartbeat uses the monitor's `logical_key` as its one watcher
-  identity. If `automation_update` exposes atomic upsert, pass that key with
-  `destination=thread`. If the automation id is missing and upsert is not
-  available, make one read-only lookup in `~/.codex/automations/*/automation.toml`
-  for the current thread and logical key, then use `automation_update` to update
-  the match and delete duplicates before creating anything. Never edit those
-  files by hand.
+  the hunt was done, and the merge waited on it. A done answer carrying
+  `awaiting_verdicts: true` is a verdict hand-off. Keep this watcher, judge the
+  findings, and let the next wake read the result. A done answer without that
+  field follows the server's terminal contract. A foreground `get_findings` is
+  a hand-off after a wake, never a second poll beside a live watcher. Update an
+  existing heartbeat for the same review instead of creating a duplicate, and
+  retire or replace any heartbeat pointing at an older review. The heartbeat
+  uses the monitor's `logical_key` as its watcher identity. If
+  `automation_update` exposes atomic upsert, pass that key with
+  `destination=thread`. Otherwise use the automation id supplied by the
+  current heartbeat and never edit Codex automation files by hand.
   **The automation is the cadence; a wake is one read.** The heartbeat
   fires once per `interval_s`, and inside a wake the prompt makes ONE read and
   ends: `get_findings(review_id)`, or one `wait_review(review_id)` with its
@@ -130,9 +127,10 @@ This is a required client action, not a reminder to do later:
   status word, so a wake that sees either flag prints `bughunt · <mode> ·
   needs-files` and serves the files first. If the poll itself fails, the wake
   falls back to one `get_findings` before it counts as a wake that read nothing.
-  On `needs_files`, send files first; on `verdicts`, judge the findings and
-  re-arm the same watcher; on `done` without `awaiting_verdicts`, or on
-  `failed`, process the result and delete the heartbeat. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Retire it too when
+  On `needs_files`, send files first. On `failed`, or on `done` without
+  `awaiting_verdicts`, process the result and delete the heartbeat. On
+  `done` with `awaiting_verdicts`, judge the findings and let the next wake
+  read the result. A read that carries a `route_state` other than `final` is not the end, whatever its status says: follow §the routed hunt under the watch loop (`awaiting_verdicts` → judge, then keep waiting; `continued` → wait on the review `continued_by` names). Retire it too when
   it is older than 180 minutes or after 3 consecutive wakes that could not read
   a status at all — a failed `wait_review`, `get_findings` or `status_url` read,
   whichever that wake uses: print `bughunt · <mode> ·
@@ -144,7 +142,6 @@ This is a required client action, not a reminder to do later:
   Keep each wake-up to
   one compact line (`bughunt · fast · running`, `bughunt · files-sent`,
   `bughunt · fast · needs-files`, `bughunt · fast · done · findings=N`,
-  `bughunt · fast · verdicts`,
   `bughunt · fast · failed`, `bughunt · fast · poll-failed`, or
   `bughunt · fast · watch-retired`).
   Write the next sentence into the heartbeat prompt word for word, because a
@@ -178,9 +175,10 @@ This is a required client action, not a reminder to do later:
     fast · done · findings=3`) — the bare word is what a memory produces.
     Non-terminal wakes keep the enumerated lines; no answer from this wake's
     read → the only line allowed is `bughunt · <mode> · poll-failed`.
-  - **Stop in the same turn as the read.** On `done` or `failed`,
-    `automation_update` deletes this heartbeat in the turn that read the
-    status. If the automation still exists at the next wake after a terminal
+  - **Stop in the same turn as the read.** On `failed`, or on `done` without
+    `awaiting_verdicts`, `automation_update` deletes this heartbeat in the turn
+    that read the status. On a verdict hand-off, keep the heartbeat for the next
+    wake. If the automation still exists at the next wake after a terminal
     read, delete it first, then report.
   - **The server names an overrun.** When a `get_findings` answer's
     `next_step` begins "this is the first read after done", this heartbeat
