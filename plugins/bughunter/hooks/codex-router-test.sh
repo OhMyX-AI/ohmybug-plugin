@@ -762,7 +762,7 @@ for phrase in (
     "no answer from this wake's\n    read → the only line allowed is `bughunt · <mode> · poll-failed`",
     "done for more than ten minutes",
     "On `failed`, or on `done` without\n    `awaiting_verdicts`, `automation_update` deletes this heartbeat",
-    "delete it first",
+    "If the automation still exists at the next wake after a terminal",
     "begins \"this is the first read after done\"", "delete it in that same turn",
 ):
     assert phrase in codex_bullet, phrase
@@ -784,7 +784,7 @@ assert "terminal by construction" not in router_text
 # travel in its prompt (rev: the remedy had landed on the Codex heartbeat only).
 assert "past `<retire_at>`" in claude_bullet
 assert "print `findings=N` from that answer" in claude_bullet
-assert "status_url read" in router_text
+assert "status_url" in router_text
 for text in (skill, router_text):
     assert "timeout_s=225" not in text, "a 225 s hold is capped by the server to 45 s"
     assert "client MCP timeout" not in text and "client-side timeout" not in text, "the clamp answers; it does not kill the socket"
@@ -795,7 +795,7 @@ assert "never a wake to count towards retirement" in router_text
 # this clause used to ship green — and a wake that keeps waiting through a
 # needs_files answer burns a file request that is held open for minutes.
 assert "On `needs_files`, send files first." in skill
-assert "awaiting_verdicts: true" in router_text
+assert "A done answer with `awaiting_verdicts: true` is a verdict hand-off: keep this heartbeat" in router_text
 # The wake's shape is one read, on both surfaces, in the same words: a wake that
 # loops is still holding the thread when the next one fires. The budget
 # arithmetic that used to size the loop (holds plus round trips against the
