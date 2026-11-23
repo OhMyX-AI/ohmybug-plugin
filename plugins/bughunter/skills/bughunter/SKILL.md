@@ -54,7 +54,7 @@ advisory result and is never a hunt.
 Codex plugin hooks are non-managed and do not run until the user reviews and
 trusts the current definition in `/hooks`. Tell the user to do that after
 installing or after an update that changes a hook definition, and to trust the
-complete set before relying on routing, the merge gate or hunt recording. The skill and MCP server
+complete set before relying on routing, the merge gate, secret scanning or hunt recording. The skill and MCP server
 remain usable without the hook, but a local advisory review is never a
 substitute for the cloud hunt.
 
