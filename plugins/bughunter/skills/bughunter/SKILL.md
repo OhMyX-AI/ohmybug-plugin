@@ -42,8 +42,9 @@ The MCP server `ohmybug` provides: `submit_review`, `get_findings`,
 `next_step`, `share.ask_user` or `deep_offer.how` is the current instruction;
 this skill may be an old copy on this machine. Follow the result.
 
-An `offers_note` in a result (confirm_findings, get_balance, post_story) is for
-the user: show it once, as one line, after the result, never as a question.
+An `offers_note` in any result is for the user: show it once, as one line,
+after the result and before any question you ask, never as a question. Where a
+step says to say nothing, it stays unsaid.
 
 ## Codex routing (mandatory)
 

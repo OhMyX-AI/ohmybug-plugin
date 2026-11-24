@@ -13,5 +13,7 @@ human table:
   its price; no `modes` (an older server): leave the row out, never fill it
   from memory
 
+If the result carries `offers_note`, add it as one line after the table.
+
 One screen, no fluff. If the call fails with an authentication error, follow
 the sign-in instructions from the `bughunter` skill.
