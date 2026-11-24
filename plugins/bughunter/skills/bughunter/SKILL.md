@@ -42,6 +42,9 @@ The MCP server `ohmybug` provides: `submit_review`, `get_findings`,
 `next_step`, `share.ask_user` or `deep_offer.how` is the current instruction;
 this skill may be an old copy on this machine. Follow the result.
 
+An `offers_note` in a result (confirm_findings, get_balance, post_story) is for
+the user: show it once, as one line, after the result, never as a question.
+
 ## Codex routing (mandatory)
 
 When this skill is installed in Codex, it owns every request to review a diff,
