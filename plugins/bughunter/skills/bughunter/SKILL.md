@@ -20,7 +20,7 @@ bug – no matter how many: 4 USD for a fast hunt (a lite or snap hunt: the
 price `get_balance` `modes` lists, see "Hunt modes" below); 12 USD for a deep hunt, 24 USD for a deep
 hunt over a wide change (11 or more folder chunks). The server is the
 authority on prices: when `get_balance` `modes` or `prices`, or a
-`deep_offer.price_usd`, names a different figure, quote that one. Severity uses the merge boundary: a finding
+`deep_offer.price_usd` or a `fast_offer.pitch`, names a different figure, quote that one. Severity uses the merge boundary: a finding
 is a billable major when a reviewer would refuse the merge over it
 (`critical` / `high` / `medium`); a `low` nit is confirmed for stats and
 never billed, and neither is a real `medium` the user already deferred or
@@ -39,7 +39,7 @@ The MCP server `ohmybug` provides: `submit_review`, `get_findings`,
 "Repository scan" below).
 
 **The server's own words outrank this file.** A tool result carrying
-`next_step`, `share.ask_user` or `deep_offer.how` is the current instruction;
+`next_step`, `share.ask_user`, `deep_offer.how` or `fast_offer.how` is the current instruction;
 this skill may be an old copy on this machine. Follow the result.
 
 An `offers_note` in any result is for the user: show it once, as one line,
@@ -67,7 +67,8 @@ the deep hunt outright (§3b: their words, never your judgement); then it is one
 `submit_review` with `deep: true`. Wait for its terminal
 `get_findings`/`wait_review` result before doing anything else. On your own
 initiative deep is strictly sequential: call it only when the server returned
-`deep_offer` and the user explicitly agreed. Never report a clean merge or
+`deep_offer` and the user explicitly agreed. The same holds for a fast hunt
+started from a lite or snap hunt's `fast_offer`: only on the user's explicit yes. Never report a clean merge or
 finish the turn while a review is running; keep the wait active or arm a
 monitor and resume on its event.
 
@@ -142,7 +143,11 @@ This is a required client action, not a reminder to do later:
   route_state, also final: true), print deep_offer.pitch word for word after
   that line, ask whether to start the deep hunt, and call no submit_review in
   this wake: the answer is the user's; copy this sentence into any heartbeat
-  that replaces this one."
+  that replaces this one." And this one too, word for word: "When this wake's
+  read carries fast_offer (and, if it carries route_state, also final: true),
+  print fast_offer.pitch word for word after that line, ask whether to start
+  the fast hunt, and call no submit_review in this wake: the answer is the
+  user's; copy this sentence into any heartbeat that replaces this one."
   A rule in the prompt did not hold: a heartbeat whose prompt carried the
   wake_rule word for word still answered `running` from memory for forty
   minutes after the hunt was done. So the prompt carries FACTS the model can
@@ -1361,6 +1366,12 @@ server's `deep_offer` once the user agrees.
   its `how`: call `submit_review` again with `deep: "<review_id>"` and the
   same `meta` – the server re-fetches the diff, so you send no payload. If
   it carries `install_url`, the App install is the missing step first.
+- A finished lite or snap hunt's `get_findings` may carry `fast_offer`
+  instead: the next rung, lite/snap -> fast -> deep (such a row never carries
+  `deep_offer`; `fast_offer_withheld` means there is nothing to offer). Show
+  its `pitch` word for word as information (the price is in the pitch) and
+  ask once: whether to run the fast hunt is the user's call. On yes, follow
+  its `how`; never start the fast hunt without that yes.
 - **Pausing an offer.** When the user asks to stop being offered the deep
   hunt for a while ("not today", "not for a day"), or the mod sends you their
   "Not today", call `set_policy` with `snooze: {"deep": 24}`; the same field

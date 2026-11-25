@@ -687,6 +687,11 @@ OFFER_WAKE = ("\"Besides its one bughunt status line, when this wake's read carr
 flat_bullet = " ".join(codex_bullet.split())
 assert "print only one compact bughunt status line, and delete itself on done or failed. " + COPY_RULE + OFFER_WAKE in router_text, "ROUTING must carry the wake's offer sentence after the one-line rule"
 assert "watch-retired`). " + COPY_RULE + OFFER_WAKE in flat_bullet, "the skill's Codex bullet must carry the same sentence after its one-line rule"
+# The lite/snap hunt's fast_offer rides the same wake, right after the deep one.
+FAST_WAKE = ("And this one too, word for word: \"When this wake's read carries fast_offer (and, if it carries route_state, also final: true), print fast_offer.pitch word for word after that line, "
+             "ask whether to start the fast hunt, and call no submit_review in this wake: the answer is the user's; copy this sentence into any heartbeat that replaces this one.\"")
+assert OFFER_WAKE + " " + FAST_WAKE in router_text, "ROUTING must carry the fast offer sentence after the deep one"
+assert OFFER_WAKE + " " + FAST_WAKE in flat_bullet, "the skill's Codex bullet must carry the fast offer sentence after the deep one"
 # Said at the start of every session: a session that began without the tools
 # never gets them, and the merge gate is too late to learn it.
 assert "confirm the ohmybug MCP tools are present" in router_text, "ROUTING must ask for the tools-present check at session start"
