@@ -688,8 +688,8 @@ flat_bullet = " ".join(codex_bullet.split())
 assert "print only one compact bughunt status line, and delete itself on done or failed. " + COPY_RULE + OFFER_WAKE in router_text, "ROUTING must carry the wake's offer sentence after the one-line rule"
 assert "watch-retired`). " + COPY_RULE + OFFER_WAKE in flat_bullet, "the skill's Codex bullet must carry the same sentence after its one-line rule"
 # The lite/snap hunt's fast_offer rides the same wake, right after the deep one.
-FAST_WAKE = ("And this one too, word for word: \"When this wake's read carries fast_offer (and, if it carries route_state, also final: true), print fast_offer.pitch word for word after that line, "
-             "ask whether to start the fast hunt, and call no submit_review in this wake: the answer is the user's; copy this sentence into any heartbeat that replaces this one.\"")
+FAST_WAKE = ("And this one too, word for word: \"Besides its one bughunt status line, when this wake's read carries fast_offer (and, if it carries route_state, also final: true), print fast_offer.pitch word for word after that status line, "
+             "ask whether to start the offered fast hunt (mode fast, not stage one), and call no submit_review in this wake: the answer is the user's; copy this sentence into any heartbeat that replaces this one.\"")
 assert OFFER_WAKE + " " + FAST_WAKE in router_text, "ROUTING must carry the fast offer sentence after the deep one"
 assert OFFER_WAKE + " " + FAST_WAKE in flat_bullet, "the skill's Codex bullet must carry the fast offer sentence after the deep one"
 # Said at the start of every session: a session that began without the tools
@@ -871,10 +871,14 @@ for phrase in ("unless the user asked for the deep hunt in their own words (deep
                "its compact line reads bughunt · deep · running"):
     assert phrase in session_text, phrase
 # The fast offer of a lite or snap hunt starts a paid hunt only on the user's yes, in the router and in the skill.
-assert "likewise start fast from a lite or snap hunt only after the server returns fast_offer and the user explicitly agrees" in session_text
+assert "likewise start the offered fast hunt (mode fast, not stage one) that a lite or snap hunt's fast_offer names only after the server returns fast_offer and the user explicitly agrees" in session_text
 flat_skill = " ".join(skill.split())
-for phrase in ("The same holds for a fast hunt started from a lite or snap hunt's `fast_offer`: only on the user's explicit yes.",
-               "On yes, follow its `how`; never start the fast hunt without that yes.",
+for phrase in ("The same holds for the `mode: \"fast\"` hunt a lite or snap hunt's `fast_offer` names: only on the user's explicit yes.",
+               "Show its `pitch` word for word as information (the price is in the pitch) and ask once: whether to run the `mode: \"fast\"` hunt it names is the user's call.",
+               "On a hunt with findings it comes only after every finding is judged: once your `confirm_findings` call is answered, read `get_findings` once more for it. On yes, follow its `how`; never start that `mode: \"fast\"` hunt without that yes.",
+               "The fast hunt a lite or snap hunt's `fast_offer` names is the exception: a `mode: \"fast\"` hunt started only through that offer's `how`.",
+               "or the price a `fast_offer.pitch` states differs, quote that one.",
+               "`snooze: {\"deep\": 24}` (it pauses the `fast_offer` of a lite or snap hunt too)",
                "`deep_offer.how` or `fast_offer.how` is the current instruction"):
     assert phrase in flat_skill, phrase
 assert "Only start deep after the server returns deep_offer" not in session_text
