@@ -870,6 +870,13 @@ for phrase in ("unless the user asked for the deep hunt in their own words (deep
                "never a silent downgrade to fast",
                "its compact line reads bughunt · deep · running"):
     assert phrase in session_text, phrase
+# The fast offer of a lite or snap hunt starts a paid hunt only on the user's yes, in the router and in the skill.
+assert "likewise start fast from a lite or snap hunt only after the server returns fast_offer and the user explicitly agrees" in session_text
+flat_skill = " ".join(skill.split())
+for phrase in ("The same holds for a fast hunt started from a lite or snap hunt's `fast_offer`: only on the user's explicit yes.",
+               "On yes, follow its `how`; never start the fast hunt without that yes.",
+               "`deep_offer.how` or `fast_offer.how` is the current instruction"):
+    assert phrase in flat_skill, phrase
 assert "Only start deep after the server returns deep_offer" not in session_text
 assert DEEP_MARK not in session_text
 # The full-repo alternative is pinned by a prompt with no other trigger word
