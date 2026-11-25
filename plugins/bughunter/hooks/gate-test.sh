@@ -2195,6 +2195,8 @@ awk '/^\*\*When to run:\*\*/,/^$/' "$G/../skills/bughunter/SKILL.md" | tr '\n' '
 # The offers note: shown once as one line, never as a question, and silent where a step says to say nothing; stats shows it too.
 tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | grep -q 'An `offers_note` in any result is for the user: show it once, as one line, after the result and before any question you ask, never as a question. Where a step says to say nothing, it stays unsaid.' \
   || { printf 'FAIL skill: the offers_note rule is gone or reworded\n'; fails=$((fails + 1)); }
+tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | grep -q "and the *refusal's \`offers_note\`, when it carries one, as one line after them" \
+  || { printf 'FAIL skill: the payment_required step no longer shows its offers_note\n'; fails=$((fails + 1)); }
 grep -q 'offers_note' "$G/../commands/stats.md" \
   || { printf 'FAIL stats: /bughunter:stats no longer shows offers_note\n'; fails=$((fails + 1)); }
 

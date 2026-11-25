@@ -1870,8 +1870,9 @@ line and stop; the person reading has the hatch, and it is theirs to use.
   the user those URLs verbatim** – they are per-account (the account id is
   baked in so the payment lands on the right balance), so never retype one,
   never strip its query string, and never send the user to a page you
-  remember instead. Show the credit terms that come with them, then stop the
-  flow gracefully; nothing was charged. When the user says they have paid,
+  remember instead. Show the credit terms that come with them, and the
+  refusal's `offers_note`, when it carries one, as one line after them. Then
+  stop the flow gracefully; nothing was charged. When the user says they have paid,
   retry `submit_review` – the payment webhook credits the balance in seconds.
 - The same links reach you two other ways, with the same rule: `buy` +
   `buy_terms` on `get_balance` (present only when the balance cannot pay for
