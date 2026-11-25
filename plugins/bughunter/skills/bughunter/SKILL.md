@@ -19,8 +19,8 @@ Billing is flat per review whose verdicts confirm at least one real major
 bug – no matter how many: 4 USD for a fast hunt (a lite or snap hunt: the
 price `get_balance` `modes` lists, see "Hunt modes" below); 12 USD for a deep hunt, 24 USD for a deep
 hunt over a wide change (11 or more folder chunks). The server is the
-authority on prices: when `get_balance` `modes` or `prices`, or a
-`deep_offer.price_usd`, names a different figure, quote that one. Severity uses the merge boundary: a finding
+authority on prices: when `get_balance` `modes` or `prices`, a
+`deep_offer.price_usd`, or the price a `fast_offer.pitch` states differs, quote that one. Severity uses the merge boundary: a finding
 is a billable major when a reviewer would refuse the merge over it
 (`critical` / `high` / `medium`); a `low` nit is confirmed for stats and
 never billed, and neither is a real `medium` the user already deferred or
@@ -39,7 +39,7 @@ The MCP server `ohmybug` provides: `submit_review`, `get_findings`,
 "Repository scan" below).
 
 **The server's own words outrank this file.** A tool result carrying
-`next_step`, `share.ask_user` or `deep_offer.how` is the current instruction;
+`next_step`, `share.ask_user`, `deep_offer.how` or `fast_offer.how` is the current instruction;
 this skill may be an old copy on this machine. Follow the result.
 
 An `offers_note` in any result is for the user: show it once, as one line,
@@ -67,7 +67,8 @@ the deep hunt outright (§3b: their words, never your judgement); then it is one
 `submit_review` with `deep: true`. Wait for its terminal
 `get_findings`/`wait_review` result before doing anything else. On your own
 initiative deep is strictly sequential: call it only when the server returned
-`deep_offer` and the user explicitly agreed. Never report a clean merge or
+`deep_offer` and the user explicitly agreed. The same holds for the `mode: "fast"`
+hunt a lite or snap hunt's `fast_offer` names: only on the user's explicit yes. Never report a clean merge or
 finish the turn while a review is running; keep the wait active or arm a
 monitor and resume on its event.
 
@@ -142,7 +143,12 @@ This is a required client action, not a reminder to do later:
   route_state, also final: true), print deep_offer.pitch word for word after
   that line, ask whether to start the deep hunt, and call no submit_review in
   this wake: the answer is the user's; copy this sentence into any heartbeat
-  that replaces this one."
+  that replaces this one." And this one too, word for word: "Besides its one
+  bughunt status line, when this wake's read carries fast_offer (and, if it
+  carries route_state, also final: true), print fast_offer.pitch word for word
+  after that status line, ask whether to start the offered fast hunt (mode
+  fast, not stage one), and call no submit_review in this wake: the answer is
+  the user's; copy this sentence into any heartbeat that replaces this one."
   A rule in the prompt did not hold: a heartbeat whose prompt carried the
   wake_rule word for word still answered `running` from memory for forty
   minutes after the hunt was done. So the prompt carries FACTS the model can
@@ -1286,11 +1292,15 @@ others are refused before anything starts.
   `mode_with_deep`: show the server's answer verbatim, then offer what it says
   to send instead (usually `mode: "fast"`) with ONE yes/no question – never
   switch modes silently.
-- **Deep is not a mode.** Never send `mode` with `deep`. The deep offer after any mode is the same. When the
+- **Deep is not a mode.** Never send `mode` with `deep`. The deep offer follows a hunt in mode
+  `fast` (a lite or snap hunt offers the fast rung instead, `fast_offer` in
+  §3b) and is the same however that hunt started. When the
   user names both a mode and the deep hunt, ask which one they want.
 - **"Fast" elsewhere in this skill is the stage.** "The fast hunt", "the fast
   stage" and "offer the fast hunt" mean stage one (not deep), in the
-  mode the user named or none: never `mode: "fast"` on your own.
+  mode the user named or none: never `mode: "fast"` on your own. The fast hunt
+  a lite or snap hunt's `fast_offer` names is the exception: a `mode: "fast"`
+  hunt started only through that offer's `how`.
 - **The monitor.** The submit answer's `hunt_mode` is the mode that runs: the
   watch loop's `mode=` takes it, so the compact line reads
   `bughunt · lite · running`. No `hunt_mode` (an older server): `fast`.
@@ -1361,9 +1371,19 @@ server's `deep_offer` once the user agrees.
   its `how`: call `submit_review` again with `deep: "<review_id>"` and the
   same `meta` – the server re-fetches the diff, so you send no payload. If
   it carries `install_url`, the App install is the missing step first.
+- A finished lite or snap hunt's `get_findings` may carry `fast_offer`
+  instead: the next rung, lite/snap -> fast -> deep (such a row never carries
+  `deep_offer`; `fast_offer_withheld` means there is none on this read).
+  Show its `pitch` word for word as information (the price is in the pitch)
+  and ask once: whether to run the `mode: "fast"` hunt it names is the user's
+  call. On a hunt with findings it comes only after every finding is judged:
+  once your `confirm_findings` call is answered, read `get_findings` once more
+  for it. On yes, follow its `how`; never start that `mode: "fast"` hunt
+  without that yes.
 - **Pausing an offer.** When the user asks to stop being offered the deep
   hunt for a while ("not today", "not for a day"), or the mod sends you their
-  "Not today", call `set_policy` with `snooze: {"deep": 24}`; the same field
+  "Not today", call `set_policy` with `snooze: {"deep": 24}` (it pauses the
+  `fast_offer` of a lite or snap hunt too); the same field
   takes `stories` (the question about posting a story) and `earned` (the note
   about unclaimed rewards), 1 to 168 hours, and 0 offers again. Do it only
   when they ask, never on your own judgment, and say when it ends. A pause
