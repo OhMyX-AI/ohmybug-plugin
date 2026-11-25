@@ -17,8 +17,8 @@ holds), $12 for a deep hunt you choose ($24 on a wide change), minor findings
 free, first review free.
 
 - **Lite review** and **snap review**: the price `get_balance` lists, where the service runs them
-- **Fast review** · $4 · finds 76.5% of known bugs on our [OMBench](https://ohmybug.ai/bench/) benchmark · up to 15 minutes
-- **Deep review** · $12 ($24 on a wide change) · finds 86.1% of known bugs on our [OMBench](https://ohmybug.ai/bench/) benchmark · up to 2 hours
+- **Fast review** · $4 · finds 76.5% of known bugs on our [OMBench](https://ohmybug.ai/bench/) benchmark, where a typical fast review takes 1.9 min
+- **Deep review** · $12 ($24 on a wide change) · finds 86.1% of known bugs on our [OMBench](https://ohmybug.ai/bench/) benchmark; it takes longer than a fast review
 
 Pick a mode for one hunt with `/bughunter:review lite` (or `snap`, `fast`); without one, on a pushed commit the service may start with a first step (snap, or lite on accounts set to lite), and a fast review follows when that step finds no medium or worse bug ([how it works](https://ohmybug.ai/modes/#route)); uncommitted work, a payload hunt (diff + snapshot by upload) and a change the first step cannot take get the fast review. Lite and snap read the repository, so they need a pushed GitHub commit the service can read, and snap a diff under 1 MB. `/bughunter:stats` lists the modes the service runs for your key.
 
@@ -180,7 +180,7 @@ picked before anything is sent, and you can point it elsewhere ("hunt
 On a GitHub repository, `/bughunter:scan` hunts the code this repository changed in the last 30 days
 (`/bughunter:scan 14` for two weeks). The server reads the history from
 GitHub and clones the repository on its side — nothing is uploaded from your
-machine — then runs a deep hunt (up to 150 minutes) over the window's changed
+machine — then runs a deep hunt (it can run long) over the window's changed
 code, and hands back one merged review that lists anything
 it did not read. Your agent verifies the findings like any hunt, and it is priced
 as a deep hunt: $12, or $24 on a wide change, only if a real bug is confirmed. It needs the OhMyBug GitHub App on that repository, runs once per
