@@ -547,6 +547,12 @@ the pre-merge gate, which has nothing to gate here – mention it in one line
 at most, never as a failure. Everything after the submit – the wait, the
 verdicts, the bill – is the same as for a pull request.
 
+**Build first.** If the project has a build or a type check (for example
+`npm run build`, `tsc --noEmit`, `cargo check`, `go vet`), run it before or
+while the hunt runs, and fix what it reports. The hunt looks for what a
+compiler cannot see; it does not replace your build. Never wait for the build
+to submit the hunt.
+
 ### 2. Context files (diff mode only) – and the manifest
 
 A payload hunt with the repository snapshot (every one outside diff mode)
