@@ -75,16 +75,20 @@ export function findingsOf(body: Body): Finding[] {
   })
 }
 
-/** The soft low classes `low_groups` collapses, each with the ids it holds; `other` is not here (its lows are drawn in
- *  full). A class name is drawn only from the fixed list, never as the server sends it. */
-const SOFT: Record<string, string> = { style: 'style', perf: 'perf', dead_code: 'dead code', defensive: 'defensive', cleanup: 'cleanup' }
-export function lowGroupsOf(body: Body): { name: string; ids: string[] }[] {
+/** The soft low classes `low_groups` collapses, in the order they are drawn; `other` is not here (its lows are drawn
+ *  in full). A class name is drawn only from this list, never as the server sends it. */
+const SOFT: readonly [string, string][] = [['style', 'style'], ['perf', 'perf'], ['dead_code', 'dead code'], ['defensive', 'defensive'], ['cleanup', 'cleanup']]
+/** One line per soft class, in SOFT's order, each with the ids of `lows` (the low findings this answer lists) the
+ *  server put under it: an id is drawn once, under the first class that names it, and anything else is drawn in full. */
+export function lowGroupsOf(body: Body, lows: ReadonlySet<string>): { label: string; ids: string[] }[] {
   const list = Array.isArray(body.low_groups) ? body.low_groups : []
-  return list.flatMap(g => {
-    const o = g && typeof g === 'object' ? (g as Body) : {}
-    const name = typeof o.class === 'string' ? SOFT[o.class] : undefined
-    const ids = Array.isArray(o.finding_ids) ? o.finding_ids.flatMap(i => str(i) ?? []) : []
-    return name && ids.length ? [{ name, ids }] : []
+  const taken = new Set<string>()
+  return SOFT.flatMap(([key, label]) => {
+    const ids = list.flatMap(g => {
+      const o = g && typeof g === 'object' ? (g as Body) : {}
+      return o.class === key && Array.isArray(o.finding_ids) ? o.finding_ids.flatMap(i => str(i) ?? []) : []
+    }).filter(i => lows.has(i) && !taken.has(i) && taken.add(i))
+    return ids.length ? [{ label, ids }] : []
   })
 }
 

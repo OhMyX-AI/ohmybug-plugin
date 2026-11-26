@@ -715,8 +715,7 @@ export const register: Register = on => {
         const found = findingsOf(body).sort((a, b) => SEVERITY.indexOf(a.severity) - SEVERITY.indexOf(b.severity))
         // Lows of a soft class: one line per class with its ids, after the rows drawn in full (`other` among them). Only
         // ids of lows this answer lists are grouped: any other finding is drawn in full whatever a group names.
-        const lows = new Set(found.filter(f => f.severity === 'low').map(f => f.id))
-        const groups = lowGroupsOf(body).map(g => ({ ...g, ids: [...new Set(g.ids.filter(i => lows.has(i)))] })).filter(g => g.ids.length)
+        const groups = lowGroupsOf(body, new Set(found.filter(f => f.severity === 'low').map(f => f.id)))
         const grouped = new Set(groups.flatMap(g => g.ids))
         rows = [
           withMascot(<Text>{huntLabel(body, 'fast')} hunt {id} · done · {found.length} finding{found.length === 1 ? '' : 's'}</Text>),
@@ -731,7 +730,7 @@ export const register: Register = on => {
               {f.where ? <Text dimColor>{'           '}{f.where}</Text> : null}
             </Box>
           )),
-          ...groups.map(g => <Text><Text dimColor>● {'low'.padEnd(8)}</Text>{g.name} {g.ids.length}: {g.ids.join(', ')}</Text>),
+          ...groups.map(g => <Text><Text dimColor>● {'low'.padEnd(8)}</Text>{g.label} {g.ids.length}: {g.ids.join(', ')}</Text>),
           found.length === 0 && str(body.summary) ? <Text>{str(body.summary)}</Text> : null,
           str(body.next_step) ? <Text dimColor>next: {str(body.next_step)!.slice(0, 240)}</Text> : null,
           // The band exists only for a tracked hunt's get_findings; point at it only then.
