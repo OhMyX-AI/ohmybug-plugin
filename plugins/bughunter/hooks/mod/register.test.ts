@@ -1702,6 +1702,42 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(texts.indexOf('Refund retried twice')).toBeLessThan(texts.indexOf('Log line leaks'))
   })
 
+  test(`the findings card draws other lows in full and each soft class as one line with its ids on ${surface}`, async ($, on) => {
+    mock.store(on)
+    engine(on)
+    const grouped = JSON.stringify({ ...JSON.parse(done), findings: [
+      { finding_id: 'f_1', severity: 'high', file: 'a.ts', line: 1, title: 'Refund retried twice on timeout' },
+      { finding_id: 'f_2', severity: 'low', file: 'a.ts', line: 2, title: 'Real low kept in full' },
+      { finding_id: 'f_3', severity: 'low', file: 'a.ts', line: 3, title: 'Rename the helper' },
+      { finding_id: 'f_4', severity: 'low', file: 'a.ts', line: 4, title: 'Unused branch' },
+      { finding_id: 'f_5', severity: 'low', file: 'a.ts', line: 5, title: 'Odd class low' },
+      { finding_id: 'f_6', severity: 'low', file: 'a.ts', line: 6, title: 'Second style low' }],
+      // Out of order, with a class off the list and prototype keys naming a real low (drawn in full, never as a line),
+      // a repeated class and a repeated id (one line, the id once), and a group naming a high or an unlisted id (neither).
+      low_groups: [{ class: 'dead_code', count: 1, finding_ids: ['f_4', 'f_3'] }, { class: 'other', count: 1, finding_ids: ['f_2'] },
+        { class: '<b>x</b>', count: 1, finding_ids: ['f_5'] }, { class: '__proto__', count: 1, finding_ids: ['f_5'] }, { class: 'constructor', count: 1, finding_ids: ['f_5'] },
+        { class: 'style', count: 1, finding_ids: ['f_3', 'f_3'] }, { class: 'style', count: 1, finding_ids: ['f_6'] },
+        { class: 'perf', count: 2, finding_ids: ['f_1', 'f_9'] }] })
+    const ui = await $.ui.mount({ plugin: 'bughunter', surface, component: 'ToolResult', requestId: 't1',
+      props: { tool_use_id: 't1', tool: GET, output: grouped, isErrored: false } } as never)
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+    expect(texts).toContain('· done · 6 findings')
+    expect(texts).toContain('Real low kept in full')
+    expect(texts).toContain('Odd class low')
+    expect(texts).not.toContain('Rename the helper')
+    expect(texts).not.toContain('Unused branch')
+    expect(texts).not.toContain('Second style low')
+    expect(texts).toContain('Refund retried twice on timeout')
+    expect(texts).not.toContain('perf')
+    expect(texts).not.toContain('f_9')
+    expect(texts).not.toMatch(/\d: .*f_5/)  // drawn in full, on no class line
+    expect(texts).not.toContain('<b>x</b>')
+    expect(texts.match(/^.*style \d.*$/gm)).toEqual([expect.stringContaining('style 2: f_3, f_6')])
+    expect(texts).toContain('dead code 1: f_4')
+    expect(texts.indexOf('Real low kept in full')).toBeLessThan(texts.indexOf('style 2: f_3, f_6'))
+    expect(texts.indexOf('style 2: f_3, f_6')).toBeLessThan(texts.indexOf('dead code 1: f_4'))
+  })
+
   test(`a finding with a filed species shows its name and links to its page on ${surface}`, async ($, on) => {
     mock.store(on)
     engine(on)

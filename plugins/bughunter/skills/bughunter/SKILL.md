@@ -1438,6 +1438,13 @@ was read a second time against the code; the tool's own description says how
 to show it, and one that also carries `reported_severity` and no `kind` is
 judged by the same step 4 rule.
 
+**Lows by class.** When `get_findings` carries `low_groups`, start the lows with
+one count line, e.g. `Lows: other 5, style 7, dead code 4`. Show the `other`
+lows first and in full, each as usual. Show every other class (style, perf,
+dead code, defensive, cleanup) as one line: the class, how many, and their
+finding ids, e.g. `style 7: f-1a2b, f-3c4d, …`. Each low still gets a verdict
+(step 4); open one in full when the user asks.
+
 **Notes.** A finding marked `kind: "note"` is a `low` that names no input or
 state that goes wrong on the code as it is: hardening against something no
 caller does today, a latent risk, style, a suggestion. Show those last, in

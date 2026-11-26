@@ -23,7 +23,7 @@
 
 import type { EngineInterface as Engine, Register, RenderChildren } from 'claude-code'
 
-import { bodyOf, catchOf, findingsOf, gateReason, halfBlocks, huntLabel, mascotOf, minutes, num, ROUTE_OVER, routeRead, speciesOf, statusState, str, toolKind } from './parse'
+import { bodyOf, catchOf, findingsOf, lowGroupsOf, gateReason, halfBlocks, huntLabel, mascotOf, minutes, num, ROUTE_OVER, routeRead, speciesOf, statusState, str, toolKind } from './parse'
 
 /** The status door journals which waiter polled (`w`): the skill's watch loop sends `loop`, the mod `mod`. */
 export const tagged = (url: string): string => {
@@ -713,9 +713,13 @@ export const register: Register = on => {
         rows = [<Text dimColor>hunt {id} · {state === 'needs_files' ? 'reviewers asked for files' : state ?? 'running'}{body.timed_out ? ' · still running' : ''}</Text>]
       } else {
         const found = findingsOf(body).sort((a, b) => SEVERITY.indexOf(a.severity) - SEVERITY.indexOf(b.severity))
+        // Lows of a soft class: one line per class with its ids, after the rows drawn in full (`other` among them). Only
+        // ids of lows this answer lists are grouped: any other finding is drawn in full whatever a group names.
+        const groups = lowGroupsOf(body, new Set(found.filter(f => f.severity === 'low').map(f => f.id)))
+        const grouped = new Set(groups.flatMap(g => g.ids))
         rows = [
           withMascot(<Text>{huntLabel(body, 'fast')} hunt {id} · done · {found.length} finding{found.length === 1 ? '' : 's'}</Text>),
-          ...found.map(f => (
+          ...found.filter(f => !grouped.has(f.id)).map(f => (
             <Box flexDirection="column">
               <Text>
                 <Text color={COLOR[f.severity]} dimColor={!COLOR[f.severity]}>● {f.severity.padEnd(8)}</Text>
@@ -726,6 +730,7 @@ export const register: Register = on => {
               {f.where ? <Text dimColor>{'           '}{f.where}</Text> : null}
             </Box>
           )),
+          ...groups.map(g => <Text><Text dimColor>● {'low'.padEnd(8)}</Text>{g.label} {g.ids.length}: {g.ids.join(', ')}</Text>),
           found.length === 0 && str(body.summary) ? <Text>{str(body.summary)}</Text> : null,
           str(body.next_step) ? <Text dimColor>next: {str(body.next_step)!.slice(0, 240)}</Text> : null,
           // The band exists only for a tracked hunt's get_findings; point at it only then.
