@@ -459,10 +459,12 @@ In Codex, say "set up OhMyBug" wherever these lines name `/bughunter:setup`.
 ### 1. Scope the diff
 
 **Build first.** If the project has a build or a type check (for example
-`npm run build`, `tsc --noEmit`, `cargo check`, `go vet`), run it before or
-while the hunt runs, and fix what it reports. The hunt looks for what a
-compiler cannot see; it does not replace your build. Never wait for the build
-to submit the hunt.
+`npm run build`, `tsc --noEmit`, `cargo check`, `go vet`), start it beside the
+hunt and note what it reports. The hunt looks for what a compiler cannot see;
+it does not replace your build. Never wait for the build to submit the hunt,
+and do not edit the code while the hunt runs: fix the build errors together
+with the confirmed findings, after the verdicts (step 5), and hunt those fixes
+again. On Codex, run it after the hunt's result.
 
 Default scope: everything that would land in the PR – commits on this branch
 beyond the base branch plus staged and unstaged changes:
