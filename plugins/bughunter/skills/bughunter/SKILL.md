@@ -458,6 +458,12 @@ In Codex, say "set up OhMyBug" wherever these lines name `/bughunter:setup`.
 
 ### 1. Scope the diff
 
+**Build first.** If the project has a build or a type check (for example
+`npm run build`, `tsc --noEmit`, `cargo check`, `go vet`), run it before or
+while the hunt runs, and fix what it reports. The hunt looks for what a
+compiler cannot see; it does not replace your build. Never wait for the build
+to submit the hunt.
+
 Default scope: everything that would land in the PR – commits on this branch
 beyond the base branch plus staged and unstaged changes:
 
@@ -546,12 +552,6 @@ say that an uploaded hunt is not recorded for the merge gate: that is about
 the pre-merge gate, which has nothing to gate here – mention it in one line
 at most, never as a failure. Everything after the submit – the wait, the
 verdicts, the bill – is the same as for a pull request.
-
-**Build first.** If the project has a build or a type check (for example
-`npm run build`, `tsc --noEmit`, `cargo check`, `go vet`), run it before or
-while the hunt runs, and fix what it reports. The hunt looks for what a
-compiler cannot see; it does not replace your build. Never wait for the build
-to submit the hunt.
 
 ### 2. Context files (diff mode only) – and the manifest
 
