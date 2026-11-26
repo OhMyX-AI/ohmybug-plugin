@@ -713,12 +713,14 @@ export const register: Register = on => {
         rows = [<Text dimColor>hunt {id} · {state === 'needs_files' ? 'reviewers asked for files' : state ?? 'running'}{body.timed_out ? ' · still running' : ''}</Text>]
       } else {
         const found = findingsOf(body).sort((a, b) => SEVERITY.indexOf(a.severity) - SEVERITY.indexOf(b.severity))
-        // Lows of a soft class: one line per class with its ids, after the rows drawn in full (`other` among them).
-        const groups = lowGroupsOf(body)
+        // Lows of a soft class: one line per class with its ids, after the rows drawn in full (`other` among them). Only
+        // ids of lows this answer lists are grouped: any other finding is drawn in full whatever a group names.
+        const lows = new Set(found.filter(f => f.severity === 'low').map(f => f.id))
+        const groups = lowGroupsOf(body).map(g => ({ ...g, ids: [...new Set(g.ids.filter(i => lows.has(i)))] })).filter(g => g.ids.length)
         const grouped = new Set(groups.flatMap(g => g.ids))
         rows = [
           withMascot(<Text>{huntLabel(body, 'fast')} hunt {id} · done · {found.length} finding{found.length === 1 ? '' : 's'}</Text>),
-          ...found.filter(f => !(f.severity === 'low' && grouped.has(f.id))).map(f => (
+          ...found.filter(f => !grouped.has(f.id)).map(f => (
             <Box flexDirection="column">
               <Text>
                 <Text color={COLOR[f.severity]} dimColor={!COLOR[f.severity]}>● {f.severity.padEnd(8)}</Text>

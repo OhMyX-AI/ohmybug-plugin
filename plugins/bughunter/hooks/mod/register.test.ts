@@ -1711,13 +1711,19 @@ for (const surface of ['terminal', 'desktop'] as const) {
       { finding_id: 'f_3', severity: 'low', file: 'a.ts', line: 3, title: 'Rename the helper' },
       { finding_id: 'f_4', severity: 'low', file: 'a.ts', line: 4, title: 'Unused branch' }],
       low_groups: [{ class: 'other', count: 1, finding_ids: ['f_2'] }, { class: 'style', count: 1, finding_ids: ['f_3'] },
-        { class: 'dead_code', count: 1, finding_ids: ['f_4'] }, { class: '<b>x</b>', count: 1, finding_ids: ['f_9'] }] })
+        { class: 'dead_code', count: 1, finding_ids: ['f_4'] }, { class: '<b>x</b>', count: 1, finding_ids: ['f_9'] },
+        // A group naming a high finding or an id the answer does not list groups neither.
+        { class: 'perf', count: 2, finding_ids: ['f_1', 'f_9'] }] })
     const ui = await $.ui.mount({ plugin: 'bughunter', surface, component: 'ToolResult', requestId: 't1',
       props: { tool_use_id: 't1', tool: GET, output: grouped, isErrored: false } } as never)
     const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
     expect(texts).toContain('· done · 4 findings')
     expect(texts).toContain('Real low kept in full')
     expect(texts).not.toContain('Rename the helper')
+    expect(texts).not.toContain('Unused branch')
+    expect(texts).toContain('Refund retried twice on timeout')
+    expect(texts).not.toContain('perf')
+    expect(texts).not.toContain('f_9')
     expect(texts).toContain('style 1: f_3')
     expect(texts).toContain('dead code 1: f_4')
     expect(texts).not.toContain('<b>x</b>')
