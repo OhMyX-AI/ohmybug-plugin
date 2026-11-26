@@ -75,6 +75,19 @@ export function findingsOf(body: Body): Finding[] {
   })
 }
 
+/** The soft low classes `low_groups` collapses, each with the ids it holds; `other` is not here (its lows are drawn in
+ *  full). A class name is drawn only from the fixed list, never as the server sends it. */
+const SOFT: Record<string, string> = { style: 'style', perf: 'perf', dead_code: 'dead code', defensive: 'defensive', cleanup: 'cleanup' }
+export function lowGroupsOf(body: Body): { name: string; ids: string[] }[] {
+  const list = Array.isArray(body.low_groups) ? body.low_groups : []
+  return list.flatMap(g => {
+    const o = g && typeof g === 'object' ? (g as Body) : {}
+    const name = typeof o.class === 'string' ? SOFT[o.class] : undefined
+    const ids = Array.isArray(o.finding_ids) ? o.finding_ids.flatMap(i => str(i) ?? []) : []
+    return name && ids.length ? [{ name, ids }] : []
+  })
+}
+
 /** What the review itself says, route aside: the findings card draws this. */
 export function statusState(body: Body): 'running' | 'needs_files' | 'done' | 'failed' | undefined {
   const s = str(body.status)

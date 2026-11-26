@@ -1702,6 +1702,28 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(texts.indexOf('Refund retried twice')).toBeLessThan(texts.indexOf('Log line leaks'))
   })
 
+  test(`the findings card draws other lows in full and each soft class as one line with its ids on ${surface}`, async ($, on) => {
+    mock.store(on)
+    engine(on)
+    const grouped = JSON.stringify({ ...JSON.parse(done), findings: [
+      { finding_id: 'f_1', severity: 'high', file: 'a.ts', line: 1, title: 'Refund retried twice on timeout' },
+      { finding_id: 'f_2', severity: 'low', file: 'a.ts', line: 2, title: 'Real low kept in full' },
+      { finding_id: 'f_3', severity: 'low', file: 'a.ts', line: 3, title: 'Rename the helper' },
+      { finding_id: 'f_4', severity: 'low', file: 'a.ts', line: 4, title: 'Unused branch' }],
+      low_groups: [{ class: 'other', count: 1, finding_ids: ['f_2'] }, { class: 'style', count: 1, finding_ids: ['f_3'] },
+        { class: 'dead_code', count: 1, finding_ids: ['f_4'] }, { class: '<b>x</b>', count: 1, finding_ids: ['f_9'] }] })
+    const ui = await $.ui.mount({ plugin: 'bughunter', surface, component: 'ToolResult', requestId: 't1',
+      props: { tool_use_id: 't1', tool: GET, output: grouped, isErrored: false } } as never)
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+    expect(texts).toContain('· done · 4 findings')
+    expect(texts).toContain('Real low kept in full')
+    expect(texts).not.toContain('Rename the helper')
+    expect(texts).toContain('style 1: f_3')
+    expect(texts).toContain('dead code 1: f_4')
+    expect(texts).not.toContain('<b>x</b>')
+    expect(texts.indexOf('Real low kept in full')).toBeLessThan(texts.indexOf('style 1: f_3'))
+  })
+
   test(`a finding with a filed species shows its name and links to its page on ${surface}`, async ($, on) => {
     mock.store(on)
     engine(on)
