@@ -178,6 +178,13 @@ PY2
 check "submit_review has one PreToolUse hook, the scan" "$wired" "secret-scan.sh"
 dwired=$(python3 -c "import json,re,sys; pre=json.load(open(sys.argv[1]))['hooks']['PreToolUse']; print(any(re.search(e.get('matcher',''),'mcp__plugin_bughunter_ohmybug__challenge_finding') and any(k['command'].endswith('/secret-scan.sh') for k in e['hooks']) for e in pre))" "$G/hooks.json")
 check "challenge_finding goes through the scan" "$dwired" "True"
+awired=$(python3 -c "import json,re,sys; pre=json.load(open(sys.argv[1]))['hooks']['PreToolUse']; print(any(re.search(e.get('matcher',''),'mcp__plugin_bughunter_ohmybug__ask_ohmybug') and any(k['command'].endswith('/secret-scan.sh') for k in e['hooks']) for e in pre))" "$G/hooks.json")
+check "ask_ohmybug goes through the scan (its message is the user's free text)" "$awired" "True"
+TOOL=ask_ohmybug
+row "ask_ohmybug: a key in the question is not sent"  2 "$(j "{'message':'why was I billed? my key is $AWS'}")" "Ask again with each value replaced by [REDACTED]."
+row "ask_ohmybug: a clean question goes on"            0 "$(j "{'message':'what is waiting for my verdict?'}")"
+check "ask_ohmybug is never recorded as a hunt" "$(stamped)" no
+TOOL=submit_review
 
 full=$(hook "$(j "{'diff':'+k=\"$AWS\"'}")")
 if printf '%s' "$full" | LC_ALL=C grep -qF "$AWS"; then echo "FAIL the full key reached the message"; fails=$((fails + 1)); else echo "ok   the full key never reaches the message"; fi

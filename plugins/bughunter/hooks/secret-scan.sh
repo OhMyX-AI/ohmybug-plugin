@@ -289,6 +289,7 @@ fi
   case "$INPUT" in
     *'__provide_files"'*) echo "Call provide_files again for the same review without those files (or with each value replaced by [REDACTED]); an empty list is a valid answer. Do not start a new hunt for this." ;;
     *'__challenge_finding"'*) echo "Dispute again with each value named instead of quoted, or judge the finding without a dispute." ;;
+    *'__ask_ohmybug"'*) echo "Ask again with each value replaced by [REDACTED]." ;;
     *) echo "Replace each value with [REDACTED] where it is named above, or leave that file or meta field out, then submit again. The text in meta (the task, the PR title and description, the briefing) is sent on every submit: a submit with meta.repo + meta.ref and no payload drops the diff and files only." ;;
   esac
 } >&2
