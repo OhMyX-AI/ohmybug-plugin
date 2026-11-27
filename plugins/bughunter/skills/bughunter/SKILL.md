@@ -325,7 +325,7 @@ an interactive tty.)
 
 ## First-run setup
 
-Five questions that set the account's defaults, asked once per machine. In
+Four questions that set the account's defaults, asked once per machine. In
 Claude Code the session-start hook asks for it in your first reply, at most
 three times per machine; `/bughunter:setup` runs it any time. In Codex it
 starts only on the user's word ("set up OhMyBug"). In Claude Code it needs
@@ -1404,14 +1404,15 @@ or weak test; the code itself does what it should). Show those after the
 other findings, under "Test gaps", and say how many there are. One that also
 carries `reported_severity` was delivered as `low` by the service (a finding
 only about tests never blocks): it does not block the merge and is not charged,
-unless your verdict raises it (step 4). Say so once for the section, and put
+unless your verdict raises it because the code itself fails (step 4). Say so once for the section, and put
 each one's reported severity beside it.
 
 **Docs findings.** A finding marked `kind: "docs"` is only about documentation
 or code comments (the code itself does what it should). Show those in their
 own section after the test gaps, under "Docs findings", and say how many there
 are. One that also carries `reported_severity` was delivered as `low` by the
-user's setting (`docs_findings: "not_block"`), with the same rule as a test gap.
+user's setting (`docs_findings: "not_block"`): it does not block the merge and is
+not charged, unless your verdict raises it (step 4).
 
 **Findings delivered as low.** A finding that carries `reported_severity` but
 neither `kind` nor `second_read` was delivered as `low`; the field is the
