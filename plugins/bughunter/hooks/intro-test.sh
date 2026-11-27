@@ -95,9 +95,8 @@ for want in \
   'Sends `hunt_mode: "snap"`' \
   'Sends `hunt_mode: "fast"`' \
   'Sends `hunt_mode: "auto"`' \
-  'Not asked when `get_balance` `policy` has no `test_gaps`' \
-  '`docs_findings` (an older server): send nothing for it, and make no second' \
-  '(Docs findings) in a second call right after: a question tool takes at most' \
+  '`docs_findings` (an older server): send nothing for it.' \
+  'Ask the four questions in ONE question-tool call' \
   'finds ~<found_pct>% of known bugs (our benchmark)' \
   'with a `get_balance` `route`' \
   'This question has no Skip' \
@@ -107,8 +106,8 @@ for want in \
   'The marker stays written.'; do
   case $SEC in *"$want"*) ;; *) fail "S skill setup text lost: $want" ;; esac
 done
-# The test-gaps options with their own values: blocking first, recommended, then not_block (a swap would stop billing).
-printf '%s' "$SEC" | grep -q 'Block the merge (recommended)[^-]*Sends `test_gaps: "block"`.*Show them, but don.t block.*Sends `test_gaps: "not_block"`' && ok "S test gaps options: block first and recommended, each sends its own value" || fail "S test gaps option values"
+# #4756: test findings are always delivered low by the service; the setup no longer asks or sends test_gaps.
+case $SEC in *test_gaps*) fail "S setup no longer asks test_gaps" ;; *) ok "S setup no longer asks test_gaps" ;; esac
 # The docs options with their own values, blocking first and recommended.
 printf '%s' "$SEC" | tr '\n' ' ' | grep -q 'Block the merge (recommended)[^-]*Sends `docs_findings: "block"`.*Show them, but don.t block.*Sends `docs_findings: "not_block"`' && ok "S docs options: block first and recommended, each sends its own value" || fail "S docs option values"
 # The Notes paragraph of the result (bounded to it): last, counted, not blocking or charged, judged, raised = regular.
@@ -136,7 +135,7 @@ pin_skill $'Reviews and false positives cost nothing; an unclear finding costs n
 pin_readme() { tr '\n' ' ' < "$G/../../../README.md" | tr -s ' ' | grep -qF -- "$1" && ok "$2" || fail "$2"; }
 pin_readme $'- Billing: one flat price per review with confirmed real bugs — one or ten, same price: $4 fast (a lite or snap hunt: the price `get_balance` `modes` lists), $12 deep, $24 deep on a wide change (11+ folder chunks). Minor findings, review runs and false positives — $0, and so is a real medium you already deferred or accepted in your own ticket, once your agent marks it known (a hunt billed on CI, or one already billed at its deadline, stays charged). An unclear medium or worse is free at confirm but, like one nobody judged, is charged at the hunt\'s deadline. - ' "R verdict severity: README billing bullet whole"
 for gone in 'unclear — $0' 'unclear findings cost nothing'; do tr '\n' ' ' < "$G/../../../README.md" | tr -s ' ' | grep -qiF -- "$gone" && fail "R verdict severity: README old text gone: $gone" || ok "R verdict severity: README old text gone: $gone"; done
-pin_skill $'For a test gap the user\'s setting wins over that rule: a finding delivered `low` with `reported_severity` (the user chose `test_gaps: "not_block"`) stays `low`, even when the missing test guards a sensitive path, unless your trace shows the production code itself failing today.' "R verdict severity: test gap stays low"
+pin_skill $'For a test gap the service\'s rule wins over that rule: a finding marked `kind: "test"` and delivered `low` with `reported_severity` stays `low`, even when the missing test guards a sensitive path, unless your trace shows the production code itself failing today.' "R verdict severity: test gap stays low"
 pin_skill $'The same holds for a docs finding delivered `low` under `docs_findings: "not_block"`: it stays `low` unless your trace shows the code itself wrong, or the text is one your product shows or sends its users (a screen, a message, an email, a generated file).' "R verdict severity: docs finding stays low"
 pin_skill $'Only `medium` and `low`, both as delivered and as you grade it: the service refuses `known` on a finding delivered `high` or `critical`, even one you correct down in the same verdict, and on one you correct up to `high`.' "R verdict severity: known only medium and low"
 for gone in 'always takes `severity`' 'Always pass that `severity` in its verdict' '(always, step 4)' 'unclear findings cost nothing' '`NOT_REAL` and `UNCLEAR` cost nothing' 'plus `severity` when you corrected it'; do printf '%s' "$SK_FLAT" | grep -qF -- "$gone" && fail "R verdict severity: old text gone: $gone" || ok "R verdict severity: old text gone: $gone"; done

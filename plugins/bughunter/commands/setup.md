@@ -1,5 +1,5 @@
 ---
-description: "Set your OhMyBug defaults: which copy of your code goes to a hunt, the default hunt, bug stories, and whether test gaps and docs findings block the merge"
+description: "Set your OhMyBug defaults: which copy of your code goes to a hunt, the default hunt, bug stories, and whether docs findings block the merge"
 ---
 
 Run the "First-run setup" of the `bughunter` skill now, whatever this machine
