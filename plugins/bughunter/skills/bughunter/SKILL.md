@@ -327,7 +327,7 @@ an interactive tty.)
 
 ## First-run setup
 
-Five questions that set the account's defaults, asked once per machine. In
+Four questions that set the account's defaults, asked once per machine. In
 Claude Code the session-start hook asks for it in your first reply, at most
 three times per machine; `/bughunter:setup` runs it any time. In Codex it
 starts only on the user's word ("set up OhMyBug"). In Claude Code it needs
@@ -342,13 +342,12 @@ nothing and say nothing about it. Then answer what the user asked.
    not `/bughunter:setup`, run `bash '<skill_dir>/../../hooks/intro.sh' done`,
    say nothing and stop: the setup ran on another machine.
 2. Say, as plain text: "OhMyBug hunts bugs in your changes in the cloud. You
-   pay only when a real bug is found: a clean change costs nothing. Five quick
+   pay only when a real bug is found: a clean change costs nothing. Four quick
    questions set your defaults; change them any time with /bughunter:setup or
    on ohmybug.ai/me/policy." Add "Your first hunt that finds a bug costs
    nothing." only when `get_balance` shows one still free.
-3. Ask the first four questions in ONE question-tool call, then the fifth
-   (Docs findings) in a second call right after: a question tool takes at most
-   four (in Codex: all five in chat, numbered, a free-text answer accepted). The option equal to the saved
+3. Ask the four questions in ONE question-tool call (in Codex: all four in
+   chat, numbered, a free-text answer accepted). The option equal to the saved
    value in `get_balance` `policy` is marked "(current)".
    - **Upload.** "When OhMyBug cannot read your code on GitHub, a copy goes
      to the hunt sandbox. Which copy?" Git-ignored and secret-named files
@@ -412,21 +411,8 @@ nothing and say nothing about it. Then answer what the user asked.
        `stories: "ask"`, `author: "anonymous"`.
      - "Don't write them": "No stories, no questions." Sends
        `stories: "never"`.
-   - **Test gaps.** Not asked when `get_balance` `policy` has no `test_gaps`
-     (an older server): send nothing for it. The question: "Some findings
-     are only about tests: a missing or weak test, while the code itself
-     works. Should they block the merge?"
-     - "Block the merge (recommended)": "Like any other finding: your agent
-       fixes them before the merge, and a confirmed one is charged." Sends
-       `test_gaps: "block"`.
-     - "Show them, but don't block": "Listed in their own section after the
-       other findings. They do not block the merge and are not charged,
-       unless your agent finds the code itself failing." Sends
-       `test_gaps: "not_block"`.
-     - "Skip (keep the current setting)".
    - **Docs findings.** Not asked when `get_balance` `policy` has no
-     `docs_findings` (an older server): send nothing for it, and make no second
-     call. The question: "Some findings are only about documentation or code
+     `docs_findings` (an older server): send nothing for it. The question: "Some findings are only about documentation or code
      comments, while the code itself works. Should they block the merge?"
      - "Block the merge (recommended)": "Like any other finding: your agent
        fixes them before the merge, and a confirmed one is charged." Sends
@@ -1418,16 +1404,18 @@ only evidence the hunt was real. Never paraphrase it into "all good".
 **Test gaps.** A finding marked `kind: "test"` is only about tests (a missing
 or weak test; the code itself does what it should). Show those after the
 other findings, under "Test gaps", and say how many there are. One that also
-carries `reported_severity` was delivered as `low` by the user's setting
-(`test_gaps: "not_block"`): it does not block the merge and is not charged,
-unless your verdict raises it (step 4). Say so once for the section, and put
+carries `reported_severity` was delivered as `low` by the service (a finding
+only about tests never blocks): it does not block the merge and is not charged,
+unless your verdict raises it because the code itself fails (step 4). Say so once for the section, and put
 each one's reported severity beside it.
 
 **Docs findings.** A finding marked `kind: "docs"` is only about documentation
 or code comments (the code itself does what it should). Show those in their
 own section after the test gaps, under "Docs findings", and say how many there
 are. One that also carries `reported_severity` was delivered as `low` by the
-user's setting (`docs_findings: "not_block"`), with the same rule as a test gap.
+user's setting (`docs_findings: "not_block"`): it does not block the merge and is
+not charged, unless your verdict raises it (step 4). Say so once for the
+section, and put each one's reported severity beside it.
 
 **Findings delivered as low.** A finding that carries `reported_severity` but
 neither `kind` nor `second_read` was delivered as `low`; the field is the
@@ -1482,11 +1470,11 @@ pass `severity` (either direction) whenever the trace changes the
 consequence, and say why in `reason` – the finder's original is kept
 alongside. One finding takes it on every `REAL`: the one delivered `low` with
 `reported_severity` and no `kind` (below). Severity describes the CONSEQUENCE, not the finding's category: a
-missing test whose mutation reopens a security hole, loses data or misbills
-is `critical`/`high`, never "just a test gap". Correct downward just as
+finding that reopens a security hole, loses data or misbills is
+`critical`/`high` whatever it is filed as. Correct downward just as
 readily when the failure turns out to need an unreachable state. For a test gap
-the user's setting wins over that rule: a finding delivered `low` with
-`reported_severity` (the user chose `test_gaps: "not_block"`) stays `low`, even
+the service's rule wins over that rule: a finding marked `kind: "test"` and
+delivered `low` with `reported_severity` stays `low`, even
 when the missing test guards a sensitive path, unless your trace shows the
 production code itself failing today. Then it is not a test gap, and the
 severity you set is what blocks and bills. The same holds for a docs finding

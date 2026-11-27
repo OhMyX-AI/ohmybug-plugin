@@ -31,7 +31,7 @@ import os, tempfile
 # text, no marker written; offered 3 times in all, never once the setup is done.
 state = tempfile.mkdtemp()
 os.environ["OMB_STATE_DIR"] = state
-OFFER = "In your first reply add one line: OhMyBug is installed, say 'set up OhMyBug' for three quick questions; then go on."
+OFFER = "In your first reply add one line: OhMyBug is installed, say 'set up OhMyBug' for four quick questions; then go on."
 first = run("session")
 assert first["systemMessage"] == "OHMYBUG: cloud code review", first
 first_text = first["hookSpecificOutput"]["additionalContext"]
