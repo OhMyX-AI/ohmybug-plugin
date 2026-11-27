@@ -1412,7 +1412,8 @@ or code comments (the code itself does what it should). Show those in their
 own section after the test gaps, under "Docs findings", and say how many there
 are. One that also carries `reported_severity` was delivered as `low` by the
 user's setting (`docs_findings: "not_block"`): it does not block the merge and is
-not charged, unless your verdict raises it (step 4).
+not charged, unless your verdict raises it (step 4). Say so once for the
+section, and put each one's reported severity beside it.
 
 **Findings delivered as low.** A finding that carries `reported_severity` but
 neither `kind` nor `second_read` was delivered as `low`; the field is the
@@ -1467,8 +1468,8 @@ pass `severity` (either direction) whenever the trace changes the
 consequence, and say why in `reason` – the finder's original is kept
 alongside. One finding takes it on every `REAL`: the one delivered `low` with
 `reported_severity` and no `kind` (below). Severity describes the CONSEQUENCE, not the finding's category: a
-missing test whose mutation reopens a security hole, loses data or misbills
-is `critical`/`high`, never "just a test gap". Correct downward just as
+finding that reopens a security hole, loses data or misbills is
+`critical`/`high` whatever it is filed as. Correct downward just as
 readily when the failure turns out to need an unreachable state. For a test gap
 the service's rule wins over that rule: a finding marked `kind: "test"` and
 delivered `low` with `reported_severity` stays `low`, even

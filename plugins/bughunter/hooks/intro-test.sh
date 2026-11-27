@@ -106,10 +106,13 @@ for want in \
   'The marker stays written.'; do
   case $SEC in *"$want"*) ;; *) fail "S skill setup text lost: $want" ;; esac
 done
-# #4756: test findings are always delivered low by the service; the setup no longer asks or sends test_gaps.
+# Test findings are always delivered low by the service; the setup no longer asks or sends test_gaps.
 case $SEC in *test_gaps*) fail "S setup no longer asks test_gaps" ;; *) ok "S setup no longer asks test_gaps" ;; esac
 # The question count, everywhere the user is told it.
-cat "$G/../skills/bughunter/SKILL.md" "$G/../commands/setup.md" "$G/intro.sh" | grep -qiE 'five (quick )?questions' && fail "S no file still says five questions" || ok "S no file still says five questions"
+cat "$G/../skills/bughunter/SKILL.md" "$G/../commands/setup.md" "$G/intro.sh" "$G/codex-router.js" "$G/../../../README.md" | tr '\n' ' ' | tr -s ' ' | grep -qiE '(three|five) (quick )?questions' && fail "S no file states a stale question count" || ok "S no file states a stale question count"
+for f in "$G/intro.sh" "$G/../commands/setup.md" "$G/codex-router.js" "$G/../../../README.md"; do
+  tr '\n' ' ' < "$f" | tr -s ' ' | grep -qiE 'four (quick )?questions' && ok "S $(basename "$f") says four questions" || fail "S $(basename "$f") says four questions"
+done
 # The docs options with their own values, blocking first and recommended.
 printf '%s' "$SEC" | tr '\n' ' ' | grep -q 'Block the merge (recommended)[^-]*Sends `docs_findings: "block"`.*Show them, but don.t block.*Sends `docs_findings: "not_block"`' && ok "S docs options: block first and recommended, each sends its own value" || fail "S docs option values"
 # The Notes paragraph of the result (bounded to it): last, counted, not blocking or charged, judged, raised = regular.

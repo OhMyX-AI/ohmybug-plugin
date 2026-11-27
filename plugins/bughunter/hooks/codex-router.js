@@ -28,7 +28,7 @@ function emit(context, hookEventName) {
 // written only by the skill's First-run setup) and at most 3 times (a counter
 // shared with intro.sh). The questions start only on the user's word, so
 // `codex exec` never waits on one.
-const SETUP_OFFER = 'In your first reply add one line: OhMyBug is installed, say \'set up OhMyBug\' for three quick questions; then go on.';
+const SETUP_OFFER = 'In your first reply add one line: OhMyBug is installed, say \'set up OhMyBug\' for four quick questions; then go on.';
 
 function offerSetup() {
   const fs = require('fs'), path = require('path'), os = require('os');
