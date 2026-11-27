@@ -411,6 +411,16 @@ nothing and say nothing about it. Then answer what the user asked.
        `stories: "ask"`, `author: "anonymous"`.
      - "Don't write them": "No stories, no questions." Sends
        `stories: "never"`.
+
+     **X follow-up.** Asked only when the user picked "Publish them, signed
+     with my GitHub name", `get_balance` has `x_crosspost`, and the saved
+     `x_crosspost` is not already `on`: one more question-tool call (in
+     Codex, in chat), after the four and before step 5. The question: "Also
+     post your signed stories on your X account?" Then `x_crosspost.rule`
+     word for word; never a reward rule of your own.
+     - "Yes": "Your signed stories also go out on your X account, after
+       you confirm it once with a link." Sends `x_crosspost: "on"`.
+     - "No": "Stories stay on OhMyBug only." Sends nothing for it.
    - **Docs findings.** Not asked when `get_balance` `policy` has no
      `docs_findings` (an older server): send nothing for it. The question: "Some findings are only about documentation or code
      comments, while the code itself works. Should they block the merge?"
@@ -432,10 +442,14 @@ nothing and say nothing about it. Then answer what the user asked.
 6. Say: "Done. /bughunter:review hunts what you have, /bughunter:scan a
    GitHub repository, /bughunter:stats shows your record." (In Codex, in
    words: "ask for an OhMyBug review, a scan of this repository, or your
-   record.") When the answer carries `confirm_url` (signed stories over a
-   saved unsigned setting), add last: "Open this link to sign your stories
-   with your GitHub name: <confirm_url>. It is valid for 24 hours; until then
-   stories stay unsigned." Nothing waits on it.
+   record.") When the answer carries `confirm_url`, add last: "Open this
+   link to <what>: <confirm_url>. It is valid for 24 hours; until then
+   <what stays>." For signed stories over a saved unsigned setting, <what>
+   is "sign your stories with your GitHub name" and <what stays> "stories
+   stay unsigned"; for X, "post your signed stories on X" and "nothing goes
+   to X"; for both, the two joined with "and". When the answer carries
+   `x_connect_url`, add: "Then connect your X account: <x_connect_url>."
+   Nothing waits on either.
 7. `set_policy` refused or unreachable: one line, "Your choices were not
    saved: <the server's sentence>. Run /bughunter:setup to try again.", and
    go on with the session. No retry. The marker stays written.

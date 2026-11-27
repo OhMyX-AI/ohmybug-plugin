@@ -146,6 +146,11 @@ pin_skill $'Only `medium` and `low`, both as delivered and as you grade it: the 
 for gone in 'always takes `severity`' 'Always pass that `severity` in its verdict' '(always, step 4)' 'unclear findings cost nothing' '`NOT_REAL` and `UNCLEAR` cost nothing' 'plus `severity` when you corrected it'; do printf '%s' "$SK_FLAT" | grep -qF -- "$gone" && fail "R verdict severity: old text gone: $gone" || ok "R verdict severity: old text gone: $gone"; done
 # The stories options in this order, private first.
 printf '%s' "$SEC" | grep -q 'Keep them in my account only (recommended).*Publish them, signed with my GitHub name.*Publish them unsigned.*Don.t write them' && ok "S stories options: private first and recommended, then signed, unsigned, off" || fail "S stories option order"
+# The X follow-up: only after the signed option, only while get_balance has x_crosspost, the reward from the server.
+printf '%s' "$SEC" | grep -qF 'Asked only when the user picked "Publish them, signed with my GitHub name", `get_balance` has `x_crosspost`, and the saved `x_crosspost` is not already `on`' && ok "S X follow-up: gated on signed, x_crosspost present, not already on" || fail "S X follow-up gate"
+printf '%s' "$SEC" | grep -qF 'Then `x_crosspost.rule` word for word; never a reward rule of your own.' && ok "S X follow-up: reward from x_crosspost.rule" || fail "S X follow-up reward source"
+printf '%s' "$SEC" | grep -qF '"Yes": "Your signed stories also go out on your X account, after you confirm it once with a link." Sends `x_crosspost: "on"`.' && ok "S X follow-up: yes sends x_crosspost on" || fail "S X follow-up yes"
+printf '%s' "$SEC" | grep -qF 'When the answer carries `x_connect_url`, add: "Then connect your X account: <x_connect_url>."' && ok "S X follow-up: connect link said" || fail "S X follow-up connect link"
 # Plugin text never names the reward itself.
 grep -qi 'free review' "$G/intro.sh" "$G/../commands/setup.md" && fail "S intro text says free review" || :
 printf '%s' "$SEC" | grep -qi 'free review' && fail "S setup section says free review" || ok "S setup texts: no reward wording of their own"
