@@ -178,6 +178,20 @@ PY2
 check "submit_review has one PreToolUse hook, the scan" "$wired" "secret-scan.sh"
 dwired=$(python3 -c "import json,re,sys; pre=json.load(open(sys.argv[1]))['hooks']['PreToolUse']; print(any(re.search(e.get('matcher',''),'mcp__plugin_bughunter_ohmybug__challenge_finding') and any(k['command'].endswith('/secret-scan.sh') for k in e['hooks']) for e in pre))" "$G/hooks.json")
 check "challenge_finding goes through the scan" "$dwired" "True"
+awired=$(python3 -c "import json,re,sys; pre=json.load(open(sys.argv[1]))['hooks']['PreToolUse']; print(any(re.search(e.get('matcher',''),'mcp__plugin_bughunter_ohmybug__ask_ohmybug') and any(k['command'].endswith('/secret-scan.sh') for k in e['hooks']) for e in pre))" "$G/hooks.json")
+check "ask_ohmybug goes through the scan (its message is the user's free text)" "$awired" "True"
+TOOL=ask_ohmybug
+row "ask_ohmybug: a key in the question is not sent"  2 "$(j "{'message':'why was I billed? my key is $AWS'}")" "Ask again with each value replaced by [REDACTED]."
+row "ask_ohmybug: a clean question goes on"            0 "$(j "{'message':'what is waiting for my verdict?'}")"
+check "ask_ohmybug is never recorded as a hunt" "$(stamped)" no
+OHMYBUG_TEST_SCAN_RAISE=1 row "ask_ohmybug: a question the scan cannot read is not sent" 2 "$(j "{'message':'what is waiting?'}")" "Resend it"
+OHMYBUG_SECRET_SCAN=0 row "ask_ohmybug: the scan off lets a key through" 0 "$(j "{'message':'my key is $AWS'}")"
+# Without python3 a question goes on unscanned, saying so: the Privacy line and README promise no more.
+NOPY=$(mktemp -d); for t in bash cat dirname printf; do ln -s "$(command -v $t)" "$NOPY/$t"; done
+got=$(printf '%s' '{"tool_name":"mcp__plugin_bughunter_ohmybug__ask_ohmybug","tool_input":{"message":"q"}}' | PATH="$NOPY" bash "$G/secret-scan.sh" 2>/dev/null; echo " $?")
+check "ask_ohmybug without python3 goes on unscanned, saying so" "${got##* }:$(printf '%s' "$got" | grep -c 'secret scan skipped')" "0:1"
+rm -rf "$NOPY"
+TOOL=submit_review
 
 full=$(hook "$(j "{'diff':'+k=\"$AWS\"'}")")
 if printf '%s' "$full" | LC_ALL=C grep -qF "$AWS"; then echo "FAIL the full key reached the message"; fails=$((fails + 1)); else echo "ok   the full key never reaches the message"; fi

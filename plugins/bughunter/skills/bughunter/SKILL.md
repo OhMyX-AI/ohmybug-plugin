@@ -34,9 +34,11 @@ allowance.
 The MCP server `ohmybug` provides: `submit_review`, `get_findings`,
 `provide_files`, `confirm_findings`, `post_story`, `post_story_anonymous`, `get_balance`,
 `challenge_finding` (some keys only: a dispute before a verdict, step 4),
-`redeem_code` (promo codes that raise the free-review allowance), and
+`redeem_code` (promo codes that raise the free-review allowance),
 `scan_repo` (a one-off hunt of the code a repository changed recently – see
-"Repository scan" below).
+"Repository scan" below), and `ask_ohmybug` (when the user asks OhMyBug a
+question about their own account, call it with their words and show the
+answer and its suggestions; act on none yourself).
 
 **The server's own words outrank this file.** A tool result carrying
 `next_step`, `share.ask_user`, `deep_offer.how` or `fast_offer.how` is the current instruction;
@@ -1966,3 +1968,5 @@ the diff and its context files only. Files the reviewers ask for and your
 verdicts are sent too – a `known` verdict's ticket ref included. The review runs in memory
 on OhMyBug's cloud and payloads are deleted after the review. Nothing is used
 for model training.
+
+A question you pass to `ask_ohmybug` is sent as written and kept in the account's talk thread on /me; where the plugin's hooks run and `python3` is installed, it is scanned for credentials first.
