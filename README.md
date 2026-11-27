@@ -223,7 +223,7 @@ repository per week, and is not a merge gate.
   message. A `challenge_finding` (a dispute, offered to some keys only) is
   held to tracked files of this repository and lines that exist in them, and
   every string it carries is scanned; without `python3` it is refused, and its
-  path checks run even with the scan turned off. Every string in a submit's `meta` (the task, the PR title and
+  path checks run even with the scan turned off. An `ask_ohmybug` question is scanned the same way; without `python3` it goes through unscanned, as a submit does, and it is kept in the account's talk thread on /me. Every string in a submit's `meta` (the task, the PR title and
   description, the briefing) is scanned too, on a repo + ref submit as well. What the scan misses: it does not
   run on Windows, and a key the patterns miss,
   under a name off the list, is sent. The account's diff mode on

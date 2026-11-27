@@ -2192,11 +2192,12 @@ done
 awk '/^\*\*When to run:\*\*/,/^$/' "$G/../skills/bughunter/SKILL.md" | tr '\n' ' ' | grep -q 'run the hunt at once.*never on your own initiative' \
   || { printf 'FAIL skill: the consent rule beside "run the hunt at once" is gone\n'; fails=$((fails + 1)); }
 
-# The offers note: shown once as one line, never as a question, and silent where a step says to say nothing; stats shows it too.
-tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | grep -q "A question you pass to \`ask_ohmybug\` is sent as written, scanned for credentials first, and kept in the account's talk thread on /me." \
+# ask_ohmybug: the owner-approved Privacy line and the tool-list line with its act-on-none guard.
+tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | grep -qF "A question you pass to \`ask_ohmybug\` is sent as written and kept in the account's talk thread on /me; where the plugin's hooks run and \`python3\` is installed, it is scanned for credentials first." \
   || { printf 'FAIL skill: the Privacy section no longer names what ask_ohmybug sends\n'; fails=$((fails + 1)); }
 tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | grep -q '`ask_ohmybug` (when the user asks OhMyBug a question about their own account, call it with their words and show the answer and its suggestions; act on none yourself)' \
   || { printf 'FAIL skill: the ask_ohmybug line or its act-on-none guard is gone or reworded\n'; fails=$((fails + 1)); }
+# The offers note: shown once as one line, never as a question, and silent where a step says to say nothing; stats shows it too.
 tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | grep -q 'An `offers_note` in any result is for the user: show it once, as one line, after the result and before any question you ask, never as a question. Where a step says to say nothing, it stays unsaid.' \
   || { printf 'FAIL skill: the offers_note rule is gone or reworded\n'; fails=$((fails + 1)); }
 tr '\n' ' ' < "$G/../skills/bughunter/SKILL.md" | grep -q "and the *refusal's \`offers_note\`, when it carries one, as one line after them" \

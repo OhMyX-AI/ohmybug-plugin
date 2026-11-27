@@ -11,8 +11,8 @@
 # shapes: high-signal ones only, every value masked. This hook reads the call.
 #
 # It reads whatever payload the call carries: submit_review's diff and files,
-# provide_files' files, every string of a challenge_finding, and every other field of a call (a submit's meta, sent on
-# every submit, a repo+ref one included).
+# provide_files' files, every string of a challenge_finding, an ask_ohmybug question, and every other field of a call
+# (a submit's meta, sent on every submit, a repo+ref one included).
 #
 # It also FILLS provide_files' `paths`: the agent names the requested files,
 # and this hook reads them from disk and hands the call on with their contents

@@ -184,6 +184,13 @@ TOOL=ask_ohmybug
 row "ask_ohmybug: a key in the question is not sent"  2 "$(j "{'message':'why was I billed? my key is $AWS'}")" "Ask again with each value replaced by [REDACTED]."
 row "ask_ohmybug: a clean question goes on"            0 "$(j "{'message':'what is waiting for my verdict?'}")"
 check "ask_ohmybug is never recorded as a hunt" "$(stamped)" no
+OHMYBUG_TEST_SCAN_RAISE=1 row "ask_ohmybug: a question the scan cannot read is not sent" 2 "$(j "{'message':'what is waiting?'}")" "Resend it"
+OHMYBUG_SECRET_SCAN=0 row "ask_ohmybug: the scan off lets a key through" 0 "$(j "{'message':'my key is $AWS'}")"
+# Without python3 a question goes on unscanned, saying so: the Privacy line and README promise no more.
+NOPY=$(mktemp -d); for t in bash cat dirname printf; do ln -s "$(command -v $t)" "$NOPY/$t"; done
+got=$(printf '%s' '{"tool_name":"mcp__plugin_bughunter_ohmybug__ask_ohmybug","tool_input":{"message":"q"}}' | PATH="$NOPY" bash "$G/secret-scan.sh" 2>/dev/null; echo " $?")
+check "ask_ohmybug without python3 goes on unscanned, saying so" "${got##* }:$(printf '%s' "$got" | grep -c 'secret scan skipped')" "0:1"
+rm -rf "$NOPY"
 TOOL=submit_review
 
 full=$(hook "$(j "{'diff':'+k=\"$AWS\"'}")")

@@ -1977,6 +1977,8 @@ diff, both scanned for credentials first. A snapshot file the scan flags is
 left out; a key the scan's patterns miss, under a name off the list, is sent,
 so say so when the repository holds one. In diff mode a payload hunt sends
 the diff and its context files only. Files the reviewers ask for and your
-verdicts are sent too – a `known` verdict's ticket ref included. A question you pass to `ask_ohmybug` is sent as written, scanned for credentials first, and kept in the account's talk thread on /me. The review runs in memory
+verdicts are sent too – a `known` verdict's ticket ref included. The review runs in memory
 on OhMyBug's cloud and payloads are deleted after the review. Nothing is used
 for model training.
+
+A question you pass to `ask_ohmybug` is sent as written and kept in the account's talk thread on /me; where the plugin's hooks run and `python3` is installed, it is scanned for credentials first.
