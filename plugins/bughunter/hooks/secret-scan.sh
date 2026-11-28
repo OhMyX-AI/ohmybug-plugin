@@ -11,7 +11,7 @@
 # shapes: high-signal ones only, every value masked. This hook reads the call.
 #
 # It reads whatever payload the call carries: submit_review's diff and files,
-# provide_files' files, every string of a challenge_finding, an ask_ohmybug question, and every other field of a call
+# provide_files' files, every string of a challenge_finding, an ask_ohmybug question, a send_feedback text, and every other field of a call
 # (a submit's meta, sent on every submit, a repo+ref one included).
 #
 # It also FILLS provide_files' `paths`: the agent names the requested files,
@@ -290,6 +290,7 @@ fi
     *'__provide_files"'*) echo "Call provide_files again for the same review without those files (or with each value replaced by [REDACTED]); an empty list is a valid answer. Do not start a new hunt for this." ;;
     *'__challenge_finding"'*) echo "Dispute again with each value named instead of quoted, or judge the finding without a dispute." ;;
     *'__ask_ohmybug"'*) echo "Ask again with each value replaced by [REDACTED]." ;;
+    *'__send_feedback"'*) echo "Show the user the text with each value replaced by [REDACTED], and send it only after they confirm it again." ;;
     *) echo "Replace each value with [REDACTED] where it is named above, or leave that file or meta field out, then submit again. The text in meta (the task, the PR title and description, the briefing) is sent on every submit: a submit with meta.repo + meta.ref and no payload drops the diff and files only." ;;
   esac
 } >&2
