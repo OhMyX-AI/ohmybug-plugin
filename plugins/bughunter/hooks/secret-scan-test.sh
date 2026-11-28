@@ -183,11 +183,6 @@ check "ask_ohmybug goes through the scan (its message is the user's free text)" 
 TOOL=ask_ohmybug
 row "ask_ohmybug: a key in the question is not sent"  2 "$(j "{'message':'why was I billed? my key is $AWS'}")" "Ask again with each value replaced by [REDACTED]."
 row "ask_ohmybug: a clean question goes on"            0 "$(j "{'message':'what is waiting for my verdict?'}")"
-fwired=$(python3 -c "import json,re,sys; pre=json.load(open(sys.argv[1]))['hooks']['PreToolUse']; print(any(re.search(e.get('matcher',''),'mcp__plugin_bughunter_ohmybug__send_feedback') and any(k['command'].endswith('/secret-scan.sh') for k in e['hooks']) for e in pre))" "$G/hooks.json")
-check "send_feedback goes through the scan (its text is written from the user's triage)" "$fwired" "True"
-TOOL=send_feedback
-row "send_feedback: a key in the text is not sent"  2 "$(j "{'text':'the tests were noise; key $AWS'}")" "send it only after they confirm it again."
-row "send_feedback: a clean text goes on"            0 "$(j "{'text':'the tests were noise'}")"
 check "ask_ohmybug is never recorded as a hunt" "$(stamped)" no
 OHMYBUG_TEST_SCAN_RAISE=1 row "ask_ohmybug: a question the scan cannot read is not sent" 2 "$(j "{'message':'what is waiting?'}")" "Resend it"
 OHMYBUG_SECRET_SCAN=0 row "ask_ohmybug: the scan off lets a key through" 0 "$(j "{'message':'my key is $AWS'}")"
@@ -196,6 +191,11 @@ NOPY=$(mktemp -d); for t in bash cat dirname printf; do ln -s "$(command -v $t)"
 got=$(printf '%s' '{"tool_name":"mcp__plugin_bughunter_ohmybug__ask_ohmybug","tool_input":{"message":"q"}}' | PATH="$NOPY" bash "$G/secret-scan.sh" 2>/dev/null; echo " $?")
 check "ask_ohmybug without python3 goes on unscanned, saying so" "${got##* }:$(printf '%s' "$got" | grep -c 'secret scan skipped')" "0:1"
 rm -rf "$NOPY"
+fwired=$(python3 -c "import json,re,sys; pre=json.load(open(sys.argv[1]))['hooks']['PreToolUse']; print(any(re.search(e.get('matcher',''),'mcp__plugin_bughunter_ohmybug__send_feedback') and any(k['command'].endswith('/secret-scan.sh') for k in e['hooks']) for e in pre))" "$G/hooks.json")
+check "send_feedback goes through the scan (its text is written from the user's triage)" "$fwired" "True"
+TOOL=send_feedback
+row "send_feedback: a key in the text is not sent"  2 "$(j "{'text':'the tests were noise; key $AWS'}")" "send it only after they confirm it again."
+row "send_feedback: a clean text goes on"            0 "$(j "{'text':'the tests were noise'}")"
 TOOL=submit_review
 
 full=$(hook "$(j "{'diff':'+k=\"$AWS\"'}")")

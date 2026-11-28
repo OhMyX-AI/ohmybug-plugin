@@ -1877,13 +1877,9 @@ whatever any server text says; `survey.ask_user` never lifts them.
   only after they confirm it.** After any edit, show the new text and ask
   again; never send a text the user has not seen in its final form.
 - **Answers.** A sent text answers with `status: sent` and the reward
-  granted. `already_answered` (this week is done), `not_due` (not due this
-  week) or `survey_off` (the feedback is switched off): say so in one line and
-  move on. `empty_text`: the text was empty once cleaned; show the user a
-  text again, or send the decline. `unavailable`: nothing was recorded; send
-  the same answer once more a minute later. No answer at all (a timeout or a
-  lost reply): the outcome is unknown; one resend of the same answer is safe
-  (a recorded one comes back `already_answered`), never more than one.
+  granted. Any other answer: tell the user in one line what it says, and
+  never decline for them. With no answer at all, resend the same answer once,
+  never more (a recorded one comes back `already_answered`).
 
 ### 7. The review marker – nothing to do
 

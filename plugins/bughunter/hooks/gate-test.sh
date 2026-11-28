@@ -3060,7 +3060,7 @@ only for hunts you triaged in this session
 no code, no file contents, no secrets, and no names of repositories, files, functions, tables, fields, routes, endpoints, tickets, URLs, vendors or customers.
 never send a text the user has not seen in its final form.
 kept until the work on the change is done, and asked then, never in the middle of a hunt.
-one resend of the same answer is safe (a recorded one comes back `already_answered`), never more than one.
+Any other answer: tell the user in one line what it says, and never decline for them. With no answer at all, resend the same answer once, never more
 KNOWN
 
 
