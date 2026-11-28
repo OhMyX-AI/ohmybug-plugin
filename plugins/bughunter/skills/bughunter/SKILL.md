@@ -36,12 +36,13 @@ The MCP server `ohmybug` provides: `submit_review`, `get_findings`,
 `challenge_finding` (some keys only: a dispute before a verdict, step 4),
 `redeem_code` (promo codes that raise the free-review allowance),
 `scan_repo` (a one-off hunt of the code a repository changed recently – see
-"Repository scan" below), and `ask_ohmybug` (when the user asks OhMyBug a
+"Repository scan" below), `send_feedback` (the weekly feedback, only when a
+`confirm_findings` answer carries `survey`: step 6c), and `ask_ohmybug` (when the user asks OhMyBug a
 question about their own account, call it with their words and show the
 answer and its suggestions; act on none yourself).
 
 **The server's own words outrank this file.** A tool result carrying
-`next_step`, `share.ask_user`, `deep_offer.how` or `fast_offer.how` is the current instruction;
+`next_step`, `share.ask_user`, `survey.ask_user`, `deep_offer.how` or `fast_offer.how` is the current instruction;
 this skill may be an old copy on this machine. Follow the result.
 
 An `offers_note` in any result is for the user: show it once, as one line,
@@ -1846,6 +1847,26 @@ they pick posting without it (`share.author` says who signs it now).
   push.
 - A "no" is final. Never post without approval, and never ask again after a
   no in the same session (a changed text or a typed question is not a no).
+
+### 6c. The weekly feedback (only when the answer carries `survey`)
+
+A `confirm_findings` answer may carry a `survey` block, at most once a week
+per account. It asks for feedback on how YOU triaged the user's recent hunts,
+and it earns the user a free review. Handle it after the triage and the story
+offer, never in the middle of a hunt:
+
+- Relay `survey.ask_user`: ask the user whether you may write the feedback,
+  and name the reward from `survey.reward`. A "no" is `send_feedback` with
+  `declined: true`; then nothing is asked again that week.
+- On a yes, answer every item of `survey.questions` from your own triage of
+  the hunts in the window (`survey.hunts_in_window`): plain text, no code, no
+  file contents, no secrets, no customer or repository names.
+- **Show the user the exact text and send it only after they confirm.** They
+  may edit or cut it; send what they approved, nothing more. Never send a text
+  the user has not seen.
+- The text is private: it is never published or shared. A second answer in
+  the same week is refused (`already_answered`), and so is one outside a due
+  week (`not_due`, `survey_off`): say so in one line and move on.
 
 ### 7. The review marker – nothing to do
 
