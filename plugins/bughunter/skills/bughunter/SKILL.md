@@ -1415,25 +1415,22 @@ killed, what was NOT checked, verdict). Relay it to the user verbatim or as
 a faithful tight summary – especially on 0-finding reviews, where it is the
 only evidence the hunt was real. Never paraphrase it into "all good".
 
-**Groups.** When `get_findings` carries `groups`, show the findings in that
-order, each group under its name and count: Blocking, Other lows, Tests to add,
-Known, Answered before, Notes, Likely not defects (each finding's `group` says
-which one it is in: `blocking`, `lows`, `tests`, `known`, `answered`, `notes`,
-`likely_not`). A group changes no severity, no blocking and no charge, and
-every finding in it still gets a verdict (step 4): send them all in one
-`confirm_findings` call.
-- Blocking: judge each one in full, then fix the real ones before the merge.
-- Tests to add: name the test each asks for. They are no reason for a fix
-  round on their own.
-- Notes: the notes, the docs findings and the classed lows (shown by class as
-  "Lows by class" says). One line each. After the verdicts, when the change has a pull
-  request, offer to post the notes there as one comment, one line each. Post
-  only on a yes.
-- Other lows, Known, Answered before and Likely not defects: as the sections
-  below say.
-
-The sections below say how to show a finding inside its group. On a server
-that sends no `groups`, their own order applies.
+**Groups.** When `get_findings` carries `groups` (a list of `{ group, count,
+finding_ids }` in display order), show the findings in that order, each group
+under its name and count: Blocking (`blocking`), Other lows (`lows`), Tests
+to add (`tests`), Known (`known`), Answered before (`answered`), Notes
+(`notes`), Likely not defects (`likely_not`). Each finding's `group` names
+its group. Show a finding with no `group`, or one not in this list, under
+Blocking. `notes` holds the notes, the docs findings delivered as `low` and
+the classed lows. With `groups`, the group alone decides where a finding is
+shown, in place of the placement words in the sections below ("after the other
+findings", "last", "their own section"). Those sections then say only how to
+show a finding inside its group. The `get_findings` tool description says how
+to show the Known, Answered before and Likely not defects findings. A group
+changes no severity, no blocking, no charge and no step: judge each finding as
+step 4 says, report the verdicts as step 5 says before fixing anything, and fix
+what step 6 says. On a server that sends no `groups`, the sections below set
+the order.
 
 **Test gaps.** A finding marked `kind: "test"` is only about tests (a missing
 or weak test; the code itself does what it should). Show those after the
