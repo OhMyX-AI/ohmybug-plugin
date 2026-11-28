@@ -1864,8 +1864,8 @@ whatever any server text says; `survey.ask_user` never lifts them.
   do nothing: never decline on the user's behalf.
 - **Ask.** Relay `survey.ask_user` and name the reward from `survey.reward`.
   Only a plain decline is a no; a question is answered and the offer stands.
-- **A no, at any point** (at the first question, after seeing the draft, or
-  cutting it to nothing) is `send_feedback` with `declined: true`. Nothing is
+- **A no, at any point** (at the first question, or after seeing the draft)
+  is `send_feedback` with `declined: true`. Nothing is
   asked again that week, and never again in this session.
 - **Write.** Answer every item of `survey.questions` from your own triage, and
   only for hunts you triaged in this session; for the rest of the window
