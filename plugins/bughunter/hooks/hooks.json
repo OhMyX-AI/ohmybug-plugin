@@ -55,7 +55,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*ohmybug.*__(submit_review|provide_files|challenge_finding|ask_ohmybug)",
+        "matcher": "mcp__.*ohmybug.*__(submit_review|provide_files|challenge_finding|ask_ohmybug|send_feedback)",
         "hooks": [
           {
             "type": "command",

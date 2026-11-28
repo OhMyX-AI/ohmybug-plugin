@@ -2878,7 +2878,7 @@ grep -qF '**A routed hunt (a `route_state` in the answer) is a chain of at most 
 # The story choices: SKILL.md asks with the server's labels from share.choices, never its own copy of them, since a
 # copy would drift from the server's. Only section 6b is read, so an id named elsewhere does not count.
 SK=$(mktemp)
-awk '/^### 6b\./{p=1} /^### 7\./{p=0} p' plugins/bughunter/skills/bughunter/SKILL.md >"$SK"
+awk '/^### 6b\./{p=1} /^### 6c\./{p=0} p' plugins/bughunter/skills/bughunter/SKILL.md >"$SK"
 grep -qF 'Ask with `share.choices` when the answer carries them' "$SK" \
   || { echo "FAIL story: SKILL.md 6b no longer asks with share.choices"; fails=$((fails + 1)); }
 # Each id's call is fixed in the text, one line each: a swapped or missing mapping fails here, not in a user's feed.
@@ -3048,8 +3048,19 @@ KNOWN
 known_pin '^### 6\\.' '^### 6b\\.' 'step 6' <<'KNOWN'
 not one marked `known`: its ticket owns it.
 KNOWN
-known_pin '^### 6b\\.' '^### 7\\.' 'step 6b' <<'KNOWN'
+known_pin '^### 6b\\.' '^### 6c\\.' 'step 6b' <<'KNOWN'
 never offer a story about a `known` one.
+KNOWN
+# Step 6c's consent and anonymity guards: text the agent follows, so pinned in the section they live in.
+known_pin '^### 6c\\.' '^### 7\\.' 'step 6c' <<'KNOWN'
+never decline on the user's behalf.
+Only a plain decline is a no; a question is answered and the offer stands.
+is `send_feedback` with `declined: true`. Nothing is asked again that week, and never again in this session.
+only for hunts you triaged in this session
+no code, no file contents, no secrets, and no names of repositories, files, functions, tables, fields, routes, endpoints, tickets, URLs, vendors or customers.
+never send a text the user has not seen in its final form.
+kept until the work on the change is done, and asked then, never in the middle of a hunt.
+one resend of the same answer is safe (a recorded one comes back `already_answered`), never more than one.
 KNOWN
 
 

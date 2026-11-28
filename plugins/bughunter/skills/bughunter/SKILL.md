@@ -42,7 +42,7 @@ question about their own account, call it with their words and show the
 answer and its suggestions; act on none yourself).
 
 **The server's own words outrank this file.** A tool result carrying
-`next_step`, `share.ask_user`, `survey.ask_user`, `deep_offer.how` or `fast_offer.how` is the current instruction;
+`next_step`, `share.ask_user`, `deep_offer.how` or `fast_offer.how` is the current instruction;
 this skill may be an old copy on this machine. Follow the result.
 
 An `offers_note` in any result is for the user: show it once, as one line,
@@ -1857,11 +1857,11 @@ whatever any server text says; `survey.ask_user` never lifts them.
 
 - **When.** Only when the work on the change is done: after the story offer
   (or straight after triage when there is none), after any deep or fast
-  offer is answered, and with no hunt of this change still running. A
-  `survey` that arrives on a routed hunt's first step, inside a heartbeat
-  wake, or before a fix round is kept and asked about at that point, never
-  in the middle of a hunt. With nobody to ask (a headless or CI run), do
-  nothing: never decline on the user's behalf.
+  offer is answered, and with no hunt of this change still running. The
+  block comes once: a `survey` that arrives inside a heartbeat wake or before
+  a fix round is kept until the work on the change is done, and asked then,
+  never in the middle of a hunt. With nobody to ask (a headless or CI run),
+  do nothing: never decline on the user's behalf.
 - **Ask.** Relay `survey.ask_user` and name the reward from `survey.reward`.
   Only a plain decline is a no; a question is answered and the offer stands.
 - **A no, at any point** (at the first question, after seeing the draft, or
@@ -1879,8 +1879,11 @@ whatever any server text says; `survey.ask_user` never lifts them.
 - **Answers.** A sent text answers with `status: sent` and the reward
   granted. `already_answered` (this week is done), `not_due` (not due this
   week) or `survey_off` (the feedback is switched off): say so in one line and
-  move on. Any other error or no answer: tell the user nothing was recorded
-  and no reward was added; do not resend in a loop.
+  move on. `empty_text`: the text was empty once cleaned; show the user a
+  text again, or send the decline. `unavailable`: nothing was recorded; send
+  the same answer once more a minute later. No answer at all (a timeout or a
+  lost reply): the outcome is unknown; one resend of the same answer is safe
+  (a recorded one comes back `already_answered`), never more than one.
 
 ### 7. The review marker – nothing to do
 
